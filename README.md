@@ -43,6 +43,35 @@ docker compose -f docker-compose.dev.yml up -d --build
 2. Attach a **volume** mounted at `/data`.
 3. That's it — the server listens on Railway's `PORT` automatically.
 
+### NixOS
+Add this repository as a flake input and add the module to your configuration:
+```nix
+{
+    crosspoint-sync.url = "github:rogierknoester/crosspoint-sync";
+    crosspoint-sync.inputs.nixpkgs.follows = "nixpkgs";
+    ...
+}: {
+  nixosConfigurations = {
+    myServer = nixpkgs.lib.nixosSystem {
+      ...
+      modules = [
+        ./configuration.nix
+        crosspoint-sync.nixosModules.crosspoint-sync
+      ];
+    };
+  };
+}
+```
+
+Now you can enable it in your `configuration.nix`:
+```nix
+services.crosspoint-sync = {
+  enable = true;
+  port = 8080;
+  registration = true;
+};
+```
+
 ### Bare Node (≥ 22.13)
 
 ```sh
