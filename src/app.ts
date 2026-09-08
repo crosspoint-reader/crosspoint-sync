@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import type { DB } from './db/db.js';
 import type { Config } from './config.js';
 import { sessionOrKeyAuth, type AppEnv } from './auth/middleware.js';
@@ -24,6 +25,21 @@ export interface AppOptions {
 
 export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
+
+  // CORS for browser-based kosync clients (PWAs, WebView readers). Applied only
+  // to the header-authenticated API surfaces - never to the cookie-based web UI
+  // routes (/auth, /account) - so a wildcard origin stays safe: without
+  // Access-Control-Allow-Credentials, browsers never attach session cookies.
+  const apiCors = cors({
+    origin: config.corsOrigins === '*' ? '*' : config.corsOrigins,
+    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Accept', 'x-auth-user', 'x-auth-key'],
+    maxAge: 86400,
+  });
+  app.use('/users/*', apiCors);
+  app.use('/syncs/*', apiCors);
+  app.use('/api/v1/*', apiCors);
+  app.use('/healthz', apiCors);
 
   app.get('/healthz', (c) => c.json({ status: 'ok', version: VERSION }));
 

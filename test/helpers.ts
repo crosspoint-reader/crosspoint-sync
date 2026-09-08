@@ -24,6 +24,7 @@ export function makeTestApp(
     registrationDisabled: false,
     authRateLimitPerMinute: 0, // disabled in tests (limiter state is per-app anyway)
     trustProxy: false,
+    corsOrigins: '*',
     ...configOverrides,
   };
   return { app: createApp(db, config, opts), db };

@@ -4,6 +4,12 @@ export interface Config {
   authRateLimitPerMinute: number;
   /** Trust the deployment's reverse proxy to set X-Forwarded-Proto. */
   trustProxy: boolean;
+  /**
+   * Origins allowed to call the sync API from a browser. '*' (the default)
+   * is safe because the API authenticates with headers, not cookies, so
+   * Access-Control-Allow-Credentials is never set.
+   */
+  corsOrigins: '*' | string[];
 }
 
 export function fromEnv(env: NodeJS.ProcessEnv = process.env): Config {
@@ -12,6 +18,13 @@ export function fromEnv(env: NodeJS.ProcessEnv = process.env): Config {
     authRateLimitPerMinute: env.AUTH_RATE_LIMIT_PER_MINUTE
       ? Number(env.AUTH_RATE_LIMIT_PER_MINUTE)
       : 30,
-    trustProxy: env.TRUST_PROXY === 'true' || env.TRUST_PROXY === '1',
+    // Railway always terminates TLS at its edge and sets RAILWAY_ENVIRONMENT,
+    // so trust the proxy there by default; TRUST_PROXY still overrides both ways.
+    trustProxy: env.TRUST_PROXY
+      ? env.TRUST_PROXY === 'true' || env.TRUST_PROXY === '1'
+      : Boolean(env.RAILWAY_ENVIRONMENT),
+    corsOrigins: env.CORS_ORIGINS
+      ? env.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
+      : '*',
   };
 }
