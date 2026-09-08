@@ -707,3 +707,25 @@ describe('bookfusion connector', () => {
     expect(JSON.parse(fake.calls[0].body!).percentage).toBe(25);
   });
 });
+
+describe('hardcover connector (unit)', () => {
+  it('validate fails when the API accepts the request but returns no account', async () => {
+    const fake = fakeTransport();
+    fake.on('me', 200, { data: { me: [] } });
+    const r = await hardcoverConnector.validate({ token: 'looks-plausible' }, fake.transport);
+    expect(r.ok).toBe(false);
+  });
+
+  it('push surfaces GraphQL errors from the context query instead of silently succeeding', async () => {
+    const fake = fakeTransport();
+    fake.on('Ctx', 200, { errors: [{ message: 'invalid token format' }] });
+    const r = await hardcoverConnector.push(
+      { token: 't' },
+      { externalId: '42', confidence: 1 },
+      { kind: 'progress', document: DOC, percentage: 0.5, timestamp: 1 },
+      fake.transport
+    );
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe('invalid token format');
+  });
+});

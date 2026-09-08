@@ -75,7 +75,12 @@ async function validate(cred: Credential, http: HttpTransport): Promise<Validate
     if (r.status === 401 || r.status === 403) return { ok: false, error: 'invalid token' };
     if (r.errors?.length) return { ok: false, error: r.errors[0].message };
     const username = r.data?.me?.[0]?.username ?? r.data?.me?.username;
-    return { ok: true, accountLabel: username ?? undefined };
+    // No username means the API did not recognize the token even though the
+    // request itself succeeded (Hardcover returns 200 with empty data for some
+    // bad-token shapes). Treat it as a failed link so the user finds out now,
+    // not silently at sync time.
+    if (!username) return { ok: false, error: 'token not recognized by Hardcover' };
+    return { ok: true, accountLabel: username };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
@@ -284,7 +289,7 @@ async function push(
     { bookId }
   );
   const ctxAuth = classify(ctx);
-  if (ctxAuth && !ctxAuth.ok && ctxAuth.needsReauth) return ctxAuth;
+  if (ctxAuth) return ctxAuth;
 
   const meUb = ctx.data?.me?.[0]?.user_books?.[0];
   let userBookId: number | undefined = meUb?.id;
@@ -314,7 +319,7 @@ async function push(
       { bookId, statusId: desiredStatus }
     );
     const a = classify(ubRes);
-    if (a && !a.ok && a.needsReauth) return a;
+    if (a) return a;
     userBookId = ubRes.data?.insert_user_book?.user_book?.id;
     statusTouched = true;
   } else if (
@@ -334,7 +339,7 @@ async function push(
       { id: userBookId, statusId: desiredStatus }
     );
     const a = classify(upd);
-    if (a && !a.ok && a.needsReauth) return a;
+    if (a) return a;
     statusTouched = true;
   }
 
