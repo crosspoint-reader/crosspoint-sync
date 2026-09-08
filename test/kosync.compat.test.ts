@@ -192,3 +192,59 @@ describe('kosync protocol compatibility', () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe('third-party kosync client compatibility', () => {
+  it('accepts a raw-password x-auth-key for an MD5-registered account', async () => {
+    const { app } = makeTestApp();
+    const password = 'hunter2';
+    const { username } = await registerUser(app, password); // registers with md5(password)
+    const res = await app.request('/users/auth', {
+      headers: { 'x-auth-user': username, 'x-auth-key': password },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('a plaintext registration still authenticates with the MD5 key', async () => {
+    const { app } = makeTestApp();
+    const res = await app.request('/users/create', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'orbit', password: 'hunter2' }), // raw, not md5
+    });
+    expect(res.status).toBe(201);
+    const viaMd5 = await app.request('/users/auth', {
+      headers: { 'x-auth-user': 'orbit', 'x-auth-key': md5('hunter2') },
+    });
+    expect(viaMd5.status).toBe(200);
+    const viaRaw = await app.request('/users/auth', {
+      headers: { 'x-auth-user': 'orbit', 'x-auth-key': 'hunter2' },
+    });
+    expect(viaRaw.status).toBe(200);
+    const wrong = await app.request('/users/auth', {
+      headers: { 'x-auth-user': 'orbit', 'x-auth-key': 'wrong' },
+    });
+    expect(wrong.status).toBe(401);
+  });
+
+  it('answers CORS preflight and marks API responses for browser clients', async () => {
+    const { app } = makeTestApp();
+    const preflight = await app.request('/syncs/progress', {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'http://localhost:5173',
+        'access-control-request-method': 'PUT',
+        'access-control-request-headers': 'content-type,x-auth-user,x-auth-key',
+      },
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get('access-control-allow-origin')).toBe('*');
+    expect(preflight.headers.get('access-control-allow-headers')?.toLowerCase()).toContain('x-auth-key');
+
+    const { headers } = await registerUser(app);
+    const res = await app.request('/users/auth', {
+      headers: { ...headers, origin: 'http://localhost:5173' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('access-control-allow-origin')).toBe('*');
+  });
+});

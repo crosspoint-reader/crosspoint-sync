@@ -8,7 +8,7 @@ import {
   rateLimiter,
   type AppEnv,
 } from '../auth/middleware.js';
-import { hashKey } from '../auth/password.js';
+import { hashKey, looksLikeMd5, md5Hex } from '../auth/password.js';
 import { parsePosition } from '../models/position.js';
 import { nowSeconds } from '../models/sync.js';
 import { fanOutProgress } from '../connectors/fanout.js';
@@ -264,9 +264,14 @@ export function kosyncRoutes(db: DB, config: Config): Hono<AppEnv> {
     if (exists) {
       return kosyncError(c, 402, 2002, 'Username is already registered.');
     }
+    // kosync convention: `password` is already MD5(password). Some third-party
+    // clients register with the raw password instead; normalize to the MD5 form
+    // so the stored hash matches later x-auth-key logins from either kind of
+    // client (auth also accepts raw keys by hashing them, see authMiddleware).
+    const md5Key = looksLikeMd5(password) ? password : md5Hex(password);
     db.prepare('INSERT INTO users (username, key_hash, created_at) VALUES (?, ?, ?)').run(
       username,
-      hashKey(password),
+      hashKey(md5Key),
       nowSeconds()
     );
     invalidateAuthCache(username);

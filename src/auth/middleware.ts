@@ -1,7 +1,7 @@
 import type { Context, MiddlewareHandler } from 'hono';
 import { getCookie } from 'hono/cookie';
 import type { DB } from '../db/db.js';
-import { verifyKey } from './password.js';
+import { md5Hex, verifyKey } from './password.js';
 import { SESSION_COOKIE, verifySession } from './session.js';
 
 export interface AuthedUser {
@@ -55,7 +55,10 @@ export function authMiddleware(db: DB): MiddlewareHandler<AppEnv> {
       return kosyncError(c, 401, 2001, 'Unauthorized');
     }
     if (verifiedCache.get(username) !== key) {
-      if (!verifyKey(key, row.key_hash)) {
+      // Stock kosync clients send x-auth-key as MD5(password); some third-party
+      // clients (e.g. BookOrbit) send the raw password. Stored hashes are always
+      // PBKDF2 of the MD5 form, so fall back to hashing the key before rejecting.
+      if (!verifyKey(key, row.key_hash) && !verifyKey(md5Hex(key), row.key_hash)) {
         return kosyncError(c, 401, 2001, 'Unauthorized');
       }
       if (verifiedCache.size >= VERIFIED_CACHE_MAX) {

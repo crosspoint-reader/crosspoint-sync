@@ -17,6 +17,15 @@ export function hashKey(md5Key: string): string {
   return `pbkdf2$${ITERATIONS}$${salt}$${hash}`;
 }
 
+/** A kosync auth key: MD5(password), lowercase or uppercase 32-hex. */
+export function looksLikeMd5(value: string): boolean {
+  return /^[a-f0-9]{32}$/i.test(value);
+}
+
+export function md5Hex(value: string): string {
+  return crypto.createHash('md5').update(value, 'utf8').digest('hex');
+}
+
 export function verifyKey(md5Key: string, stored: string): boolean {
   const parts = stored.split('$');
   if (parts.length !== 4 || parts[0] !== 'pbkdf2') return false;
