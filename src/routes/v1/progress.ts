@@ -42,7 +42,11 @@ export function progressRoutes(db: DB): Hono<AppEnv> {
              SELECT MAX(p2.updated_at) FROM progress p2
              WHERE p2.user_id = p.user_id AND p2.document = p.document
            )
-         GROUP BY p.document
+           AND p.device_id = (
+             SELECT MIN(p3.device_id) FROM progress p3
+             WHERE p3.user_id = p.user_id AND p3.document = p.document
+               AND p3.updated_at = p.updated_at
+           )
          ORDER BY p.updated_at DESC
          LIMIT ?`
       )

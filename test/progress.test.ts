@@ -115,4 +115,29 @@ describe('v1 rich progress', () => {
     const body = await (await app.request(`/api/v1/progress/${DOC}`, { headers })).json();
     expect(body.devices.map((d: { device_id: string }) => d.device_id)).toEqual(['bbbb', 'aaaa']);
   });
+
+  it('list endpoint breaks same-second timestamp ties deterministically by device_id', async () => {
+    const { app, db } = makeTestApp();
+    const { headers } = await registerUser(app);
+    // Two devices write within the same second; second-granularity timestamps
+    // collide, and the list endpoint must pick the same row every time (lowest
+    // device_id, matching the per-document endpoints), not an arbitrary one.
+    for (const [deviceId, pct, prog] of [
+      ['bbbb', 0.01, 'chapter-start'],
+      ['aaaa', 0.99, 'chapter-end'],
+    ] as const) {
+      await app.request('/api/v1/progress', {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ document: DOC, progress: prog, percentage: pct, device_id: deviceId }),
+      });
+    }
+    db.prepare('UPDATE progress SET updated_at = 1000').run();
+    for (let i = 0; i < 5; i++) {
+      const body = await (await app.request('/api/v1/progress', { headers })).json();
+      expect(body.items).toHaveLength(1);
+      expect(body.items[0].device_id).toBe('aaaa');
+      expect(body.items[0].progress).toBe('chapter-end');
+    }
+  });
 });
