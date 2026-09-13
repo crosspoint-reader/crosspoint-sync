@@ -38,6 +38,8 @@ export interface DocumentMeta {
 
 export interface Match {
   externalId: string;
+  /** Exact provider id supplied by the downloaded book's sidecar. */
+  fromSidecar?: boolean;
   externalEdition?: string | null;
   confidence: number; // 0..1
   queryUsed?: string;
@@ -121,10 +123,13 @@ export interface HttpTransport {
     method: string;
     headers?: Record<string, string>;
     body?: string;
+    signal?: AbortSignal;
+    redirect?: 'error' | 'follow' | 'manual';
   }): Promise<{
     status: number;
     text(): Promise<string>;
     json(): Promise<unknown>;
+    body?: ReadableStream<Uint8Array> | null;
   }>;
 }
 

@@ -107,6 +107,19 @@ Validates credentials. `200 {"authorized": "OK"}` or `401`.
   pushed straight to that record, skipping title/author search. Unknown-connector ids are
   ignored; a user's manual match is never overridden.
 
+  **BookFusion positions.** For a BookFusion download identified by its sidecar, the server
+  retrieves the EPUB and resolves the existing KOSync XPath against its chapter XHTML.
+  It sends the resulting CFI, chapter index, and text-based spine-normalized position to
+  BookFusion. This requires no additional firmware fields. Precision follows the supplied
+  XPath: a text-node offset identifies that text position; a paragraph/chapter-only XPath
+  identifies its start. An unresolved XPath fails without posting an estimated position.
+
+  The server reuses downloaded archives for 15 minutes in an account-scoped memory cache
+  capped at 32 MiB total and 32 entries. Downloads are limited to 32 MiB and 30 seconds;
+  each extracted XML file is limited to 1 MiB. Only the package metadata and target chapter
+  are decompressed. Books matched by title or manual selection retain percentage-only
+  updates because those matches do not establish that the reader has the same EPUB edition.
+
 ### GET /syncs/progress/{document}
 
 Returns the newest progress **across all of the user's devices** (most recent `timestamp` wins):

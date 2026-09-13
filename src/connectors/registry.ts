@@ -32,6 +32,7 @@ export const fetchTransport: HttpTransport = async (url, init) => {
   const res = await fetch(url, init);
   return {
     status: res.status,
+    body: res.body,
     text: () => res.text(),
     json: () => res.json(),
   };

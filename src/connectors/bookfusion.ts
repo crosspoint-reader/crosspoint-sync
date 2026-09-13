@@ -1,4 +1,6 @@
 import { decideMatch, extractTitleAuthor, type Candidate } from './matching.js';
+import { bookFusionEpub, epubPosition } from './bookfusion-epub.js';
+import { ConnectorOperationError } from './types.js';
 import type {
   Connector,
   Credential,
@@ -112,11 +114,21 @@ async function push(
 ): Promise<PushResult> {
   const token = tokenOf(cred);
   const percentage = Math.max(0, Math.min(1, ev.percentage ?? 0)) * 100; // BookFusion uses 0..100
-  // GATE: confirm reading_position field names (percentage, page_position_in_book, cfi).
+  const body: Record<string, number | string> = { percentage: Number(percentage.toFixed(4)) };
+  if (m.fromSidecar) {
+    if (!ev.progress) throw new ConnectorOperationError('BookFusion position: XPath missing', false);
+    const epub = await bookFusionEpub(token, m.externalId, authHeaders(token), http);
+    try {
+      Object.assign(body, await epubPosition(epub, ev.progress));
+    } catch (error) {
+      if (error instanceof ConnectorOperationError) throw error;
+      throw new ConnectorOperationError('BookFusion position: cannot resolve XPath in the EPUB', false);
+    }
+  }
   const res = await http(`${BASE}/api/user/books/${m.externalId}/reading_position`, {
     method: 'POST',
     headers: authHeaders(token),
-    body: JSON.stringify({ percentage: Number(percentage.toFixed(4)) }),
+    body: JSON.stringify(body),
   });
   if (res.status === 401 || res.status === 403) {
     return { ok: false, retryable: false, needsReauth: true, error: 'unauthorized' };

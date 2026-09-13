@@ -52,6 +52,7 @@ export async function resolveMatch(
   if (cached && cached.external_id) {
     return {
       externalId: cached.external_id,
+      ...(cached.source === 'sidecar' ? { fromSidecar: true } : {}),
       externalEdition: cached.external_edition,
       confidence: cached.confidence,
     };

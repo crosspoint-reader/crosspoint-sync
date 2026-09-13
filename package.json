@@ -17,10 +17,13 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
-    "hono": "^4.6.16"
+    "@xmldom/xmldom": "^0.9.12",
+    "hono": "^4.6.16",
+    "yauzl": "^3.4.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "@types/yauzl": "^3.4.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vitest": "^3.2.7"
