@@ -13,6 +13,7 @@ import { clippingRoutes } from './routes/v1/clippings.js';
 import { statsRoutes } from './routes/v1/stats.js';
 import { documentRoutes } from './routes/v1/documents.js';
 import { connectorRoutes } from './routes/v1/connectors.js';
+import { createProgressRefresh } from './connectors/refresh.js';
 import type { HttpTransport } from './connectors/types.js';
 
 // Injected at build time via package.json; read lazily to keep this file dependency-free.
@@ -25,6 +26,7 @@ export interface AppOptions {
 
 export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
+  const refreshProgress = createProgressRefresh(db, opts.connectorTransport);
 
   // CORS for browser-based kosync clients (PWAs, WebView readers). Applied only
   // to the header-authenticated API surfaces - never to the cookie-based web UI
@@ -48,7 +50,7 @@ export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<A
 
   // kosync-compatible API at the root - stock KOReader and current CrossPoint
   // firmware work by changing only the server URL.
-  app.route('/', kosyncRoutes(db, config));
+  app.route('/', kosyncRoutes(db, config, refreshProgress));
 
   // Web account session auth (browser signup/login) + kosync link management.
   app.route('/auth', authRoutes(db, config));
@@ -58,7 +60,7 @@ export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<A
   // device x-auth headers.
   const v1 = new Hono<AppEnv>();
   v1.use('*', sessionOrKeyAuth(db));
-  v1.route('/', progressRoutes(db));
+  v1.route('/', progressRoutes(db, refreshProgress));
   v1.route('/', bookmarkRoutes(db));
   v1.route('/', clippingRoutes(db));
   v1.route('/', statsRoutes(db));

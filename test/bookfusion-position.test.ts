@@ -258,10 +258,10 @@ function inboundTransport(percentage = 60, cfi: string | null = REMOTE_CFI, at =
   return { ...fake, http, reads };
 }
 
-async function linkedReader(percentage = 0.2, progress = '/body/DocFragment[1]/body') {
+async function linkedReader(percentage = 0.2, progress = '/body/DocFragment[1]/body', http: HttpTransport = transport().http) {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(START);
-  const { app, db } = makeTestApp();
+  const { app, db } = makeTestApp({}, { connectorTransport: http });
   const { headers } = await registerUser(app);
   upsertAccount(db, 1, 'bookfusion', { access_token: 'test-token' }, null);
   upsertAccount(db, 1, 'kosync', { server: 'mirror.test', username: 'u', password: 'p' }, null);
@@ -280,7 +280,7 @@ describe('BookFusion inbound sync', () => {
     const { app, db, headers } = await linkedReader();
     try {
       const fake = inboundTransport();
-      expect(await pollAll(db, fake.http)).toBe(1);
+      expect(await pollConnector(db, 1, 'bookfusion', fake.http)).toBe(1);
       const got = await (await app.request(`/syncs/progress/${DOC}`, { headers })).json();
       expect(got).toMatchObject({ device_id: 'bookfusion', progress: XPATH, percentage: 0.6 });
       const row = db.prepare("SELECT position,updated_at FROM progress WHERE device_id='bookfusion'").get();
@@ -414,5 +414,110 @@ describe('BookFusion inbound sync', () => {
       { kind: 'progress', document: DOC, percentage: 0.2, progress: XPATH, timestamp: START / 1000 }, fake.http))
       .toEqual({ ok: true });
     expect(fake.calls.some(c => c.url.endsWith('/reading_position') && c.init.method === 'POST')).toBe(false);
+  });
+});
+
+
+describe('BookFusion refresh on progress GET', () => {
+  it.each(['/syncs/progress/', '/api/v1/progress/'])('refreshes before answering %s', async endpoint => {
+    const fake = inboundTransport();
+    const { app, db, headers } = await linkedReader(0.2, '/body/DocFragment[1]/body', fake.http);
+    try {
+      saveMatch(db, 1, 'bookfusion', 'unrelated', { externalId: 'other-book', confidence: 1 }, 'sidecar');
+      expect(await pollAll(db, fake.http)).toBe(0);
+      expect(fake.reads).toHaveLength(0); // No BookFusion background polling.
+      const response = await app.request(endpoint + DOC, { headers });
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      const position = endpoint.startsWith('/api/') ? body.devices[0] : body;
+      expect(position).toMatchObject({ device_id: 'bookfusion', percentage: 0.6, progress: XPATH });
+      expect(fake.reads).toHaveLength(1);
+      expect(fake.reads[0]).toContain('/36835/reading_position');
+      await app.request(endpoint + DOC, { headers });
+      expect(fake.reads).toHaveLength(2); // A fresh GET checks for a fresh provider update.
+    } finally { db.close(); }
+  });
+
+  it('shares one refresh across concurrent legacy and extended GETs', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const fake = inboundTransport();
+    let lookups = 0;
+    const http: HttpTransport = async (url, init) => {
+      if (url.endsWith('/reading_position')) { lookups++; await gate; }
+      return fake.http(url, init);
+    };
+    const { app, db, headers } = await linkedReader(0.2, '/body/DocFragment[1]/body', http);
+    try {
+      const first = app.request('/syncs/progress/' + DOC, { headers });
+      const second = app.request('/api/v1/progress/' + DOC, { headers });
+      await vi.waitFor(() => expect(lookups).toBe(1));
+      release();
+      expect((await first).status).toBe(200);
+      expect((await second).status).toBe(200);
+      expect(lookups).toBe(1);
+    } finally { release(); db.close(); }
+  });
+
+  it.each(['unlinked', 'disabled', 'manual', 'unmatched'])('does not call BookFusion for %s books/accounts', async state => {
+    const fake = inboundTransport();
+    const { app, db, headers } = await linkedReader(0.2, '/body/DocFragment[1]/body', fake.http);
+    try {
+      if (state === 'unlinked') db.prepare("DELETE FROM connector_accounts WHERE connector_id='bookfusion'").run();
+      if (state === 'disabled') db.prepare("UPDATE connector_accounts SET enabled=0 WHERE connector_id='bookfusion'").run();
+      if (state === 'manual') db.prepare("UPDATE connector_matches SET source='manual'").run();
+      if (state === 'unmatched') db.prepare('DELETE FROM connector_matches').run();
+      const response = await app.request('/syncs/progress/' + DOC, { headers });
+      expect(response.status).toBe(200);
+      expect((await response.json()).percentage).toBe(0.2);
+      expect(fake.reads).toHaveLength(0);
+    } finally { db.close(); }
+  });
+
+  it('returns 502 on provider failure, preserves progress, and retries on the next GET', async () => {
+    const fake = inboundTransport();
+    let failed = true;
+    const http: HttpTransport = (url, init) => failed
+      ? Promise.resolve({ status: 503, text: async () => '', json: async () => ({}) })
+      : fake.http(url, init);
+    const { app, db, headers } = await linkedReader(0.2, '/body/DocFragment[1]/body', http);
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect((await app.request('/syncs/progress/' + DOC, { headers })).status).toBe(502);
+      expect(db.prepare("SELECT COUNT(*) n FROM progress WHERE device_id='bookfusion'").get()).toEqual({ n: 0 });
+      failed = false;
+      const response = await app.request('/syncs/progress/' + DOC, { headers });
+      expect(response.status).toBe(200);
+      expect((await response.json()).percentage).toBe(0.6);
+    } finally { log.mockRestore(); db.close(); }
+  });
+
+  it('limits the entire refresh and prevents late completion from updating progress', async () => {
+    let release!: () => void;
+    let signal: AbortSignal | undefined;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const fake = inboundTransport();
+    const http: HttpTransport = async (url, init) => {
+      signal = init.signal;
+      await gate; // Deliberately ignores abort, to exercise the late-result guard.
+      return fake.http(url, init);
+    };
+    const { app, db, headers } = await linkedReader(0.2, '/body/DocFragment[1]/body', http);
+    vi.useRealTimers();
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    vi.setSystemTime(START + 120_000);
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const pending = app.request('/syncs/progress/' + DOC, { headers });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(signal).toBeDefined();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect((await pending).status).toBe(504);
+      expect(signal?.aborted).toBe(true);
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(db.prepare("SELECT COUNT(*) n FROM progress WHERE device_id='bookfusion'").get()).toEqual({ n: 0 });
+      expect(fake.calls).toHaveLength(0); // No download may start after expiration.
+    } finally { release(); log.mockRestore(); db.close(); }
   });
 });

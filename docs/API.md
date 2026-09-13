@@ -114,13 +114,20 @@ Validates credentials. `200 {"authorized": "OK"}` or `401`.
   XPath: a text-node offset identifies that text position; a paragraph/chapter-only XPath
   identifies its start. An unresolved XPath fails without posting an estimated position.
 
-  The inbound worker also checks sidecar-matched BookFusion books every five minutes.
-  It resolves BookFusion's point CFI in the same EPUB and exposes the resulting XPath
-  through the existing KOSync progress endpoints. No firmware update is needed. It uses
-  the provider's update timestamp, skips older positions, and preserves text offsets
-  (converting UTF-16 CFI offsets to CrossPoint codepoints). Invalid or missing CFIs are
-  retried on later polls without substituting an approximate position. Poll failures
-  are logged per book; one failed book does not block other books. Delayed outbound
+  When a device requests `GET /syncs/progress/:document` or
+  `GET /api/v1/progress/:document`, the server first fetches the matched BookFusion
+  book's latest position, resolves its point CFI in the EPUB, and then reads the stored
+  progress for the response. This requires a linked, enabled account and a previously
+  received sidecar match; a GET cannot discover metadata that the device has not sent.
+  BookFusion is not polled in the background. Concurrent requests for the same user's
+  book share a lookup; subsequent requests check the provider again.
+
+  Refreshes have a 10-second total deadline. A timeout returns HTTP 504; provider or
+  conversion failures return HTTP 502. Stored progress is preserved and the next GET
+  retries the refresh. Books without an enabled sidecar match use the normal KOSync
+  response. No firmware update is needed. Conversion uses the provider's update
+  timestamp, skips older positions, and preserves text offsets (converting UTF-16 CFI
+  offsets to CrossPoint codepoints). Delayed outbound
   events also check the remote timestamp before posting, to avoid replacing newer
   BookFusion progress. The provider does not offer an atomic conditional update, so a
   simultaneous edit between that check and the POST is still possible.

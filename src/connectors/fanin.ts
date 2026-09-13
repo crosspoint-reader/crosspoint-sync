@@ -33,7 +33,8 @@ export async function pollConnector(
   db: DB,
   userId: number,
   connectorId: string,
-  http: HttpTransport = fetchTransport
+  http: HttpTransport = fetchTransport,
+  options: { document?: string; signal?: AbortSignal; throwOnError?: boolean } = {}
 ): Promise<number> {
   const conn = getConnector(connectorId);
   const account = getAccount(db, userId, connectorId);
@@ -66,13 +67,15 @@ export async function pollConnector(
   if (conn.pullProgress) {
     let applied = 0;
     const credential = decryptCredential(account);
-    for (const match of listMatches(db, userId, connectorId)) {
-      if (!match.external_id) continue;
+    const matches = options.document ? [getMatch(db, userId, connectorId, options.document)] : listMatches(db, userId, connectorId);
+    for (const match of matches) {
+      if (!match?.external_id) continue;
       try {
         const current = latestProgress(db, userId, match.document);
         const change = await conn.pullProgress(credential, {
           externalId: match.external_id, confidence: match.confidence, fromSidecar: match.source === 'sidecar',
         }, http, (current?.updated_at ?? 0) * 1000);
+        options.signal?.throwIfAborted();
         // The account, match, or canonical progress can change while the request is in flight.
         const freshAccount = getAccount(db, userId, connectorId);
         if (!freshAccount?.enabled || freshAccount.cred_enc !== account.cred_enc || freshAccount.status !== 'ok') break;
@@ -85,8 +88,10 @@ export async function pollConnector(
           document: match.document, error: err instanceof Error ? err.message : 'pull failed' }));
         if (err instanceof ConnectorOperationError && err.needsReauth) {
           setAccountStatus(db, userId, connectorId, 'needs_reauth', err.message);
+          if (options.throwOnError) throw err;
           break;
         }
+        if (options.throwOnError) throw err;
       }
     }
     return applied;
@@ -111,12 +116,12 @@ export async function pollConnector(
   return applied;
 }
 
-/** Poll every read-capable connector account once. Returns total applied. */
+/** Poll library-wide providers; per-book providers refresh on progress requests. */
 export async function pollAll(db: DB, http: HttpTransport = fetchTransport): Promise<number> {
   let total = 0;
   for (const { user_id, connector_id } of listAllEnabledAccounts(db)) {
     const conn = getConnector(connector_id);
-    if (!conn?.capabilities.read || (!conn.pullChanges && !conn.pullProgress)) continue;
+    if (!conn?.capabilities.read || !conn.pullChanges) continue;
     total += await pollConnector(db, user_id, connector_id, http);
   }
   return total;

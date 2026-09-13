@@ -1,3 +1,4 @@
+import type { ProgressRefresh } from '../connectors/refresh.js';
 import { Hono } from 'hono';
 import type { DB } from '../db/db.js';
 import type { Config } from '../config.js';
@@ -234,7 +235,7 @@ export function parseProgressBody(
   };
 }
 
-export function kosyncRoutes(db: DB, config: Config): Hono<AppEnv> {
+export function kosyncRoutes(db: DB, config: Config, refreshProgress: ProgressRefresh = async () => {}): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   const auth = authMiddleware(db);
 
@@ -308,12 +309,18 @@ export function kosyncRoutes(db: DB, config: Config): Hono<AppEnv> {
     return c.json({ document: parsed.record.document, timestamp: parsed.record.updatedAt });
   });
 
-  app.get('/syncs/progress/:document', auth, (c) => {
+  app.get('/syncs/progress/:document', auth, async (c) => {
     const document = c.req.param('document');
     if (!isValidDocument(document)) {
       return kosyncError(c, 403, 2004, "Field 'document' not provided.");
     }
     const user = c.get('user');
+    try {
+      await refreshProgress(user.id, document);
+    } catch (error) {
+      const status = error instanceof Error && error.name === 'TimeoutError' ? 504 : 502;
+      return c.json({ code: 2003, message: 'BookFusion progress refresh failed' }, status);
+    }
     const row = db
       .prepare(
         `SELECT document, progress, percentage, device, device_id, updated_at
