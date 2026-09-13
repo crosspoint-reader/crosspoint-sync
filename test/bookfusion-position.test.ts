@@ -1,9 +1,10 @@
 import { crc32 } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { bookFusionEpub, clearBookFusionEpubCache, epubPosition } from '../src/connectors/bookfusion-epub.js';
+import { bookFusionEpub, clearBookFusionEpubCache, epubPosition, epubXPath } from '../src/connectors/bookfusion-epub.js';
 import { bookfusionConnector } from '../src/connectors/bookfusion.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
-import { upsertAccount } from '../src/connectors/store.js';
+import { saveMatch, upsertAccount } from '../src/connectors/store.js';
+import { pollAll, pollConnector } from '../src/connectors/fanin.js';
 import { drainQueue } from '../src/connectors/runner.js';
 import type { HttpTransport } from '../src/connectors/types.js';
 import { DOC, makeTestApp, registerUser } from './helpers.js';
@@ -55,6 +56,7 @@ function transport(bytes = epub()) {
       body: new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } }),
     };
     if (url.endsWith('/reading_position')) {
+      if (init.method === 'GET') return { status: 404, text: async () => '', json: async () => ({}) };
       const body = JSON.parse(init.body!);
       return {
         status: body.cfi && body.chapter_index != null && body.page_position_in_book != null ? 200 : 422,
@@ -146,7 +148,7 @@ describe('BookFusion download and delivery', () => {
       expect(res.status).toBe(200);
       const fake = transport();
       expect(await drainQueue(db, fake.http)).toBe(1);
-      const request = fake.calls.find(c => c.url.endsWith('/reading_position'))!;
+      const request = fake.calls.find(c => c.url.endsWith('/reading_position') && c.init.method === 'POST')!;
       expect(JSON.parse(request.init.body!)).toMatchObject({
         cfi: 'epubcfi(/8/4!/6/4/3:5)', chapter_index: 1, percentage: 7.0252,
       });
@@ -194,5 +196,223 @@ describe('BookFusion download and delivery', () => {
   it('keeps transient download failures retryable', async () => {
     const http: HttpTransport = async () => ({ status: 503, text: async () => '', json: async () => ({}) });
     await expect(bookFusionEpub('a', '7', providerHeaders, http)).rejects.toMatchObject({ retryable: true, needsReauth: false });
+  });
+});
+
+
+describe('BookFusion CFI conversion', () => {
+  it.each([
+    ['epubcfi(/8/4!/6/4/3:5)', XPATH],
+    ['epubcfi(/8/4!/6/4/1:5)', '/body/DocFragment[2]/body/p[1]/text()[1].4'],
+    ['epubcfi(/8/4[b]!/6/4/1)', '/body/DocFragment[2]/body/p[1]/text()[1].0'],
+    ['epubcfi(/8/4!/6/4/1)', '/body/DocFragment[2]/body/p[1]/text()[1].0'],
+    ['epubcfi(/8/4!/6/4)', '/body/DocFragment[2]/body/p[1]'],
+    ['epubcfi(/8/2!/4)', '/body/DocFragment[1]/body'],
+  ])('resolves %s and round-trips the position', async (cfi, xpath) => {
+    expect(await epubXPath(epub(), cfi)).toBe(xpath);
+    const roundtrip = await epubPosition(epub(), xpath);
+    expect(await epubXPath(epub(), roundtrip.cfi)).toBe(xpath);
+  });
+
+  it('counts actual text nodes, including adjacent text and missing slots', async () => {
+    const bytes = epub('<h1>Title</h1><p><em>x</em>ab<!--split-->cd<![CDATA[😀f]]><b>x</b>end</p>');
+    const cfi = 'epubcfi(/8/4!/6/4/3:6)';
+    const xpath = '/body/DocFragment[2]/body/p[1]/text()[3].1';
+    expect(await epubXPath(bytes, cfi)).toBe(xpath);
+    expect((await epubPosition(bytes, xpath)).cfi).toBe(cfi);
+  });
+
+  it('validates escaped IDs and accepts text assertions and side bias', async () => {
+    const bytes = epub('<p id="a]!/;b">hello</p>');
+    expect(await epubXPath(bytes, 'epubcfi(/8/4!/6/2[a^]!/^;b]/1:2[he,llo;s=b])'))
+      .toBe('/body/DocFragment[2]/body/p[1]/text()[1].2');
+  });
+
+  it.each([
+    'epubcfi(/8/4!/6/4/1:4)', // Inside the emoji surrogate pair.
+    'epubcfi(/8/4!/6/4/1:99)', 'epubcfi(/8/4!/6/4/5:0)',
+    'epubcfi(/8/4!/6/4[wrong])', 'epubcfi(/6/4!/6/4)',
+    'epubcfi(/8/6!/6/4)', 'epubcfi(/8/4!/2)',
+    'epubcfi(/8/4!/6/4/1:0/2)', 'epubcfi(/8/4!/6/4:4)',
+    'epubcfi(/8/4!/6/4,/1:0,/1:2)', 'epubcfi(/8/4!/6/4@1:2)',
+    'epubcfi(/8/4!/6/4[unterminated)', 'not a cfi',
+  ])('rejects invalid or unsupported CFI without guessing: %s', async cfi => {
+    await expect(epubXPath(epub(), cfi)).rejects.toBeInstanceOf(Error);
+  });
+});
+
+const REMOTE_CFI = 'epubcfi(/8/4!/6/4/3:5)';
+const START = Date.parse('2026-09-13T20:00:00Z');
+function inboundTransport(percentage = 60, cfi: string | null = REMOTE_CFI, at = START + 60_000) {
+  const fake = transport();
+  const reads: string[] = [];
+  const http: HttpTransport = async (url, init) => {
+    if (url.endsWith('/reading_position') && init.method === 'GET') {
+      reads.push(url);
+      return { status: 200, text: async () => '', json: async () => ({
+        percentage, cfi, updated_at: new Date(at).toISOString(),
+      }) };
+    }
+    return fake.http(url, init);
+  };
+  return { ...fake, http, reads };
+}
+
+async function linkedReader(percentage = 0.2, progress = '/body/DocFragment[1]/body') {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(START);
+  const { app, db } = makeTestApp();
+  const { headers } = await registerUser(app);
+  upsertAccount(db, 1, 'bookfusion', { access_token: 'test-token' }, null);
+  upsertAccount(db, 1, 'kosync', { server: 'mirror.test', username: 'u', password: 'p' }, null);
+  const res = await app.request('/syncs/progress', {
+    method: 'PUT', headers, body: JSON.stringify({ document: DOC, progress, percentage,
+      device_id: 'reader', metadata: { bookfusion_id: '36835' }, position: { pctQ: 200000, spine: 0, page: 2, pages: 10 } }),
+  });
+  expect(res.status).toBe(200);
+  db.prepare('DELETE FROM connector_queue').run();
+  vi.setSystemTime(START + 120_000);
+  return { app, db, headers };
+}
+
+describe('BookFusion inbound sync', () => {
+  it('polls exact matches into the existing KOSync API and mirrors the exact XPath without an echo', async () => {
+    const { app, db, headers } = await linkedReader();
+    try {
+      const fake = inboundTransport();
+      expect(await pollAll(db, fake.http)).toBe(1);
+      const got = await (await app.request(`/syncs/progress/${DOC}`, { headers })).json();
+      expect(got).toMatchObject({ device_id: 'bookfusion', progress: XPATH, percentage: 0.6 });
+      const row = db.prepare("SELECT position,updated_at FROM progress WHERE device_id='bookfusion'").get();
+      expect(row).toEqual({ position: null, updated_at: (START + 60_000) / 1000 });
+      const queued = db.prepare('SELECT connector_id,payload FROM connector_queue').all() as { connector_id: string; payload: string }[];
+      expect(queued.map(q => q.connector_id)).toEqual(['kosync']);
+      expect(JSON.parse(queued[0].payload)).toMatchObject({ progress: XPATH, percentage: 0.6, position: null });
+      expect(await pollConnector(db, 1, 'bookfusion', fake.http)).toBe(0);
+      expect(fake.calls.filter(c => c.url.endsWith('/download'))).toHaveLength(1);
+    } finally { db.close(); }
+  });
+
+  it('does not suppress a real page advance within the old 0.5% echo tolerance', async () => {
+    const { db } = await linkedReader(0.6);
+    try {
+      expect(await pollConnector(db, 1, 'bookfusion', inboundTransport(60.01).http)).toBe(1);
+    } finally { db.close(); }
+  });
+
+  it('remembers an echo timestamp without broadcasting it again', async () => {
+    const { db } = await linkedReader(0.6, XPATH);
+    try {
+      expect(await pollConnector(db, 1, 'bookfusion', inboundTransport().http)).toBe(0);
+      expect(db.prepare('SELECT COUNT(*) n FROM connector_queue').get()).toEqual({ n: 0 });
+      expect(db.prepare("SELECT updated_at FROM progress WHERE device_id='bookfusion'").get())
+        .toEqual({ updated_at: (START + 60_000) / 1000 });
+    } finally { db.close(); }
+  });
+
+  it('does not replace a newer device upload with an older remote position', async () => {
+    const { db } = await linkedReader();
+    try {
+      const fake = inboundTransport(60, REMOTE_CFI, START - 60_000);
+      expect(await pollConnector(db, 1, 'bookfusion', fake.http)).toBe(0);
+      expect(fake.calls).toHaveLength(0); // No EPUB needed for a stale source timestamp.
+    } finally { db.close(); }
+  });
+
+  it('rechecks progress after an upload arrives during the provider request', async () => {
+    const { app, db, headers } = await linkedReader();
+    try {
+      const fake = inboundTransport();
+      const http: HttpTransport = async (url, init) => {
+        if (url.endsWith('/reading_position')) await app.request('/syncs/progress', {
+          method: 'PUT', headers, body: JSON.stringify({ document: DOC, progress: '/body/DocFragment[2]/body',
+            percentage: 0.9, device_id: 'reader' }),
+        });
+        return fake.http(url, init);
+      };
+      expect(await pollConnector(db, 1, 'bookfusion', http)).toBe(0);
+      expect(db.prepare("SELECT COUNT(*) n FROM progress WHERE device_id='bookfusion'").get()).toEqual({ n: 0 });
+    } finally { db.close(); }
+  });
+
+  it('does not import exact positions into a manually matched edition', async () => {
+    const { db } = await linkedReader();
+    try {
+      saveMatch(db, 1, 'bookfusion', DOC, { externalId: '36835', confidence: 1 }, 'manual');
+      const fake = inboundTransport();
+      expect(await pollConnector(db, 1, 'bookfusion', fake.http)).toBe(0);
+      expect(fake.reads).toHaveLength(0);
+    } finally { db.close(); }
+  });
+
+  it('isolates a failed book and retries it even after another book succeeds', async () => {
+    const { db } = await linkedReader();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      saveMatch(db, 1, 'bookfusion', 'second', { externalId: 'second', confidence: 1 }, 'sidecar');
+      let fail = true;
+      const fake = inboundTransport();
+      const http: HttpTransport = async (url, init) => {
+        if (fail && url.includes('/36835/reading_position')) return { status: 503, text: async () => '', json: async () => ({}) };
+        return fake.http(url, init);
+      };
+      expect(await pollConnector(db, 1, 'bookfusion', http)).toBe(1);
+      fail = false;
+      expect(await pollConnector(db, 1, 'bookfusion', http)).toBe(1);
+    } finally { log.mockRestore(); db.close(); }
+  });
+
+  it.each([null, 'epubcfi(/8/4!/6/99)'])('never substitutes a sample for an unresolved remote CFI: %s', async cfi => {
+    const { db } = await linkedReader();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(await pollConnector(db, 1, 'bookfusion', inboundTransport(60, cfi).http)).toBe(0);
+      expect(db.prepare("SELECT COUNT(*) n FROM progress WHERE device_id='bookfusion'").get()).toEqual({ n: 0 });
+    } finally { log.mockRestore(); db.close(); }
+  });
+
+  it('does not import a result after the match is changed while polling', async () => {
+    const { db } = await linkedReader();
+    try {
+      const fake = inboundTransport();
+      const http: HttpTransport = async (url, init) => {
+        saveMatch(db, 1, 'bookfusion', DOC, { externalId: 'different', confidence: 1 }, 'manual');
+        return fake.http(url, init);
+      };
+      expect(await pollConnector(db, 1, 'bookfusion', http)).toBe(0);
+    } finally { db.close(); }
+  });
+
+  it('stops polling an expired account and exposes the reauthorization requirement', async () => {
+    const { db } = await linkedReader();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      let calls = 0;
+      const http: HttpTransport = async () => {
+        calls++;
+        return { status: 401, text: async () => '', json: async () => ({}) };
+      };
+      expect(await pollConnector(db, 1, 'bookfusion', http)).toBe(0);
+      expect(db.prepare("SELECT status FROM connector_accounts WHERE connector_id='bookfusion'").get())
+        .toEqual({ status: 'needs_reauth' });
+      expect(await pollConnector(db, 1, 'bookfusion', http)).toBe(0);
+      expect(calls).toBe(1);
+    } finally { log.mockRestore(); db.close(); }
+  });
+
+  it('allows a fresh upload after checking an older BookFusion position', async () => {
+    const fake = inboundTransport(60, REMOTE_CFI, START - 60_000);
+    expect(await bookfusionConnector.push({ access_token: 't' }, { externalId: '7', confidence: 1, fromSidecar: true },
+      { kind: 'progress', document: DOC, percentage: 0.7, progress: XPATH, timestamp: START / 1000 }, fake.http))
+      .toEqual({ ok: true });
+    expect(fake.calls.filter(c => c.url.endsWith('/reading_position') && c.init.method === 'POST')).toHaveLength(1);
+  });
+
+  it('does not send a delayed queued upload over a newer BookFusion position', async () => {
+    const fake = inboundTransport();
+    expect(await bookfusionConnector.push({ access_token: 't' }, { externalId: '7', confidence: 1, fromSidecar: true },
+      { kind: 'progress', document: DOC, percentage: 0.2, progress: XPATH, timestamp: START / 1000 }, fake.http))
+      .toEqual({ ok: true });
+    expect(fake.calls.some(c => c.url.endsWith('/reading_position') && c.init.method === 'POST')).toBe(false);
   });
 });

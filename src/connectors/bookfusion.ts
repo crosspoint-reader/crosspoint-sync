@@ -1,5 +1,5 @@
 import { decideMatch, extractTitleAuthor, type Candidate } from './matching.js';
-import { bookFusionEpub, epubPosition } from './bookfusion-epub.js';
+import { bookFusionEpub, epubPosition, epubXPath } from './bookfusion-epub.js';
 import { ConnectorOperationError } from './types.js';
 import type {
   Connector,
@@ -8,6 +8,7 @@ import type {
   DeviceLinkStart,
   DocumentMeta,
   HttpTransport,
+  InboundChange,
   Match,
   OutboundEvent,
   PushResult,
@@ -106,6 +107,41 @@ export function extractBooks(body: any): Candidate[] {
   return out;
 }
 
+async function readingPosition(token: string, bookId: string, http: HttpTransport) {
+  const res = await http(`${BASE}/api/user/books/${encodeURIComponent(bookId)}/reading_position`, {
+    method: 'GET', headers: authHeaders(token), signal: AbortSignal.timeout(15_000),
+  });
+  if (res.status === 404) return null;
+  if (res.status < 200 || res.status >= 300) throw new ConnectorOperationError(
+    `BookFusion reading position failed (${res.status})`, res.status === 429 || res.status >= 500,
+    res.status === 401 || res.status === 403
+  );
+  const body = await res.json() as { updated_at?: unknown; percentage?: unknown; cfi?: unknown } | null;
+  const updatedAtMs = typeof body?.updated_at === 'string' ? Date.parse(body.updated_at) : NaN;
+  if (!Number.isFinite(updatedAtMs) || updatedAtMs <= 0 || typeof body?.percentage !== 'number' ||
+      !Number.isFinite(body.percentage) || body.percentage < 0 || body.percentage > 100) {
+    throw new ConnectorOperationError('BookFusion reading position is invalid', false);
+  }
+  return { updatedAtMs, percentage: body.percentage / 100, cfi: body.cfi };
+}
+
+async function pullProgress(
+  cred: Credential, match: Match, http: HttpTransport, sinceMs: number
+): Promise<InboundChange | null> {
+  if (!match.fromSidecar) return null;
+  const token = tokenOf(cred);
+  const remote = await readingPosition(token, match.externalId, http);
+  if (!remote || Math.floor(remote.updatedAtMs / 1000) <= Math.floor(sinceMs / 1000)) return null;
+  if (typeof remote.cfi !== 'string' || !remote.cfi) {
+    throw new ConnectorOperationError('BookFusion reading position has no CFI', false);
+  }
+  const epub = await bookFusionEpub(token, match.externalId, authHeaders(token), http);
+  return {
+    externalId: match.externalId, percentage: remote.percentage, finished: remote.percentage === 1,
+    updatedAtMs: remote.updatedAtMs, progress: await epubXPath(epub, remote.cfi),
+  };
+}
+
 async function push(
   cred: Credential,
   m: Match,
@@ -125,7 +161,12 @@ async function push(
       throw new ConnectorOperationError('BookFusion position: cannot resolve XPath in the EPUB', false);
     }
   }
-  const res = await http(`${BASE}/api/user/books/${m.externalId}/reading_position`, {
+  if (m.fromSidecar) {
+    // A delayed queue event must not roll back a newer BookFusion reading session.
+    const remote = await readingPosition(token, m.externalId, http);
+    if (remote && Math.floor(remote.updatedAtMs / 1000) > ev.timestamp) return { ok: true };
+  }
+  const res = await http(`${BASE}/api/user/books/${encodeURIComponent(m.externalId)}/reading_position`, {
     method: 'POST',
     headers: authHeaders(token),
     body: JSON.stringify(body),
@@ -201,13 +242,14 @@ export const bookfusionConnector: Connector = {
   id: 'bookfusion',
   displayName: 'BookFusion',
   tier: 3,
-  capabilities: { read: false, write: true },
+  capabilities: { read: true, write: true },
   carries: ['progress', 'finished'],
   credentialKind: 'device_code',
   experimental: true,
   validate,
   match,
   push,
+  pullProgress,
   beginLink,
   pollLink,
 };

@@ -106,11 +106,20 @@ export interface BookFusionPosition {
   cfi: string;
 }
 
-/** Resolve the device's XPath in the actual EPUB, including absolute sibling indices. */
-export async function epubPosition(bytes: Buffer, xpath: string): Promise<BookFusionPosition> {
-  const match = /^\/body\/DocFragment(?:\[(\d+)\])?\/body(?:\/(.*))?$/.exec(xpath);
-  if (!match || xpath.length > 4096) invalid('expected a KOReader XPath');
-  const index = Number(match[1] ?? 1) - 1;
+interface Chapter {
+  opf: Element;
+  spine: Element;
+  spineItems: Element[];
+  index: number;
+  html: Element;
+  body: Element;
+}
+
+async function withChapter<T>(
+  bytes: Buffer,
+  select: (opf: Element, spine: Element, items: Element[]) => number,
+  resolve: (chapter: Chapter) => T
+): Promise<T> {
   const zip = await fromBufferPromise(bytes, { lazyEntries: true, strictFileNames: true });
   try {
     const entries = new Map<string, Entry>();
@@ -142,6 +151,7 @@ export async function epubPosition(bytes: Buffer, xpath: string): Promise<BookFu
     const opf = xml(await read(opfPath));
     const spine = child(opf, 'spine');
     const spineItems = elements(spine).filter(e => e.localName === 'itemref');
+    const index = select(opf, spine, spineItems);
     if (!Number.isSafeInteger(index) || index < 0 || index >= spineItems.length) invalid('chapter out of range');
     const item = elements(child(opf, 'manifest')).find(
       e => e.localName === 'item' && e.getAttribute('id') === spineItems[index].getAttribute('idref')
@@ -150,6 +160,15 @@ export async function epubPosition(bytes: Buffer, xpath: string): Promise<BookFu
     const chapterPath = posix.join(posix.dirname(opfPath), decodeURIComponent(href.split('#')[0]));
     const html = xml(await read(chapterPath), true);
     const body = child(html, 'body');
+    return resolve({ opf, spine, spineItems, index, html, body });
+  } finally { zip.close(); }
+}
+
+/** Resolve the device's XPath in the actual EPUB, including absolute sibling indices. */
+export async function epubPosition(bytes: Buffer, xpath: string): Promise<BookFusionPosition> {
+  const match = /^\/body\/DocFragment(?:\[(\d+)\])?\/body(?:\/(.*))?$/.exec(xpath);
+  if (!match || xpath.length > 4096) invalid('expected a KOReader XPath');
+  return withChapter(bytes, () => Number(match[1] ?? 1) - 1, ({ opf, spine, spineItems, index, html, body }) => {
     const steps = [2 * (elements(html).indexOf(body) + 1)];
     let target: Node = body;
     let offset = 0;
@@ -207,5 +226,81 @@ export async function epubPosition(bytes: Buffer, xpath: string): Promise<BookFu
       page_position_in_book: (index + (total ? before / total : 0)) / spineItems.length,
       cfi: `epubcfi(/${packageStep}/${itemStep}!/${steps.join('/')}${suffix})`,
     };
-  } finally { zip.close(); }
+  });
+}
+
+interface CfiStep { number: number; id?: string; offset?: number; }
+
+function cfiPaths(cfi: string): CfiStep[][] {
+  if (cfi.length > 4096 || !cfi.startsWith('epubcfi(') || !cfi.endsWith(')')) invalid('expected an EPUB CFI');
+  const inner = cfi.slice(8, -1);
+  const token = /\/([1-9]\d*)(?:\[((?:\^[\s\S]|[^\]\^])*)\])?(?::(\d+)(?:\[((?:\^[\s\S]|[^\]\^])*)\])?)?/y;
+  const paths: CfiStep[][] = [[]];
+  for (let at = 0; at < inner.length;) {
+    if (inner[at] === '!' && paths.length === 1 && paths[0].length) {
+      paths.push([]); at++; continue;
+    }
+    token.lastIndex = at;
+    const step = token.exec(inner);
+    if (!step) invalid('unsupported CFI step');
+    const number = Number(step[1]), offset = step[3] === undefined ? undefined : Number(step[3]);
+    if (!Number.isSafeInteger(number) || (offset !== undefined && !Number.isSafeInteger(offset))) invalid('CFI step out of range');
+    // Parameters such as side bias do not identify an element. Unescape ID assertions.
+    const id = step[2]?.match(/^(?:\^[\s\S]|[^;])*/)?.[0].replace(/\^([\s\S])/g, '$1');
+    paths[paths.length - 1].push({ number, id: id || undefined, offset });
+    at = token.lastIndex;
+  }
+  if (paths.length !== 2 || paths[0].length !== 2 || !paths[1].length) invalid('expected a chapter CFI');
+  return paths;
+}
+
+function cfiElement(parent: Node, step: CfiStep): Element {
+  if (step.number % 2 || step.offset !== undefined) invalid('expected a CFI element');
+  const element = elements(parent)[step.number / 2 - 1] ?? invalid('CFI element missing');
+  // BookFusion uses the manifest idref as the assertion on spine itemrefs.
+  const idref = element.localName === 'itemref' ? element.getAttribute('idref') : null;
+  if (step.id && element.getAttribute('id') !== step.id && element.getAttribute('xml:id') !== step.id && idref !== step.id) {
+    invalid('CFI ID assertion mismatch');
+  }
+  return element;
+}
+
+/** Resolve a point CFI to the same codepoint-based XPath understood by CrossPoint. */
+export async function epubXPath(bytes: Buffer, cfi: string): Promise<string> {
+  const [packagePath, contentPath] = cfiPaths(cfi);
+  return withChapter(bytes, (opf, spine, items) => {
+    if (cfiElement(opf, packagePath[0]) !== spine) invalid('CFI does not reference the spine');
+    return items.indexOf(cfiElement(spine, packagePath[1]));
+  }, ({ index, html, body }) => {
+    if (cfiElement(html, contentPath[0]) !== body) invalid('CFI does not reference the body');
+    const path = [`/body/DocFragment[${index + 1}]/body`];
+    let target: Node = body;
+    for (const [i, step] of contentPath.slice(1).entries()) {
+      if (step.number % 2 === 0) {
+        const element = cfiElement(target, step);
+        const siblings = elements(target).filter(e => e.localName === element.localName);
+        path.push(`${element.localName}[${siblings.indexOf(element) + 1}]`);
+        target = element;
+      } else {
+        if (i !== contentPath.length - 2 || step.id) invalid('text must end the CFI');
+        let slot = 1, textIndex = 0, remaining = step.offset ?? 0;
+        let found = false;
+        for (const node of children(target)) {
+          if (node.nodeType === 1) { slot += 2; continue; }
+          if (!text(node)) continue;
+          textIndex++;
+          if (slot !== step.number) continue;
+          const value = node.nodeValue ?? '';
+          if (remaining > value.length) { remaining -= value.length; continue; }
+          if (remaining > 0 && /[\uD800-\uDBFF]/.test(value[remaining - 1]) &&
+              /[\uDC00-\uDFFF]/.test(value[remaining] ?? '')) invalid('CFI splits a surrogate pair');
+          path.push(`text()[${textIndex}].${Array.from(value.slice(0, remaining)).length}`);
+          found = true;
+          break;
+        }
+        if (!found) invalid('CFI text offset out of range');
+      }
+    }
+    return path.join('/');
+  });
 }

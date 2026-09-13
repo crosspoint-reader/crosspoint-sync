@@ -2,17 +2,20 @@ import type { DB } from '../db/db.js';
 import { nowSeconds } from '../models/sync.js';
 import { getConnector, fetchTransport } from './registry.js';
 import { fanOutProgress } from './fanout.js';
-import { nearestProgressSample, upsertProgress } from '../routes/kosync.js';
+import { nearestProgressSample, recordProgressSample, upsertProgress } from '../routes/kosync.js';
 import {
   decryptCredential,
   documentForExternal,
   getAccount,
   getPullCursor,
-  latestPercentage,
+  latestProgress,
+  listMatches,
+  getMatch,
+  setAccountStatus,
   listAllEnabledAccounts,
   setPullCursor,
 } from './store.js';
-import type { HttpTransport } from './types.js';
+import { ConnectorOperationError, type InboundChange, type HttpTransport } from './types.js';
 
 // Skip an inbound change whose percentage already matches our stored progress
 // (within this window). This suppresses the echo of a value we just pushed OUT
@@ -34,49 +37,74 @@ export async function pollConnector(
 ): Promise<number> {
   const conn = getConnector(connectorId);
   const account = getAccount(db, userId, connectorId);
-  if (!conn || !account || !account.enabled || !conn.pullChanges || !conn.capabilities.read) {
-    return 0;
+  if (!conn || !account || !account.enabled || account.status === 'needs_reauth' ||
+      (!conn.pullChanges && !conn.pullProgress) || !conn.capabilities.read) return 0;
+
+  function apply(ch: InboundChange, document: string): number {
+    const exact = ch.progress !== undefined;
+    const current = latestProgress(db, userId, document);
+    const updatedAt = exact ? Math.floor(ch.updatedAtMs / 1000) : nowSeconds();
+    if (exact && current && updatedAt <= current.updated_at) return 0;
+    const pct = exact ? ch.percentage : ch.finished || ch.percentage >= 0.999 ? 1 : ch.percentage;
+    const samePosition = current && Math.abs(current.percentage - pct) < (exact ? 0.000001 : ECHO_EPSILON) &&
+      (!exact || current.progress.replace(/\[1\]/g, '') === ch.progress!.replace(/\[1\]/g, ''));
+    if (samePosition && !exact) return 0;
+    // Percentage-only providers use recorded samples; exact providers never borrow a stale page.
+    const sample = exact ? null : nearestProgressSample(db, userId, document, pct);
+    const progress = ch.progress ?? sample?.progress ?? `${connectorId}:${Math.round(pct * 1_000_000)}`;
+    const position = sample?.position ?? null;
+    upsertProgress(db, {
+      userId, document, deviceId: connectorId, device: conn!.displayName,
+      percentage: pct, progress, position, metadata: null, updatedAt,
+    });
+    if (exact) recordProgressSample(db, userId, document, pct, progress, null, updatedAt);
+    if (samePosition) return 0; // Remember the source timestamp without echoing our own push.
+    fanOutProgress(db, userId, document, pct, updatedAt, progress, position, connectorId);
+    return 1;
   }
+
+  if (conn.pullProgress) {
+    let applied = 0;
+    const credential = decryptCredential(account);
+    for (const match of listMatches(db, userId, connectorId)) {
+      if (!match.external_id) continue;
+      try {
+        const current = latestProgress(db, userId, match.document);
+        const change = await conn.pullProgress(credential, {
+          externalId: match.external_id, confidence: match.confidence, fromSidecar: match.source === 'sidecar',
+        }, http, (current?.updated_at ?? 0) * 1000);
+        // The account, match, or canonical progress can change while the request is in flight.
+        const freshAccount = getAccount(db, userId, connectorId);
+        if (!freshAccount?.enabled || freshAccount.cred_enc !== account.cred_enc || freshAccount.status !== 'ok') break;
+        const freshMatch = getMatch(db, userId, connectorId, match.document);
+        if (change && freshMatch?.external_id === match.external_id && freshMatch.source === match.source) {
+          applied += apply(change, match.document);
+        }
+      } catch (err) {
+        console.error(JSON.stringify({ msg: 'connector pull failed', connector: connectorId, user_id: userId,
+          document: match.document, error: err instanceof Error ? err.message : 'pull failed' }));
+        if (err instanceof ConnectorOperationError && err.needsReauth) {
+          setAccountStatus(db, userId, connectorId, 'needs_reauth', err.message);
+          break;
+        }
+      }
+    }
+    return applied;
+  }
+
   const since = getPullCursor(db, userId, connectorId);
   let changes;
   try {
-    changes = await conn.pullChanges(decryptCredential(account), http, since);
+    changes = await conn.pullChanges!(decryptCredential(account), http, since);
   } catch {
     return 0; // best-effort; try again next tick
   }
-
   let applied = 0;
   let maxCursor = since;
   for (const ch of changes) {
     if (ch.updatedAtMs > maxCursor) maxCursor = ch.updatedAtMs;
     const document = documentForExternal(db, userId, connectorId, ch.externalId);
-    if (!document) continue; // not a book we sync
-    const pct = ch.finished || ch.percentage >= 0.999 ? 1 : ch.percentage;
-    const current = latestPercentage(db, userId, document);
-    if (current != null && Math.abs(current - pct) < ECHO_EPSILON) continue; // echo of our own push
-
-    const now = nowSeconds();
-    // Translate the percentage into a REAL position we've seen for this document
-    // (nearest-percentage sample from a device push), so stock KOReader can seek
-    // to it. CrossPoint maps by percentage regardless, but plain KOReader needs a
-    // valid xpointer/page. Fall back to a synthetic string when we have no sample
-    // yet (a percentage-mapping reader still handles it; stock KOReader can't, but
-    // there's nothing better to give it until a real device reports a position).
-    const sample = nearestProgressSample(db, userId, document, pct);
-    upsertProgress(db, {
-      userId,
-      document,
-      deviceId: connectorId,
-      device: conn.displayName,
-      percentage: pct,
-      progress: sample?.progress ?? `${connectorId}:${Math.round(pct * 1_000_000)}`,
-      position: sample?.position ?? null,
-      metadata: null,
-      updatedAt: now,
-    });
-    // Push this position to the OTHER services, but not back to the source.
-    fanOutProgress(db, userId, document, pct, now, undefined, null, connectorId);
-    applied++;
+    if (document) applied += apply(ch, document);
   }
 
   if (maxCursor > since) setPullCursor(db, userId, connectorId, maxCursor);
@@ -88,7 +116,7 @@ export async function pollAll(db: DB, http: HttpTransport = fetchTransport): Pro
   let total = 0;
   for (const { user_id, connector_id } of listAllEnabledAccounts(db)) {
     const conn = getConnector(connector_id);
-    if (!conn?.pullChanges || !conn.capabilities.read) continue;
+    if (!conn?.capabilities.read || (!conn.pullChanges && !conn.pullProgress)) continue;
     total += await pollConnector(db, user_id, connector_id, http);
   }
   return total;

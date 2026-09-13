@@ -114,11 +114,22 @@ Validates credentials. `200 {"authorized": "OK"}` or `401`.
   XPath: a text-node offset identifies that text position; a paragraph/chapter-only XPath
   identifies its start. An unresolved XPath fails without posting an estimated position.
 
+  The inbound worker also checks sidecar-matched BookFusion books every five minutes.
+  It resolves BookFusion's point CFI in the same EPUB and exposes the resulting XPath
+  through the existing KOSync progress endpoints. No firmware update is needed. It uses
+  the provider's update timestamp, skips older positions, and preserves text offsets
+  (converting UTF-16 CFI offsets to CrossPoint codepoints). Invalid or missing CFIs are
+  retried on later polls without substituting an approximate position. Poll failures
+  are logged per book; one failed book does not block other books. Delayed outbound
+  events also check the remote timestamp before posting, to avoid replacing newer
+  BookFusion progress. The provider does not offer an atomic conditional update, so a
+  simultaneous edit between that check and the POST is still possible.
+
   The server reuses downloaded archives for 15 minutes in an account-scoped memory cache
   capped at 32 MiB total and 32 entries. Downloads are limited to 32 MiB and 30 seconds;
   each extracted XML file is limited to 1 MiB. Only the package metadata and target chapter
   are decompressed. Books matched by title or manual selection retain percentage-only
-  updates because those matches do not establish that the reader has the same EPUB edition.
+  outbound updates and are excluded from inbound position conversion because those matches do not establish that the reader has the same EPUB edition.
 
 ### GET /syncs/progress/{document}
 

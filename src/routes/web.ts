@@ -232,7 +232,7 @@ const LANDING = shell(
        <div class="desc">Keep your place between the ebook and the audiobook, both ways. Read some, then pick up listening right where you left off.</div></div></div>
        <span class="pill">ready</span></div>
      <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/bookfusion.png" alt="" width="34" height="34"><div><div class="name">BookFusion</div>
-       <div class="desc">Sync your reading position to your BookFusion library.</div></div></div>
+       <div class="desc">Sync reading positions both ways for books downloaded from BookFusion.</div></div></div>
        <span class="pill warn">experimental</span></div>
      <p style="font-family:'Caveat',cursive;font-weight:600;font-size:19px;color:var(--brand-600);margin:16px 0 0;transform:rotate(-1deg)">more on the way, and it's all open source</p>
    </div>

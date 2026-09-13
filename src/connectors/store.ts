@@ -250,14 +250,17 @@ export function documentForExternal(
   return row?.document ?? null;
 }
 
-/** The canonical progress percentage, using the same ordering as the KOSync endpoint. */
+/** Canonical progress, using the same ordering as the KOSync endpoint. */
+export function latestProgress(db: DB, userId: number, document: string): {
+  percentage: number; progress: string; updated_at: number;
+} | null {
+  return db.prepare(
+    'SELECT percentage, progress, updated_at FROM progress WHERE user_id = ? AND document = ? ORDER BY updated_at DESC, device_id LIMIT 1'
+  ).get(userId, document) as { percentage: number; progress: string; updated_at: number } | undefined ?? null;
+}
+
 export function latestPercentage(db: DB, userId: number, document: string): number | null {
-  const row = db
-    .prepare(
-      'SELECT percentage FROM progress WHERE user_id = ? AND document = ? ORDER BY updated_at DESC, device_id LIMIT 1'
-    )
-    .get(userId, document) as { percentage: number } | undefined;
-  return row?.percentage ?? null;
+  return latestProgress(db, userId, document)?.percentage ?? null;
 }
 
 /** All linked, enabled connector accounts across users (for the fan-in worker). */

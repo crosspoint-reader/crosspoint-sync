@@ -64,6 +64,8 @@ export interface InboundChange {
   /** 0..1 reading fraction. */
   percentage: number;
   finished: boolean;
+  /** Exact KOSync XPath, when the provider position can be resolved in the same EPUB. */
+  progress?: string;
   /** Source last-update timestamp, ms epoch — used as the poll cursor. */
   updatedAtMs: number;
 }
@@ -205,6 +207,9 @@ export interface Connector {
    * to a document and writes it into canonical progress. Optional.
    */
   pullChanges?(cred: Credential, http: HttpTransport, sinceMs: number): Promise<InboundChange[]>;
+
+  /** Poll a known book instead of scanning the provider library; sinceMs is its canonical timestamp. */
+  pullProgress?(cred: Credential, match: Match, http: HttpTransport, sinceMs: number): Promise<InboundChange | null>;
 
   /** Begin an interactive device-code link (OAuth device grant). Optional. */
   beginLink?(http: HttpTransport): Promise<DeviceLinkStart>;
