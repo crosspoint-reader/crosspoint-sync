@@ -438,7 +438,6 @@ async function renderKosync() {
     renderConnectors();
     return;
   }
-  $('progress').innerHTML = '<div class="card"><p class="muted" style="margin:0">Set up reading sync above to see your synced books here.</p></div>';
   el.innerHTML =
     '<div class="card"><div style="font-weight:600">Set up reading sync</div>'
     + '<p class="muted" style="margin:6px 0 14px">CrossPoint Sync is a KOReader-compatible (KOSync) progress server. Create a sync account, then enter it in your reader under Settings &rarr; KOReader Sync. Already made one on your device? Connect it below.</p>'
