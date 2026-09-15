@@ -167,6 +167,13 @@ const STYLE = `
   .lead { display:flex; gap:12px; align-items:flex-start; min-width:0; }
   .svc-icon { width:34px; height:34px; border-radius:8px; flex:0 0 auto; object-fit:cover;
     box-shadow:0 1px 2px rgba(0,0,0,0.12); background:#fff; }
+  .sync-book { padding:14px 0; border-top:1px solid var(--stone-200); }
+  .sync-book:first-child { border-top:0; padding-top:0; }
+  .sync-book:last-child { padding-bottom:0; }
+  .sync-book .title { font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sync-book .meta { color:var(--stone-500); font-size:12px; margin-top:3px; }
+  .progress-track { height:6px; border-radius:999px; background:var(--stone-100); overflow:hidden; margin-top:10px; }
+  .progress-fill { height:100%; border-radius:inherit; background:var(--brand-500); }
 `;
 
 function shell(title: string, body: string, wide = false): string {
@@ -337,6 +344,10 @@ const ACCOUNT = shell(
    <h2 style="${SECTION}">CrossPoint Sync (KOSync)</h2>
    <div id="kosync"><p class="muted">Loading…</p></div>
 
+
+   <h2 style="${SECTION}">Reading progress</h2>
+   <div class="card"><div class="row"><div><div style="font-weight:600">Synced books</div><div class="muted" style="margin-top:3px">View titles, percentages, devices, and sync times.</div></div><a href="/progress"><button class="ghost">View</button></a></div></div>
+
    <h2 style="${SECTION}">Linked services</h2>
    <div class="notice" style="margin-bottom:12px">
      <p style="margin:0 0 4px"><b>One-time setup:</b> turn on <b>Send Document Metadata</b> in your reader.</p>
@@ -378,6 +389,9 @@ async function copyWithFeedback(btn, text) {
   $('who').textContent = me.data.handle;
   renderKosync();
 })();
+
+
+
 
 // Reader-setup panel shown once a sync account exists. The password is the one
 // the user chose (we never store or display plaintext), so we only echo server
@@ -631,6 +645,41 @@ async function startDeviceFlow() {
 </script>`
 );
 
+const PROGRESS = shell(
+  'Reading progress',
+  `<div><a class="muted" href="/account">&larr; Account</a></div>
+   <div style="margin-top:16px"><span class="eyebrow">Reading progress</span>
+     <h1>Synced books</h1>
+     <p class="sub">All synced books with their latest progress.</p></div>
+   <div id="list" style="margin-top:8px"><p class="muted">Loading…</p></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+async function jget(u){ const r = await fetch(u); return { ok:r.ok, status:r.status, data:await r.json().catch(()=>({})) }; }
+(async () => {
+  const r = await jget('/api/v1/progress?limit=500');
+  const el = $('list');
+  if (r.status === 409) { location.href = '/account'; return; }
+  if (!r.ok) { el.innerHTML = '<p class="muted">Could not load synced books.</p>'; return; }
+  const books = r.data.items || [];
+  if (!books.length) { el.innerHTML = '<div class="card"><p class="muted" style="margin:0">No synced books yet. Read something on your device first.</p></div>'; return; }
+  el.innerHTML = books.map(b => {
+    const title = b.title || b.filename || b.document;
+    const value = Math.max(0, Math.min(1, Number(b.percentage) || 0));
+    const percent = (value * 100).toFixed(1).replace(/\\.0$/, '');
+    const author = b.author ? '<div class="meta">' + esc(b.author) + '</div>' : '';
+    const device = b.device || b.device_id ? 'Device: ' + esc(b.device || b.device_id) : '';
+    const when = b.timestamp ? ' · Last synced: ' + new Date(b.timestamp * 1000).toLocaleString() : '';
+    return '<div class="sync-book"><div class="row"><div><div class="title" title="' + esc(title) + '">' + esc(title) + '</div>'
+      + author + '<div class="meta">' + device + when + '</div></div><b class="mono" style="font-size:13px">' + percent + '%</b></div>'
+      + '<div class="progress-track" role="progressbar" aria-valuenow="' + (value * 100) + '" aria-valuemin="0" aria-valuemax="100"><div class="progress-fill" style="width:' + (value * 100) + '%"></div></div></div>';
+  }).join('');
+})();
+</script>`
+);
+
+
 const REVIEW = shell(
   'Matches',
   `<div><a class="muted" href="/account">&larr; Account</a></div>
@@ -753,6 +802,11 @@ export function webRoutes(): Hono<AppEnv> {
   app.get('/account', (c) => {
     if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect('/');
     return c.html(ACCOUNT);
+  });
+
+  app.get('/progress', (c) => {
+    if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect('/');
+    return c.html(PROGRESS);
   });
 
   app.get('/link/:id', (c) => {
