@@ -656,10 +656,11 @@ const PROGRESS = shell(
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-async function jget(u){ const r = await fetch(u); return { ok:r.ok, data:await r.json().catch(()=>({})) }; }
+async function jget(u){ const r = await fetch(u); return { ok:r.ok, status:r.status, data:await r.json().catch(()=>({})) }; }
 (async () => {
   const r = await jget('/api/v1/progress?limit=500');
   const el = $('list');
+  if (r.status === 409) { location.href = '/account'; return; }
   if (!r.ok) { el.innerHTML = '<p class="muted">Could not load synced books.</p>'; return; }
   const books = r.data.items || [];
   if (!books.length) { el.innerHTML = '<div class="card"><p class="muted" style="margin:0">No synced books yet. Read something on your device first.</p></div>'; return; }
