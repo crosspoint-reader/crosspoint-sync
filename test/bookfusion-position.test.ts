@@ -208,6 +208,9 @@ describe('BookFusion CFI conversion', () => {
     ['epubcfi(/8/4!/6/4/1)', '/body/DocFragment[2]/body/p[1]/text()[1].0'],
     ['epubcfi(/8/4!/6/4)', '/body/DocFragment[2]/body/p[1]'],
     ['epubcfi(/8/2!/4)', '/body/DocFragment[1]/body'],
+    // Range CFIs (parent,start,end) resolve to the range start.
+    ['epubcfi(/8/4!/6/4,/1:5,/1:6)', '/body/DocFragment[2]/body/p[1]/text()[1].4'],
+    ['epubcfi(/8/4!/6,/4/1:0,/4/1:2)', '/body/DocFragment[2]/body/p[1]/text()[1].0'],
   ])('resolves %s and round-trips the position', async (cfi, xpath) => {
     expect(await epubXPath(epub(), cfi)).toBe(xpath);
     const roundtrip = await epubPosition(epub(), xpath);
@@ -234,7 +237,9 @@ describe('BookFusion CFI conversion', () => {
     'epubcfi(/8/4!/6/4[wrong])', 'epubcfi(/6/4!/6/4)',
     'epubcfi(/8/6!/6/4)', 'epubcfi(/8/4!/2)',
     'epubcfi(/8/4!/6/4/1:0/2)', 'epubcfi(/8/4!/6/4:4)',
-    'epubcfi(/8/4!/6/4,/1:0,/1:2)', 'epubcfi(/8/4!/6/4@1:2)',
+    'epubcfi(/8/4!/6/4,/1:0)', 'epubcfi(/8/4!/6/4,,/1:2)',
+    'epubcfi(/8/4!/6/4,/1:0,/1:1,/1:2)', 'epubcfi(/8,/4!/6/4/1:0,/1:2)',
+    'epubcfi(/8/4!/6/4@1:2)',
     'epubcfi(/8/4!/6/4[unterminated)', 'not a cfi',
   ])('rejects invalid or unsupported CFI without guessing: %s', async cfi => {
     await expect(epubXPath(epub(), cfi)).rejects.toBeInstanceOf(Error);

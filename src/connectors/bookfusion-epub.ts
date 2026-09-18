@@ -236,9 +236,14 @@ function cfiPaths(cfi: string): CfiStep[][] {
   const inner = cfi.slice(8, -1);
   const token = /\/([1-9]\d*)(?:\[((?:\^[\s\S]|[^\]\^])*)\])?(?::(\d+)(?:\[((?:\^[\s\S]|[^\]\^])*)\])?)?/y;
   const paths: CfiStep[][] = [[]];
+  // A range CFI is parent,start,end; a reading position is the range start.
+  const range: CfiStep[][] = [];
   for (let at = 0; at < inner.length;) {
-    if (inner[at] === '!' && paths.length === 1 && paths[0].length) {
+    if (inner[at] === '!' && paths.length === 1 && paths[0].length && !range.length) {
       paths.push([]); at++; continue;
+    }
+    if (inner[at] === ',' && paths.length === 2 && range.length < 2) {
+      range.push([]); at++; continue;
     }
     token.lastIndex = at;
     const step = token.exec(inner);
@@ -247,8 +252,12 @@ function cfiPaths(cfi: string): CfiStep[][] {
     if (!Number.isSafeInteger(number) || (offset !== undefined && !Number.isSafeInteger(offset))) invalid('CFI step out of range');
     // Parameters such as side bias do not identify an element. Unescape ID assertions.
     const id = step[2]?.match(/^(?:\^[\s\S]|[^;])*/)?.[0].replace(/\^([\s\S])/g, '$1');
-    paths[paths.length - 1].push({ number, id: id || undefined, offset });
+    (range.length ? range[range.length - 1] : paths[paths.length - 1]).push({ number, id: id || undefined, offset });
     at = token.lastIndex;
+  }
+  if (range.length) {
+    if (range.length !== 2 || !range[0].length || !range[1].length) invalid('expected a complete CFI range');
+    paths[1].push(...range[0]);
   }
   if (paths.length !== 2 || paths[0].length !== 2 || !paths[1].length) invalid('expected a chapter CFI');
   return paths;
