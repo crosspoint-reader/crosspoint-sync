@@ -47,6 +47,24 @@ function authHeaders(token: string): Record<string, string> {
   return { authorization: `Bearer ${token}`, accept: API_VERSION, 'content-type': 'application/json' };
 }
 
+/** Diagnostic snippet of an error response body; BookFusion 422s carry validation details. */
+async function bodySnippet(res: { text(): Promise<string> }): Promise<string> {
+  try {
+    const text = (await res.text()).replace(/\s+/g, ' ').trim().slice(0, 300);
+    return text || 'empty body';
+  } catch {
+    return 'unreadable body';
+  }
+}
+
+/** Re-throw a position error with the position that caused it, for log forensics. */
+function withPosition(err: unknown, label: string, value: string): never {
+  if (err instanceof ConnectorOperationError) {
+    throw new ConnectorOperationError(`${err.message} (${label}: ${value})`, err.retryable, err.needsReauth);
+  }
+  throw err;
+}
+
 async function validate(cred: Credential, http: HttpTransport): Promise<ValidateResult> {
   try {
     const token = tokenOf(cred);
@@ -136,9 +154,11 @@ async function pullProgress(
     throw new ConnectorOperationError('BookFusion reading position has no CFI', false);
   }
   const epub = await bookFusionEpub(token, match.externalId, authHeaders(token), http);
+  const progress = await epubXPath(epub, remote.cfi)
+    .catch((err) => withPosition(err, 'cfi', remote.cfi as string));
   return {
     externalId: match.externalId, percentage: remote.percentage, finished: remote.percentage === 1,
-    updatedAtMs: remote.updatedAtMs, progress: await epubXPath(epub, remote.cfi),
+    updatedAtMs: remote.updatedAtMs, progress,
   };
 }
 
@@ -157,8 +177,10 @@ async function push(
     try {
       Object.assign(body, await epubPosition(epub, ev.progress));
     } catch (error) {
-      if (error instanceof ConnectorOperationError) throw error;
-      throw new ConnectorOperationError('BookFusion position: cannot resolve XPath in the EPUB', false);
+      if (error instanceof ConnectorOperationError) withPosition(error, 'xpath', ev.progress);
+      throw new ConnectorOperationError(
+        `BookFusion position: cannot resolve XPath in the EPUB (xpath: ${ev.progress})`, false
+      );
     }
   }
   if (m.fromSidecar) {
@@ -177,7 +199,7 @@ async function push(
   if (res.status === 429) return { ok: false, retryable: true, error: 'rate limited' };
   if (res.status >= 500) return { ok: false, retryable: true, error: `server ${res.status}` };
   if (res.status >= 200 && res.status < 300) return { ok: true };
-  return { ok: false, retryable: false, error: `unexpected status ${res.status}` };
+  return { ok: false, retryable: false, error: `unexpected status ${res.status}: ${await bodySnippet(res)}` };
 }
 
 // --- Device-code linking flow -------------------------------------------------
