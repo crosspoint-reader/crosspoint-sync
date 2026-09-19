@@ -129,4 +129,76 @@ describe('readwise-reader connector', () => {
     );
     expect(change).toBeNull();
   });
+
+  it('fan-in: a missing updated_at yields a finite timestamp, never NaN', async () => {
+    const fake = fakeTransport();
+    fake.on('id=', 200, { results: [{ reading_progress: 0.3 }] }); // no updated_at
+    const change = await readwiseReaderConnector.pullProgress!(
+      CRED,
+      { externalId: '01bbb', confidence: 1 },
+      fake.transport,
+      Date.parse('2026-01-01T00:00:00Z')
+    );
+    expect(change).not.toBeNull();
+    expect(change!.percentage).toBe(0.3);
+    expect(Number.isFinite(change!.updatedAtMs)).toBe(true);
+  });
+
+  it('matches a document that only appears on a later page (pagination)', async () => {
+    const fake = fakeTransport();
+    // First page of each location: one unrelated doc + a nextPageCursor.
+    fake.on('/list/', 200, {
+      results: [{ id: 'p1', title: 'First Page Filler', author: 'Q' }],
+      nextPageCursor: 'CURSOR2',
+    });
+    // Second page (request carries pageCursor=) holds the target, no more pages.
+    fake.on('pageCursor=', 200, {
+      results: [{ id: 'p2', title: 'Buried On Page Two', author: 'Z' }],
+      nextPageCursor: null,
+    });
+    const m = await readwiseReaderConnector.match!(
+      CRED,
+      { document: 'hash', title: 'Buried On Page Two', author: 'Z', filename: null },
+      fake.transport
+    );
+    expect(m?.externalId).toBe('p2');
+    expect(fake.calls.some((c) => c.url.includes('pageCursor=CURSOR2'))).toBe(true);
+  });
+
+  it('rate-limit cooldown is per-token, not global', async () => {
+    // Token A trips a 429 -> its cooldown is set.
+    const a1 = fakeTransport();
+    a1.on('id=', 429, {});
+    const blocked = await readwiseReaderConnector.pullProgress!(
+      { token: 'rw_A' },
+      { externalId: 'x', confidence: 1 },
+      a1.transport,
+      0
+    );
+    expect(blocked).toBeNull();
+
+    // A is now in cooldown: a follow-up makes no HTTP call at all.
+    const a2 = fakeTransport();
+    a2.on('id=', 200, { results: [{ reading_progress: 0.9, updated_at: '2026-01-01T00:00:00Z' }] });
+    const stillBlocked = await readwiseReaderConnector.pullProgress!(
+      { token: 'rw_A' },
+      { externalId: 'x', confidence: 1 },
+      a2.transport,
+      0
+    );
+    expect(stillBlocked).toBeNull();
+    expect(a2.calls).toHaveLength(0);
+
+    // A different token B is unaffected and goes through.
+    const b = fakeTransport();
+    b.on('id=', 200, { results: [{ reading_progress: 0.5, updated_at: '2026-01-01T00:00:00Z' }] });
+    const ok = await readwiseReaderConnector.pullProgress!(
+      { token: 'rw_B' },
+      { externalId: 'x', confidence: 1 },
+      b.transport,
+      0
+    );
+    expect(ok?.percentage).toBe(0.5);
+    expect(b.calls.length).toBeGreaterThan(0);
+  });
 });
