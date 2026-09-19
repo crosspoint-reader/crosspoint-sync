@@ -7,7 +7,7 @@ and any KOReader device.
   only the sync-server URL. Same accounts, same auth, same endpoints as `sync.koreader.rocks`.
 - **Better multi-device sync.** Progress is stored per device and the newest position wins, fixing
   the ping-pong you get with stock kosync servers.
-- **Server-side service connectors.** Link services such as Hardcover, Micro.blog, and Audiobookshelf once; readers continue speaking standard KOSync while the server updates external reading state.
+- **Server-side service connectors.** Link services such as Hardcover, Micro.blog, Audiobookshelf, and Readwise Reader once; readers continue speaking standard KOSync while the server updates external reading state.
 - **Lossless CrossPoint sync.** An extended API carries the full CrossPoint position (spine,
   paragraph, anchor, page hints), not just a lossy xpath + percentage.
 - **Bookmarks, clippings, and reading stats.** Delta sync with tombstones for bookmarks and
