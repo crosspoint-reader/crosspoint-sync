@@ -696,7 +696,11 @@ async function removeBook(btn) {
       + 'book — opening it again starts syncing from scratch.')) return;
   $('err').textContent = '';
   btn.disabled = true; btn.textContent = 'Removing…';
-  const r = await jsend('/api/v1/progress/' + encodeURIComponent(doc), 'DELETE');
+  // fetch rejects outright when the network is down; treat that as an ordinary
+  // failed response so the one error path below re-enables the button.
+  let r;
+  try { r = await jsend('/api/v1/progress/' + encodeURIComponent(doc), 'DELETE'); }
+  catch { r = { ok:false, status:0, data:{} }; }
   if (!r.ok && r.status !== 404) {
     $('err').textContent = r.data.message || 'Could not remove this book.';
     btn.disabled = false; btn.textContent = 'Remove';
