@@ -254,6 +254,25 @@ All device rows, newest first — the client decides what to apply:
 
 `position` is `null` for rows written by plain kosync clients.
 
+#### DELETE /api/v1/progress/{document}
+
+Removes a synced book completely. Deletes the kosync progress for **every** device plus everything
+else stored server-side for that book: position samples, bookmarks, clippings, per-book reading
+stats, connector matches and any queued connector events. Document metadata goes too, so the book
+disappears from `GET /api/v1/progress` and `GET /api/v1/documents`, and `GET
+/syncs/progress/{document}` goes back to returning `{}`.
+
+```json
+{"document": "a1b2c3d4e5f60718293a4b5c6d7e8f90", "deleted": true, "rows": 14}
+```
+
+`rows` is the number of database rows removed. Returns `404 {"code": 2003, "message": "Unknown
+document"}` when the user has no data for that document.
+
+Bookmarks and clippings are hard-deleted rather than tombstoned — there is no book left to
+delta-sync against. A device that still holds the file simply re-uploads its state on the next
+sync, so this is a server-side reset, not a device-side delete.
+
 ### Bookmarks
 
 Item ids are **client-derived**: `id = first 16 hex chars of SHA-256(xpath)`. Deterministic, so
