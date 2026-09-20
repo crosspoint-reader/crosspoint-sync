@@ -23,6 +23,7 @@ function deleteKosyncUserData(db: DB, userId: number, username: string): void {
       'bookmarks',
       'documents',
       'progress',
+      'progress_samples',
     ]) {
       db.prepare(`DELETE FROM ${table} WHERE user_id = ?`).run(userId);
     }

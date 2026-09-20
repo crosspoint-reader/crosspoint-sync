@@ -172,6 +172,8 @@ const STYLE = `
   .sync-book:last-child { padding-bottom:0; }
   .sync-book .title { font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .sync-book .meta { color:var(--stone-500); font-size:12px; margin-top:3px; }
+  .sync-book .actions { display:flex; align-items:center; gap:10px; flex:0 0 auto; }
+  button.sm { padding:6px 11px; font-size:13px; }
   .progress-track { height:6px; border-radius:999px; background:var(--stone-100); overflow:hidden; margin-top:10px; }
   .progress-fill { height:100%; border-radius:inherit; background:var(--brand-500); }
 `;
@@ -346,7 +348,7 @@ const ACCOUNT = shell(
 
 
    <h2 style="${SECTION}">Reading progress</h2>
-   <div class="card"><div class="row"><div><div style="font-weight:600">Synced books</div><div class="muted" style="margin-top:3px">View titles, percentages, devices, and sync times.</div></div><a href="/progress"><button class="ghost">View</button></a></div></div>
+   <div class="card"><div class="row"><div><div style="font-weight:600">Synced books</div><div class="muted" style="margin-top:3px">View titles, percentages, devices and sync times, or remove a book.</div></div><a href="/progress"><button class="ghost">View</button></a></div></div>
 
    <h2 style="${SECTION}">Linked services</h2>
    <div class="notice" style="margin-bottom:12px">
@@ -650,31 +652,66 @@ const PROGRESS = shell(
   `<div><a class="muted" href="/account">&larr; Account</a></div>
    <div style="margin-top:16px"><span class="eyebrow">Reading progress</span>
      <h1>Synced books</h1>
-     <p class="sub">All synced books with their latest progress.</p></div>
+     <p class="sub">All synced books with their latest progress. Removing a book deletes its synced progress and everything else stored here for it.</p></div>
+   <div class="err" id="err"></div>
    <div id="list" style="margin-top:8px"><p class="muted">Loading…</p></div>
 
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 async function jget(u){ const r = await fetch(u); return { ok:r.ok, status:r.status, data:await r.json().catch(()=>({})) }; }
+async function jsend(u, m='POST'){ const r = await fetch(u,{method:m}); return { ok:r.ok, status:r.status, data:await r.json().catch(()=>({})) }; }
+
+let BOOKS = [];
+
+function bookTitle(b) { return b.title || b.filename || b.document; }
+
+function card(b) {
+  const title = bookTitle(b);
+  const value = Math.max(0, Math.min(1, Number(b.percentage) || 0));
+  const percent = (value * 100).toFixed(1).replace(/\\.0$/, '');
+  const author = b.author ? '<div class="meta">' + esc(b.author) + '</div>' : '';
+  const device = b.device || b.device_id ? 'Device: ' + esc(b.device || b.device_id) : '';
+  const when = b.timestamp ? ' · Last synced: ' + new Date(b.timestamp * 1000).toLocaleString() : '';
+  return '<div class="sync-book"><div class="row"><div style="min-width:0"><div class="title" title="' + esc(title) + '">' + esc(title) + '</div>'
+    + author + '<div class="meta">' + device + when + '</div></div>'
+    + '<div class="actions"><b class="mono" style="font-size:13px">' + percent + '%</b>'
+    + '<button class="danger sm" data-remove="' + esc(b.document) + '">Remove</button></div></div>'
+    + '<div class="progress-track" role="progressbar" aria-valuenow="' + (value * 100) + '" aria-valuemin="0" aria-valuemax="100"><div class="progress-fill" style="width:' + (value * 100) + '%"></div></div></div>';
+}
+
+function render() {
+  const el = $('list');
+  if (!BOOKS.length) { el.innerHTML = '<div class="card"><p class="muted" style="margin:0">No synced books yet. Read something on your device first.</p></div>'; return; }
+  el.innerHTML = BOOKS.map(card).join('');
+  el.querySelectorAll('[data-remove]').forEach(btn => btn.onclick = () => removeBook(btn));
+}
+
+async function removeBook(btn) {
+  const doc = btn.dataset.remove;
+  const book = BOOKS.find(b => b.document === doc);
+  if (!confirm('Remove "' + (book ? bookTitle(book) : doc) + '"?\\n\\n'
+      + 'This permanently deletes its synced progress on every device, plus any highlights, '
+      + 'bookmarks, reading stats and service matches stored here for it. Your device keeps the '
+      + 'book — opening it again starts syncing from scratch.')) return;
+  $('err').textContent = '';
+  btn.disabled = true; btn.textContent = 'Removing…';
+  const r = await jsend('/api/v1/progress/' + encodeURIComponent(doc), 'DELETE');
+  if (!r.ok && r.status !== 404) {
+    $('err').textContent = r.data.message || 'Could not remove this book.';
+    btn.disabled = false; btn.textContent = 'Remove';
+    return;
+  }
+  BOOKS = BOOKS.filter(b => b.document !== doc);
+  render();
+}
+
 (async () => {
   const r = await jget('/api/v1/progress?limit=500');
-  const el = $('list');
   if (r.status === 409) { location.href = '/account'; return; }
-  if (!r.ok) { el.innerHTML = '<p class="muted">Could not load synced books.</p>'; return; }
-  const books = r.data.items || [];
-  if (!books.length) { el.innerHTML = '<div class="card"><p class="muted" style="margin:0">No synced books yet. Read something on your device first.</p></div>'; return; }
-  el.innerHTML = books.map(b => {
-    const title = b.title || b.filename || b.document;
-    const value = Math.max(0, Math.min(1, Number(b.percentage) || 0));
-    const percent = (value * 100).toFixed(1).replace(/\\.0$/, '');
-    const author = b.author ? '<div class="meta">' + esc(b.author) + '</div>' : '';
-    const device = b.device || b.device_id ? 'Device: ' + esc(b.device || b.device_id) : '';
-    const when = b.timestamp ? ' · Last synced: ' + new Date(b.timestamp * 1000).toLocaleString() : '';
-    return '<div class="sync-book"><div class="row"><div><div class="title" title="' + esc(title) + '">' + esc(title) + '</div>'
-      + author + '<div class="meta">' + device + when + '</div></div><b class="mono" style="font-size:13px">' + percent + '%</b></div>'
-      + '<div class="progress-track" role="progressbar" aria-valuenow="' + (value * 100) + '" aria-valuemin="0" aria-valuemax="100"><div class="progress-fill" style="width:' + (value * 100) + '%"></div></div></div>';
-  }).join('');
+  if (!r.ok) { $('list').innerHTML = '<p class="muted">Could not load synced books.</p>'; return; }
+  BOOKS = r.data.items || [];
+  render();
 })();
 </script>`
 );

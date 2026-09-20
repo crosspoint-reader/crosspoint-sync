@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import type { DB } from '../../db/db.js';
 import { kosyncError, type AppEnv } from '../../auth/middleware.js';
 import { isValidDocument, parseProgressBody, upsertProgress } from '../kosync.js';
+import { deleteDocumentData, hasDocumentData } from '../../models/document.js';
 import { fanOutProgress } from '../../connectors/fanout.js';
 
 export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async () => {}): Hono<AppEnv> {
@@ -114,6 +115,24 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
         timestamp: r.updated_at,
       })),
     });
+  });
+
+  // Remove a synced book entirely: kosync progress for every device plus the
+  // rest of that book's server-side data (samples, bookmarks, clippings,
+  // per-book stats, connector matches and queued connector events). Lets a user
+  // clear a book off their dashboard - e.g. one synced from a file they no
+  // longer have. Devices that still hold the book re-sync it from scratch.
+  app.delete('/progress/:document', (c) => {
+    const document = c.req.param('document');
+    if (!isValidDocument(document)) {
+      return kosyncError(c, 403, 2004, "Field 'document' not provided.");
+    }
+    const user = c.get('user');
+    if (!hasDocumentData(db, user.id, document)) {
+      return c.json({ code: 2003, message: 'Unknown document' }, 404);
+    }
+    const rows = deleteDocumentData(db, user.id, document);
+    return c.json({ document, deleted: true, rows });
   });
 
   return app;
