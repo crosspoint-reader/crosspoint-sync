@@ -471,6 +471,10 @@ Unlink; wipes the stored credential, all matches, and queued work.
 
 Lists resolved book matches (for a review UI): `{"connector": "hardcover", "matches": [{"document",
 "external_id", "confidence", "source": "auto|manual|none", "query_used", "updated_at"}]}`.
+The review endpoint (`GET /connectors/{id}/review`) additionally carries `push_note`: a
+per-book condition from the last successful push (e.g. Hardcover has no page count for
+the book, so progress cannot sync), or null. Cleared automatically when the condition
+resolves or the match changes.
 
 #### PUT /api/v1/connectors/{id}/matches/{document}
 
@@ -481,10 +485,24 @@ Manually set a match (sticky — never auto-recomputed). Body `{"external_id": "
 
 Force (re)matching now; returns the resolved match or null. Preserves manual overrides.
 
+#### POST /api/v1/connectors/{id}/library/refresh
+
+Force-refresh the connector's server-side library list. `{"count": 2}`. 400 for
+connectors without a refreshable library.
+
+#### POST /api/v1/connectors/{id}/lookup
+
+Verify an externally-supplied book id against the user's account at the service.
+Body `{"external_id": "…"}`. `{"found": true, "book": {"externalId", "title",
+"author", "edition"}}` or `{"found": false}`. 400 for connectors without lookup.
+
 **Matching** is server-side from the document's title/author (the EPUB metadata the firmware sends —
 so connectors need "Send Metadata" on). **Fan-out** is automatic: a progress PUT enqueues a
 progress/finished event to write-connectors that carry it; a clippings PUT enqueues highlight events
 to highlight-connectors (Readwise). A background worker delivers them with retry/backoff.
+**Fan-in** (read connectors: Audiobookshelf, Readwise Reader, BookFusion) is pulled on a
+background interval for library-wide providers, and on-demand — when a device asks for progress on a
+matched book — for per-book providers.
 
 ### GET /healthz
 

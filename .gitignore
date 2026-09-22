@@ -6,3 +6,4 @@ data/
 *.db-shm
 .DS_Store
 .localdata/
+.firecrawl/

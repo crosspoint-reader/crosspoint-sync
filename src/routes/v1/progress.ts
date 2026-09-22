@@ -5,6 +5,7 @@ import { kosyncError, type AppEnv } from '../../auth/middleware.js';
 import { isValidDocument, parseProgressBody, upsertProgress } from '../kosync.js';
 import { deleteDocumentData, hasDocumentData } from '../../models/document.js';
 import { fanOutProgress } from '../../connectors/fanout.js';
+import { aliasesByDocument, resolveDocument } from '../../models/merge.js';
 
 export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async () => {}): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -21,9 +22,11 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
     if (!parsed.ok) {
       return kosyncError(c, 403, parsed.code, parsed.message);
     }
+    const clientDocument = parsed.record.document;
+    parsed.record.document = resolveDocument(db, user.id, clientDocument);
     upsertProgress(db, parsed.record);
     fanOutProgress(db, user.id, parsed.record.document, parsed.record.percentage, parsed.record.updatedAt, parsed.record.progress, parsed.record.position);
-    return c.json({ document: parsed.record.document, timestamp: parsed.record.updatedAt });
+    return c.json({ document: clientDocument, timestamp: parsed.record.updatedAt });
   });
 
   // List every synced document with its newest progress (joined with any known
@@ -35,7 +38,7 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
       Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 500) : 100;
     const rows = db
       .prepare(
-        `SELECT p.document, p.device_id, p.device, p.percentage, p.progress, p.updated_at,
+        `SELECT p.document, p.device_id, p.device, p.percentage, p.progress, p.position, p.updated_at,
                 d.title, d.author, d.filename
          FROM progress p
          LEFT JOIN documents d ON d.user_id = p.user_id AND d.document = p.document
@@ -58,23 +61,38 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
       device: string;
       percentage: number;
       progress: string;
+      position: string | null;
       updated_at: number;
       title: string | null;
       author: string | null;
       filename: string | null;
     }[];
+    const aliases = aliasesByDocument(db, user.id);
     return c.json({
-      items: rows.map((r) => ({
-        document: r.document,
-        title: r.title,
-        author: r.author,
-        filename: r.filename,
-        percentage: r.percentage,
-        progress: r.progress,
-        device_id: r.device_id,
-        device: r.device,
-        timestamp: r.updated_at,
-      })),
+      items: rows.map((r) => {
+        let position: { page?: number; pages?: number } | null = null;
+        if (r.position) {
+          try {
+            position = JSON.parse(r.position) as { page?: number; pages?: number };
+          } catch {
+            position = null;
+          }
+        }
+        return {
+          document: r.document,
+          title: r.title,
+          author: r.author,
+          filename: r.filename,
+          percentage: r.percentage,
+          progress: r.progress,
+          page: position?.page ?? null,
+          pages: position?.pages ?? null,
+          device_id: r.device_id,
+          device: r.device,
+          timestamp: r.updated_at,
+          aliases: aliases.get(r.document) ?? [],
+        };
+      }),
     });
   });
 
@@ -84,8 +102,9 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
       return kosyncError(c, 403, 2004, "Field 'document' not provided.");
     }
     const user = c.get('user');
+    const canonical = resolveDocument(db, user.id, document);
     try {
-      await refreshProgress(user.id, document);
+      await refreshProgress(user.id, canonical);
     } catch (error) {
       const status = error instanceof Error && error.name === 'TimeoutError' ? 504 : 502;
       return c.json({ code: 2003, message: 'BookFusion progress refresh failed' }, status);
@@ -96,7 +115,7 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
          FROM progress WHERE user_id = ? AND document = ?
          ORDER BY updated_at DESC, device_id`
       )
-      .all(user.id, document) as {
+      .all(user.id, canonical) as {
       device_id: string;
       device: string;
       percentage: number;

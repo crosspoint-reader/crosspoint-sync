@@ -13,6 +13,8 @@ import {
   getAccount,
   getMatch,
   listMatches,
+  listReveals,
+  revealConnector,
   saveMatch,
   upsertAccount,
 } from '../../connectors/store.js';
@@ -27,7 +29,7 @@ function loopbackAddress(address: string): boolean {
   return address === '::1' || address.startsWith('127.') || address.startsWith('::ffff:127.');
 }
 
-function credentialRequestIsSecure(c: Context<AppEnv>, trustProxy: boolean): boolean {
+export function credentialRequestIsSecure(c: Context<AppEnv>, trustProxy: boolean): boolean {
   const url = new URL(c.req.url);
   if (url.protocol === 'https:') return true;
   const incoming = c.env?.incoming;
@@ -54,13 +56,20 @@ export function connectorRoutes(
 ): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
-  // List available connectors + this user's link status.
+  // List available connectors + this user's link status. Stealth (revealable)
+  // connectors are listed only once revealed — or linked, which implies reveal.
   app.get('/connectors', (c) => {
     const user = c.get('user');
     const enabled = secretsEnabled();
+    const revealed = new Set(listReveals(db, user.id));
+    const visible = listConnectors().filter((conn) => {
+      if (!conn.revealable) return true;
+      if (revealed.has(conn.id)) return true;
+      return !!getAccount(db, user.id, conn.id);
+    });
     return c.json({
       encryption: enabled ? 'enabled' : 'disabled',
-      connectors: listConnectors().map((conn) => {
+      connectors: visible.map((conn) => {
         const account = getAccount(db, user.id, conn.id);
         return {
           id: conn.id,
@@ -70,6 +79,8 @@ export function connectorRoutes(
           carries: conn.carries,
           capabilities: conn.capabilities,
           credential_kind: conn.credentialKind,
+          library_refresh: !!conn.refreshLibrary,
+          asin_lookup: !!conn.lookup,
           linked: !!account,
           status: account?.status ?? null,
           account: account?.account_label ?? null,
@@ -167,6 +178,59 @@ export function connectorRoutes(
     }
   });
 
+  // Reveal a stealth connector (the /kindle landing page calls this). Idempotent.
+  app.post('/connectors/:id/reveal', (c) => {
+    const conn = getConnector(c.req.param('id'));
+    if (!conn) return c.json({ code: 2003, message: 'Unknown connector' }, 404);
+    if (!conn.revealable) return c.json({ code: 2003, message: 'Connector is not revealable' }, 400);
+    const user = c.get('user');
+    revealConnector(db, user.id, conn.id);
+    return c.json({ id: conn.id, revealed: true });
+  });
+
+  // Force-refresh the connector's server-side library list ("Refresh library" button).
+  app.post('/connectors/:id/library/refresh', async (c) => {
+    const conn = getConnector(c.req.param('id'));
+    if (!conn) return c.json({ code: 2003, message: 'Unknown connector' }, 404);
+    if (!conn.refreshLibrary) return c.json({ code: 2003, message: 'Connector has no library to refresh' }, 400);
+    const user = c.get('user');
+    const account = getAccount(db, user.id, conn.id);
+    if (!account) return c.json({ code: 2003, message: 'Connector not linked' }, 400);
+    try {
+      const result = await conn.refreshLibrary(decryptCredential(account), transport);
+      return c.json(result ?? { count: null });
+    } catch (err) {
+      return c.json({ code: 2003, message: err instanceof Error ? err.message : 'refresh failed' }, 502);
+    }
+  });
+
+  // Verify an externally-supplied book id (e.g. a pasted ASIN) against the
+  // user's account at this service before it becomes a manual match.
+  app.post('/connectors/:id/lookup', async (c) => {
+    const conn = getConnector(c.req.param('id'));
+    if (!conn) return c.json({ code: 2003, message: 'Unknown connector' }, 404);
+    if (!conn.lookup) return c.json({ code: 2003, message: 'Connector has no id lookup' }, 400);
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return kosyncError(c, 403, 2003, 'Invalid request');
+    }
+    const externalId = (body as Record<string, unknown> | null)?.external_id;
+    if (typeof externalId !== 'string' || !externalId.trim()) {
+      return kosyncError(c, 403, 2003, 'Invalid request');
+    }
+    const user = c.get('user');
+    const account = getAccount(db, user.id, conn.id);
+    if (!account) return c.json({ code: 2003, message: 'Connector not linked' }, 400);
+    try {
+      const book = await conn.lookup(decryptCredential(account), externalId, transport);
+      return c.json({ found: !!book, book: book ?? null });
+    } catch (err) {
+      return c.json({ code: 2003, message: err instanceof Error ? err.message : 'lookup failed' }, 502);
+    }
+  });
+
   // "Sync now": backfill this connector with everything already synced.
   app.post('/connectors/:id/sync', (c) => {
     const conn = getConnector(c.req.param('id'));
@@ -221,7 +285,8 @@ export function connectorRoutes(
     const rows = db
       .prepare(
         `SELECT p.document AS document, d.title AS title, d.author AS author,
-                m.external_id AS external_id, m.source AS source, m.confidence AS confidence
+                m.external_id AS external_id, m.source AS source, m.confidence AS confidence,
+                m.push_note AS push_note
          FROM progress p
          LEFT JOIN documents d ON d.user_id = p.user_id AND d.document = p.document
          LEFT JOIN connector_matches m ON m.user_id = p.user_id AND m.connector_id = ? AND m.document = p.document
@@ -237,6 +302,7 @@ export function connectorRoutes(
       external_id: string | null;
       source: string | null;
       confidence: number | null;
+      push_note: string | null;
     }[];
     return c.json({
       connector: conn.id,
@@ -248,6 +314,7 @@ export function connectorRoutes(
         external_id: r.external_id,
         source: r.source ?? 'none',
         confidence: r.confidence ?? 0,
+        push_note: r.push_note,
       })),
     });
   });

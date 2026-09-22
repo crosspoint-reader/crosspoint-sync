@@ -16,6 +16,7 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY migrations ./migrations
 COPY assets ./assets
+COPY extension ./extension
 COPY package.json ./
 RUN mkdir -p /data && chown node:node /data
 USER node

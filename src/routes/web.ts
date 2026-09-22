@@ -5,6 +5,7 @@ import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
 import type { AppEnv } from '../auth/middleware.js';
 import { SESSION_COOKIE, verifySession } from '../auth/session.js';
+import { extensionZip } from '../kindle-zip.js';
 
 /**
  * Minimal server-rendered web UI (no framework, no build step, no deps). Styled
@@ -569,7 +570,18 @@ const TOKEN_HELP = {
     + '<li>Open <a href="https://micro.blog/account/apps" target="_blank" rel="noopener noreferrer">Account → App tokens</a>.</li>'
     + '<li>Create a separate token for <b>CrossPoint Sync</b>.</li>'
     + '<li>Copy the new token and paste it below.</li>'
-    + '</ol><p style="margin-bottom:0">Treat this token like a password: it has full access to your Micro.blog account. CrossPoint Sync encrypts it before storing it.</p></div>'
+    + '</ol><p style="margin-bottom:0">Treat this token like a password: it has full access to your Micro.blog account. CrossPoint Sync encrypts it before storing it.</p></div>',
+  kindle: '<div class="muted" style="margin-bottom:18px">'
+    + '<p style="margin-top:0"><b>Set up with the CrossPoint Kindle Link extension (recommended):</b></p>'
+    + '<ol style="padding-left:20px;margin-bottom:10px">'
+    + '<li><a href="/kindle-link.zip"><b>Download crosspoint-kindle-link.zip</b></a> and unzip it.</li>'
+    + '<li>Open <code>chrome://extensions</code> and turn on <b>Developer mode</b>.</li>'
+    + '<li>Choose <b>Load unpacked</b> and select the unzipped folder.</li>'
+    + '<li>Click the extension icon: connect it to this server (the same username and password as this dashboard), then register with Amazon — Amazon emails a one-time code.</li>'
+    + '<li>That\u2019s it — reading on your Kindle now syncs here. Purchased books match by title automatically; for Send-to-Kindle docs, paste the ASIN (from Manage Your Content &amp; Devices) on the match page.</li>'
+    + '</ol>'
+    + '<p><b>Caution — experimental and unofficial.</b> This connector uses Amazon\u2019s private device-sync protocol. It is not an official API and is technically against Amazon\u2019s Terms of Service; use it only with your own account and books, at your own risk. Your Amazon password is used once, inside your own browser, and never reaches this server. The extension registers a new device in your Amazon account (Amazon names it something like <b>&ldquo;Android Phone&rdquo;</b>, ignoring the name we request) — deregister it in Manage Your Content &amp; Devices to revoke access instantly.</p>'
+    + '<p style="margin-bottom:0">Advanced: if you already hold a device credential JSON, paste it below instead of using the extension.</p></div>'
 };
 
 (async () => {
@@ -589,7 +601,9 @@ function done() { location.href = '/account'; }
 function render(conn) {
   const f = $('form');
   if (conn.credential_kind === 'token') {
-    f.innerHTML = (TOKEN_HELP[ID] || '') + '<label>API token</label><input id="tok" class="mono" type="password" placeholder="paste token">'
+    const tokLabel = ID === 'kindle' ? 'Device credential JSON' : 'API token';
+    const tokPlaceholder = ID === 'kindle' ? '{"adp_token": "\u2026"}' : 'paste token';
+    f.innerHTML = (TOKEN_HELP[ID] || '') + '<label>' + tokLabel + '</label><input id="tok" class="mono" type="password" placeholder="' + tokPlaceholder + '">'
       + '<button class="primary full mt" id="go">Link ' + esc(conn.name) + '</button><div class="err" id="e"></div>';
     $('go').onclick = async () => {
       $('e').textContent = '';
@@ -652,7 +666,7 @@ const PROGRESS = shell(
   `<div><a class="muted" href="/account">&larr; Account</a></div>
    <div style="margin-top:16px"><span class="eyebrow">Reading progress</span>
      <h1>Synced books</h1>
-     <p class="sub">All synced books with their latest progress. Removing a book deletes its synced progress and everything else stored here for it.</p></div>
+     <p class="sub">All synced books with their latest progress. Removing a book deletes its synced progress and everything else stored here for it. If the same book shows up twice (two devices can identify one book differently), merge the listings and they will sync as one.</p></div>
    <div class="err" id="err"></div>
    <div id="list" style="margin-top:8px"><p class="muted">Loading…</p></div>
 
@@ -660,7 +674,7 @@ const PROGRESS = shell(
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 async function jget(u){ const r = await fetch(u); return { ok:r.ok, status:r.status, data:await r.json().catch(()=>({})) }; }
-async function jsend(u, m='POST'){ const r = await fetch(u,{method:m}); return { ok:r.ok, status:r.status, data:await r.json().catch(()=>({})) }; }
+async function jsend(u, m='POST', body){ const r = await fetch(u,{method:m,headers:body?{'content-type':'application/json'}:undefined, body: body?JSON.stringify(body):undefined}); return { ok:r.ok, status:r.status, data:await r.json().catch(()=>({})) }; }
 
 let BOOKS = [];
 
@@ -672,12 +686,17 @@ function card(b) {
   const percent = (value * 100).toFixed(1).replace(/\\.0$/, '');
   const author = b.author ? '<div class="meta">' + esc(b.author) + '</div>' : '';
   const device = b.device || b.device_id ? 'Device: ' + esc(b.device || b.device_id) : '';
+  const page = b.page && b.pages ? ' · Page ' + b.page + ' of ' + b.pages : '';
   const when = b.timestamp ? ' · Last synced: ' + new Date(b.timestamp * 1000).toLocaleString() : '';
+  const merged = (b.aliases || []).map(a =>
+    '<div class="meta">Merged with <span class="mono">' + esc(a.slice(0, 12)) + '…</span> <a href="#" data-unmerge="' + esc(a) + '">unmerge</a></div>').join('');
   return '<div class="sync-book"><div class="row"><div style="min-width:0"><div class="title" title="' + esc(title) + '">' + esc(title) + '</div>'
-    + author + '<div class="meta">' + device + when + '</div></div>'
+    + author + '<div class="meta">' + device + page + when + '</div>' + merged + '</div>'
     + '<div class="actions"><b class="mono" style="font-size:13px">' + percent + '%</b>'
+    + '<button class="ghost sm" data-merge="' + esc(b.document) + '">Merge</button>'
     + '<button class="danger sm" data-remove="' + esc(b.document) + '">Remove</button></div></div>'
-    + '<div class="progress-track" role="progressbar" aria-valuenow="' + (value * 100) + '" aria-valuemin="0" aria-valuemax="100"><div class="progress-fill" style="width:' + (value * 100) + '%"></div></div></div>';
+    + '<div class="progress-track" role="progressbar" aria-valuenow="' + (value * 100) + '" aria-valuemin="0" aria-valuemax="100"><div class="progress-fill" style="width:' + (value * 100) + '%"></div></div>'
+    + '<div id="merge-' + esc(b.document) + '" hidden style="margin-top:10px"></div></div>';
 }
 
 function render() {
@@ -685,6 +704,47 @@ function render() {
   if (!BOOKS.length) { el.innerHTML = '<div class="card"><p class="muted" style="margin:0">No synced books yet. Read something on your device first.</p></div>'; return; }
   el.innerHTML = BOOKS.map(card).join('');
   el.querySelectorAll('[data-remove]').forEach(btn => btn.onclick = () => removeBook(btn));
+  el.querySelectorAll('[data-merge]').forEach(btn => btn.onclick = () => openMerge(btn.dataset.merge));
+  el.querySelectorAll('[data-unmerge]').forEach(a => a.onclick = (e) => { e.preventDefault(); unmerge(a.dataset.unmerge); });
+}
+
+// Pick which other listing this book is the same as; this listing folds into
+// the one picked (the picked one's hash stays canonical).
+function openMerge(doc) {
+  const box = $('merge-' + doc);
+  if (!box.hidden) { box.hidden = true; return; }
+  box.hidden = false;
+  const others = BOOKS.filter(b => b.document !== doc);
+  if (!others.length) { box.innerHTML = '<p class="muted" style="margin:0">No other synced books to merge with.</p>'; return; }
+  box.innerHTML = '<div class="grp">This is the same book as</div>' + others.map(b => {
+    const pct = (Math.max(0, Math.min(1, Number(b.percentage) || 0)) * 100).toFixed(1).replace(/\\.0$/, '');
+    return '<div class="row" style="padding:6px 0"><div style="min-width:0"><div class="title">' + esc(bookTitle(b)) + '</div>'
+      + '<div class="meta">' + pct + '% · ' + esc(b.device || b.device_id || '') + '</div></div>'
+      + '<button class="ghost sm" data-into="' + esc(b.document) + '">Merge</button></div>';
+  }).join('');
+  box.querySelectorAll('[data-into]').forEach(btn => btn.onclick = async () => {
+    $('err').textContent = '';
+    btn.disabled = true; btn.textContent = 'Merging…';
+    let r;
+    try { r = await jsend('/api/v1/documents/merge', 'POST', { document: doc, into: btn.dataset.into }); }
+    catch { r = { ok:false, data:{} }; }
+    if (!r.ok) {
+      $('err').textContent = r.data.message || 'Could not merge.';
+      btn.disabled = false; btn.textContent = 'Merge';
+      return;
+    }
+    load();
+  });
+}
+
+async function unmerge(alias) {
+  if (!confirm('Unmerge this listing? The old copy starts syncing separately again; progress already merged stays here.')) return;
+  $('err').textContent = '';
+  let r;
+  try { r = await jsend('/api/v1/documents/merge/' + encodeURIComponent(alias), 'DELETE'); }
+  catch { r = { ok:false, data:{} }; }
+  if (!r.ok) { $('err').textContent = r.data.message || 'Could not unmerge.'; return; }
+  load();
 }
 
 async function removeBook(btn) {
@@ -710,13 +770,14 @@ async function removeBook(btn) {
   render();
 }
 
-(async () => {
+async function load() {
   const r = await jget('/api/v1/progress?limit=500');
   if (r.status === 409) { location.href = '/account'; return; }
   if (!r.ok) { $('list').innerHTML = '<p class="muted">Could not load synced books.</p>'; return; }
   BOOKS = r.data.items || [];
   render();
-})();
+}
+load();
 </script>`
 );
 
@@ -724,10 +785,11 @@ async function removeBook(btn) {
 const REVIEW = shell(
   'Matches',
   `<div><a class="muted" href="/account">&larr; Account</a></div>
-   <div style="margin-top:16px"><span class="eyebrow">Matches</span>
-     <h1 id="title">Matches</h1>
-     <p class="sub">Which book each of your synced titles maps to. Fix anything that matched wrong, or pick a match for the ones that didn't.</p></div>
-   <div id="list" style="margin-top:8px"><p class="muted">Loading…</p></div>
+    <div style="margin-top:16px"><span class="eyebrow">Matches</span>
+      <h1 id="title">Matches</h1>
+      <p class="sub">Which book each of your synced titles maps to. Fix anything that matched wrong, or pick a match for the ones that didn't.</p></div>
+    <div id="libtools" style="margin-top:8px"></div>
+    <div id="list" style="margin-top:8px"><p class="muted">Loading…</p></div>
 
 <script>
 const ID = decodeURIComponent(location.pathname.split('/').pop());
@@ -744,6 +806,20 @@ let CONN = null, CANDIDATES = [], BOOKS = [];
   CONN = (list.data.connectors || []).find(c => c.id === ID);
   if (!CONN) { location.href = '/account'; return; }
   $('title').textContent = CONN.name + ' matches';
+  if (CONN.library_refresh) {
+    $('libtools').innerHTML = '<button class="ghost" id="refr">Refresh library</button> <span class="muted" id="refrNote"></span>';
+    $('refr').onclick = async () => {
+      $('refr').disabled = true;
+      $('refrNote').textContent = 'refreshing…';
+      const r = await jsend('/api/v1/connectors/' + ID + '/library/refresh', 'POST');
+      $('refrNote').textContent = r.ok && r.data.count != null
+        ? r.data.count + ' book(s). Send-to-Kindle docs refresh from the extension.'
+        : 'failed: ' + (r.data.message || r.status);
+      const cand = await jget('/api/v1/connectors/' + ID + '/candidates');
+      CANDIDATES = cand.data.books || [];
+      $('refr').disabled = false;
+    };
+  }
   // Preload the "currently reading" candidates for quick picking.
   const cand = await jget('/api/v1/connectors/' + ID + '/candidates');
   CANDIDATES = cand.data.books || [];
@@ -761,8 +837,16 @@ async function renderList() {
     const state = b.matched
       ? '<span class="pill ok">' + (b.source === 'manual' ? 'matched (manual)' : 'matched') + '</span>'
       : '<span class="pill warn">not matched</span>';
+    const note = b.push_note
+      ? '<div class="muted" style="margin-top:6px;color:#b45309">&#9888; ' + esc(b.push_note)
+        + (ID === 'hardcover' && b.title
+          ? ' <a href="https://hardcover.app/search?q=' + encodeURIComponent(b.title) + '" target="_blank" rel="noopener noreferrer">Open it on Hardcover</a>'
+          : '')
+        + '</div>'
+      : '';
     return '<div class="card"><div class="row"><div><div style="font-weight:600">' + name + ' ' + state + '</div>'
       + (b.matched ? '<div class="muted" style="margin-top:3px">id ' + esc(b.external_id) + '</div>' : '')
+      + note
       + '</div><button class="ghost" data-pick="' + esc(b.document) + '">' + (b.matched ? 'Change' : 'Match') + '</button></div>'
       + '<div class="picker" id="pick-' + esc(b.document) + '" hidden style="margin-top:12px"></div></div>';
   }).join('');
@@ -778,9 +862,24 @@ function openPicker(doc) {
   box.innerHTML = (opts ? '<div class="grp">Currently reading</div>' + opts : '')
     + '<div id="results-' + doc + '"><div class="grp">Suggestions</div><p class="muted" style="margin:2px 0 0">Searching…</p></div>'
     + '<div style="display:flex;gap:8px;margin-top:12px"><input placeholder="search ' + esc(CONN.name) + '…" id="q-' + doc + '" style="flex:1"><button class="ghost" data-search="' + doc + '">Search</button></div>'
+    + (CONN.asin_lookup
+      ? '<div style="display:flex;gap:8px;margin-top:8px"><input class="mono" placeholder="or paste an ASIN (B0…)" id="asin-' + doc + '" style="flex:1"><button class="ghost" data-asin="' + doc + '">Look up</button></div><div id="asinres-' + doc + '"></div>'
+      : '')
     + '<button class="ghost mt" data-nomatch="' + doc + '">Don\\'t sync this book</button>';
   box.querySelectorAll('[data-choose]').forEach(bindChoose);
   box.querySelector('[data-search]').onclick = () => runSearch(doc, $('q-' + doc).value.trim());
+  box.querySelector('[data-asin]')?.addEventListener('click', async () => {
+    const res = $('asinres-' + doc);
+    const asin = $('asin-' + doc).value.trim();
+    if (!asin) return;
+    res.innerHTML = '<p class="muted" style="margin:6px 0 0">Looking up ' + esc(asin) + '…</p>';
+    const r = await jsend('/api/v1/connectors/' + ID + '/lookup', 'POST', { external_id: asin });
+    const b = r.data && r.data.book;
+    res.innerHTML = r.ok && r.data.found && b
+      ? '<div class="grp">Found in your Kindle account</div>' + optionRow(doc, b)
+      : '<p class="muted" style="margin:6px 0 0">Not found in your Kindle account. Check the ASIN, or sync the library from the extension first.</p>';
+    res.querySelectorAll('[data-choose]').forEach(bindChoose);
+  });
   box.querySelector('[data-nomatch]').onclick = async () => {
     await jsend('/api/v1/connectors/' + ID + '/matches/' + doc, 'PUT', { external_id: null });
     renderList();
@@ -814,6 +913,44 @@ function bindChoose(btn) {
 </script>`
 );
 
+const KINDLE = shell(
+  'Connect your Kindle',
+  `<div style="margin-top:16px"><span class="eyebrow">Experimental</span>
+     <h1>Connect your Kindle</h1>
+     <p class="sub">Sync reading progress from a non-jailbroken Kindle (or Kindle app) into CrossPoint Sync — for Send-to-Kindle documents and purchased books.</p></div>
+   <div class="card" style="margin-top:18px">
+     <h3 style="margin-top:0">Caution — experimental and unofficial</h3>
+     <p>This connector uses Amazon&rsquo;s private device-sync protocol. It is not an official API and is technically against Amazon&rsquo;s Terms of Service; use it only with your own account and books, at your own risk.</p>
+     <p style="margin-bottom:0">Your Amazon password is used once, inside your own browser, and never reaches this server. The setup registers a new device in your Amazon account (Amazon names it something like <b>&ldquo;Android Phone&rdquo;</b>, ignoring the name we request) — deregister it in Manage Your Content &amp; Devices to revoke access instantly.</p>
+   </div>
+   <div class="card">
+     <div class="step"><div class="n">1</div><div>
+       <h3>Download the Kindle Link extension</h3>
+       <p><a href="/kindle-link.zip"><b>Download crosspoint-kindle-link.zip</b></a> and unzip it.</p></div></div>
+     <div class="step"><div class="n">2</div><div>
+       <h3>Load it in Chrome</h3>
+       <p>Open <code>chrome://extensions</code>, turn on <b>Developer mode</b>, choose <b>Load unpacked</b> and select the unzipped folder.</p></div></div>
+     <div class="step"><div class="n">3</div><div>
+       <h3>Connect and register</h3>
+       <p>Click the extension icon: connect it to this server (the same username and password as this dashboard), then register with Amazon — Amazon emails a one-time code.</p></div></div>
+     <div class="step"><div class="n">4</div><div>
+       <h3>Read</h3>
+       <p>Kindle positions flow into CrossPoint Sync automatically when your devices sync. Use the match page to fix a book by ASIN if a title doesn&rsquo;t line up.</p></div></div>
+   </div>
+   <p class="muted" id="reveal" style="margin-top:14px">Enabling the Kindle connector on your account…</p>
+   <script>
+     fetch('/api/v1/connectors/kindle/reveal', { method: 'POST' })
+       .then(function (r) {
+         document.getElementById('reveal').innerHTML = r.ok
+           ? 'The Kindle connector is now visible <a href="/account">on your account page</a>.'
+           : 'Could not enable it automatically — it will also appear once linked from the extension.';
+       })
+       .catch(function () {
+         document.getElementById('reveal').textContent = 'Could not enable it automatically — it will also appear once linked from the extension.';
+       });
+   </script>`
+);
+
 export function webRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
@@ -835,6 +972,17 @@ export function webRoutes(): Hono<AppEnv> {
     return c.body(new Uint8Array(icon));
   });
 
+  // The CrossPoint Kindle Link extension, zipped from extension/ at deploy time.
+  // Public: it contains no secrets (the same code as the repo).
+  app.get('/kindle-link.zip', (c) => {
+    const zip = extensionZip();
+    if (!zip) return c.notFound();
+    c.header('content-type', 'application/zip');
+    c.header('content-disposition', 'attachment; filename="crosspoint-kindle-link.zip"');
+    c.header('cache-control', 'public, max-age=3600');
+    return c.body(new Uint8Array(zip));
+  });
+
   app.get('/', (c) => {
     if (verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect('/account');
     return c.html(LANDING);
@@ -848,6 +996,13 @@ export function webRoutes(): Hono<AppEnv> {
   app.get('/progress', (c) => {
     if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect('/');
     return c.html(PROGRESS);
+  });
+
+  // Stealth landing page for the Kindle connector: visiting it reveals the
+  // connector on the user's account page (the page JS POSTs the reveal).
+  app.get('/kindle', (c) => {
+    if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect('/');
+    return c.html(KINDLE);
   });
 
   app.get('/link/:id', (c) => {

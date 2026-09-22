@@ -6,10 +6,16 @@ export interface Config {
   trustProxy: boolean;
   /**
    * Origins allowed to call the sync API from a browser. '*' (the default)
-   * is safe because the API authenticates with headers, not cookies, so
-   * Access-Control-Allow-Credentials is never set.
+   *   is safe because the API authenticates with headers, not cookies, so
+   *   Access-Control-Allow-Credentials is never set.
    */
   corsOrigins: '*' | string[];
+  /**
+   * Self-host escape hatch: allow Amazon device registration THROUGH the server
+   * (password transits memory, never stored). Off by default; NEVER enable on a
+   * multi-user/hosted install — the setup CLI is the supported path there.
+   */
+  kindleServerRegistration: boolean;
 }
 
 export function fromEnv(env: NodeJS.ProcessEnv = process.env): Config {
@@ -26,5 +32,7 @@ export function fromEnv(env: NodeJS.ProcessEnv = process.env): Config {
     corsOrigins: env.CORS_ORIGINS
       ? env.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
       : '*',
+    kindleServerRegistration:
+      env.KINDLE_SERVER_REGISTRATION === 'true' || env.KINDLE_SERVER_REGISTRATION === '1',
   };
 }

@@ -25,6 +25,7 @@ export function makeTestApp(
     authRateLimitPerMinute: 0, // disabled in tests (limiter state is per-app anyway)
     trustProxy: false,
     corsOrigins: '*',
+    kindleServerRegistration: false,
     ...configOverrides,
   };
   return { app: createApp(db, config, opts), db };

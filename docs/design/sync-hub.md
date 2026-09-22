@@ -7,8 +7,8 @@ connector below. Read the feasibility tiers before scoping anything.
 
 A crosspoint-sync account becomes a **master sync identity**. Reading state (progress, finished
 status, and later ratings/clippings) is captured once — from any device over kosync — and
-fanned out to whichever external services the user has *paired*: Hardcover, Goodreads, StoryGraph,
-Kindle/Whispersync, Audible, etc. All pairing and forwarding happens server-side, so there are
+fanned out to whichever external services the user has *paired*: Hardcover, Goodreads,
+StoryGraph, etc. All pairing and forwarding happens server-side, so there are
 **no firmware changes** for any of it.
 
 [hardcover-sync.md](hardcover-sync.md) is the reference connector; this doc generalizes that
@@ -21,7 +21,7 @@ pattern to N connectors and defines what's actually buildable.
                                         |
         +------------------+------------+------------+------------------+
         |                  |                         |                  |
-   device sync        Hardcover                 Goodreads          Kindle / Audible
+   device sync        Hardcover                 Goodreads          StoryGraph / ...
    (kosync, canonical)  connector                connector          connector
         |                  |                         |                  |
    progress/stats  <--- sync graph: canonical store + per-connector adapters --->
@@ -73,14 +73,14 @@ Three models, best to worst posture:
    paste their session cookies (or a browser extension harvests just those cookies). The connector
    replays them against the service's own **web endpoints**. **The server never sees the
    password.** Because the cookie is captured *post-login*, this also sidesteps 2FA/CAPTCHA
-   entirely. This is the standard modern pattern — it's how Readwise's Kindle sync works
+   entirely. This is the standard modern pattern — it's how Readwise's Amazon sync works
    ("Readwise couldn't access your Amazon password even if we wanted to"). The tradeoff isn't
    credential exposure — it's that session cookies are unscopeable full-session secrets, expire and
    need re-pasting, and depend on undocumented web endpoints that can change.
 3. **Stored password / headless login (avoid).** Server holds the actual username+password and
    drives a login. Highest risk; breaks on 2FA. **We do not build this for any connector.**
 
-Cookie-replay is what makes Goodreads/StoryGraph/Kindle viable at all now — and viable *without*
+Cookie-replay is what makes Goodreads/StoryGraph viable at all now — and viable *without*
 holding anyone's password. It's still ToS-gray and brittle, so those connectors ship behind an
 explicit "experimental, may break, unofficial" opt-in — but "we store your password" was never
 the actual requirement, and I was wrong to frame it that way earlier.
@@ -88,13 +88,11 @@ the actual requirement, and I was wrong to frame it that way earlier.
 ### Prefer the aggregator hop over direct scraping
 
 When a **sanctioned aggregator already ingests a hard target**, route through it instead of
-scraping the target ourselves. The prime example: **Readwise** already pulls Kindle highlights via
-its own browser extension (the ToS-gray Amazon work is *their* responsibility, done with the user's
-explicit install), and exposes them through an official token API. So for Kindle *highlights*, a
-Readwise connector (Tier 1, no scraping) beats a direct Kindle cookie-replay connector (Tier 3,
-TLS-fingerprint fight). Always ask "is there a legit API that already has this data?" before
-building a scraper. (This doesn't cover Kindle reading-*progress* — Readwise doesn't have it — so
-the direct-Kindle spike still stands for progress specifically.)
+scraping the target ourselves. The prime example: **Readwise** already pulls e-reader highlights
+via its own browser extension (the ToS-gray work is *their* responsibility, done with the user's
+explicit install), and exposes them through an official token API. A Readwise connector (Tier 1,
+no scraping) beats a direct cookie-replay connector (Tier 3, TLS-fingerprint fight). Always ask
+"is there a legit API that already has this data?" before building a scraper.
 
 ## Feasibility tiers — READ THIS BEFORE SCOPING
 
@@ -111,13 +109,11 @@ the direct-Kindle spike still stands for progress specifically.)
     This is the cleanest way to make on-device highlights useful anywhere.
   - **Fan-in / "Readwise as the hop":** pull highlights *out* of Readwise
     (`GET /api/v2/export/?updatedAfter=`) into our canonical clippings store. Since Readwise's own
-    browser extension already ingests **Kindle** (and Apple Books, Instapaper, …) highlights the
-    sanctioned way, this gets us Kindle highlights **without us ever scraping Amazon** — we let
-    Readwise do the Amazon work and read from their clean API. This is the safer alternative to a
-    direct Kindle connector for the *highlights* use case.
+    browser extension already ingests e-reader (and Apple Books, Instapaper, …) highlights the
+    sanctioned way, this gets us those highlights **without us ever scraping the sources** — we
+    let Readwise do that work and read from their clean API.
 
-  Caveats: highlights-only (does **not** solve Kindle reading-*progress* sync — that's still the
-  Tier-3 spike below), requires a paid Readwise subscription, and create/export endpoints are
+  Caveats: highlights-only, requires a paid Readwise subscription, and create/export endpoints are
   rate-limited (~20 req/min — batch accordingly). Book identity in Readwise is title/author, which
   matches our metadata model. Verify the exact v2 schema at implementation (same gate as Hardcover).
 
@@ -142,25 +138,7 @@ the direct-Kindle spike still stands for progress specifically.)
 
 ### Tier 3 — Cookie-replay possible, but higher blast radius / harder. Spike, don't commit.
 
-- **Amazon Kindle (`read.amazon.com`)** — cookie-replay is proven (`Xetera/kindle-api` reads
-  library + reading-progress % using `at-main`/`sess-at-main`/`x-main`/`ubid-main`/`session-id`
-  cookies, valid ~1 year). Two real obstacles beyond Tier 2: (a) **Amazon added TLS fingerprinting
-  in July 2023**, so a naive server fetch is blocked — you need a browser-mimicking TLS client
-  (bogdanfinn/tls-client style) or you route through the user's browser via an extension; (b) an
-  Amazon session cookie is higher blast radius than a Goodreads one (same account as payments,
-  though scoped to the `read.amazon.com` subdomain in Readwise's model). Whispersync itself (the
-  device progress protocol) remains private with no endpoint; what's reachable is the Cloud Reader
-  progress % and the `/notebook` highlights. So "bidirectional Kindle progress" is partially real
-  (read progress %, write via the same web surface) but engineering-heavy and ToS-gray.
-- **Audible** — only a community reverse-engineered API; audiobook position ≠ ebook position
-  (needs a timestamp↔percentage model). Lower priority.
-
-  Verdict: technically reachable via the same cookie-replay pattern (no password storage), but the
-  Amazon TLS-fingerprinting workaround and the larger credential blast radius make this a research
-  spike gated on a security review — not a committed v1 feature. **For highlights specifically,
-  prefer the Readwise hop (Tier 1) over building this at all.** A direct Kindle connector is only
-  justified by reading-*progress* sync, which Readwise can't provide. The framework accommodates
-  it; we don't rush it.
+No current targets.
 
 ## What this means for the build
 
@@ -168,11 +146,9 @@ the direct-Kindle spike still stands for progress specifically.)
    runner, web-UI pairing screen). Durable regardless of which connectors follow.
 2. **Ship Hardcover + Readwise** as the first Tier-1 connectors (token APIs, no extension needed).
 3. **Build the browser extension** — the decided, shared credential-capture path for every
-   cookie-based connector. It's the prerequisite for all of Tier 2/3, so it comes before them.
+   cookie-based connector; generalize `extension/` for Tier 2 connectors.
 4. **Gate Tier 2** (Goodreads/StoryGraph, via the extension) behind an explicit experimental opt-in
    if there's demand; expect maintenance cost and breakage. Revisit if official APIs appear.
-5. **Do not build Tier 3 credential storage.** Track the Amazon/Audible landscape; if an official
-   API or a legal-reviewed narrow importer becomes viable, the framework already accommodates it.
 
 ## Cookie-replay mechanics (Tier 2/3)
 
@@ -185,9 +161,8 @@ Shared shape for every cookie-replay connector:
    over-sharing, matches Readwise's proven UX) and never touches the login page or password.
    Manual cookie paste stays as a no-extension fallback only. We store the harvested bundle
    encrypted, treated as password-equivalent. Cookie sets per service:
-   - Goodreads: `_session_id2` (+ `ccsid`)
-   - StoryGraph: `_story_graph_session` + `remember_user_token`
-   - Kindle: `at-main`, `sess-at-main`, `x-main`, `ubid-main`, `session-id`
+    - Goodreads: `_session_id2` (+ `ccsid`)
+    - StoryGraph: `_story_graph_session` + `remember_user_token`
 2. **CSRF handshake (Rails sites: Goodreads, StoryGraph).** Before any write, GET an authenticated
    HTML page, scrape `<meta name="csrf-token">` (or the hidden `authenticity_token` input), and
    send it as `X-CSRF-Token` (AJAX) or an `authenticity_token` form field (form POST), alongside
@@ -195,7 +170,7 @@ Shared shape for every cookie-replay connector:
 3. **Write** to the service's web endpoint (below).
 4. **Expiry handling.** On a redirect-to-login / 401 / signup-page-HTML response, mark the
    connector `needs_reauth` and surface it in the status endpoint — never retry-loop a dead
-   session. Kindle cookies last ~1 year; Goodreads/StoryGraph session cookies are shorter.
+   session. Goodreads/StoryGraph session cookies are relatively short-lived.
 
 ### Goodreads write-path reference
 
@@ -244,8 +219,6 @@ unavailable.
   touching the login page. Paste-cookie is the no-extension fallback. The extension is a shared
   dependency of every Tier 2/3 connector, so it's the first thing to build before any of them ship.
 - Outbound requests restricted to each connector's known hosts (no user-supplied URLs; no SSRF).
-  Kindle additionally needs a browser-fingerprint-matching TLS client to get past Amazon's 2023
-  TLS fingerprinting.
 
 ## Open questions
 

@@ -220,6 +220,8 @@ interface Edition {
  * many books have some editions with page counts and some without - looking at
  * only the top edition silently loses progress for the rest.
  */
+const noPagedEditionLogged = new Set<number>();
+
 function pickEdition(meUb: any, data: any): Edition | null {
   const candidates = [
     meUb?.user_book_reads?.[0]?.edition,
@@ -367,12 +369,24 @@ async function push(
 
   if (!edition) {
     // Shelf status is synced, but no edition with a known page count exists, so
-    // Hardcover has no denominator for a percentage. Log it (this is otherwise
-    // an invisible "synced but progress never moves") and move on.
-    console.warn(
-      JSON.stringify({ msg: 'hardcover: no paged edition, progress skipped', bookId })
-    );
-    return { ok: true };
+    // Hardcover has no denominator for a percentage. Keep trying on every push
+    // (the lookup is the same query status sync needs, and it self-heals the
+    // moment someone adds a page count on Hardcover) but log only once per
+    // process per book — this fires for every progress event otherwise.
+    if (!noPagedEditionLogged.has(bookId)) {
+      noPagedEditionLogged.add(bookId);
+      console.warn(
+        JSON.stringify({
+          msg: 'hardcover: no paged edition, progress skipped (add a page count on hardcover.app to fix; logged once per book)',
+          bookId,
+          title: m.title ?? null,
+        })
+      );
+    }
+    return {
+      ok: true,
+      note: 'Hardcover has no page count for this book, so progress cannot sync (shelf status still does). Add a page count to any edition on hardcover.app and it will start syncing.',
+    };
   }
   const progressPages = Math.max(0, Math.min(edition.pages, Math.floor(pct * edition.pages)));
 

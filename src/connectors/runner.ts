@@ -17,6 +17,7 @@ import {
   latestPercentage,
   saveMatch,
   setAccountStatus,
+  setMatchNote,
 } from './store.js';
 import { decideMatch, extractTitleAuthor } from './matching.js';
 import {
@@ -144,6 +145,8 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
   try {
     const result = await connector.push(cred, match, ev, http);
     if (result.ok) {
+      // Persist (or clear) the per-book condition so the review UI can show it.
+      setMatchNote(db, row.user_id, row.connector_id, row.document, result.note ?? null);
       markDone(db, row.id);
       return;
     }

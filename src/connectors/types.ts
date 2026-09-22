@@ -68,6 +68,13 @@ export interface InboundChange {
   progress?: string;
   /** Source last-update timestamp, ms epoch — used as the poll cursor. */
   updatedAtMs: number;
+  /**
+   * The source only reports a FURTHEST-read location (Kindle FRL), possibly
+   * without a trustworthy timestamp. The fan-in applier must apply it only when
+   * it ADVANCES the canonical position — furthest-read can't be ahead of a
+   * higher value from anywhere else, so a lower-or-equal value is always stale.
+   */
+  furthestReadOnly?: boolean;
 }
 
 /** A canonical reading event to fan out to a connector. */
@@ -93,9 +100,11 @@ export interface OutboundEvent {
   };
 }
 
-/** Result of a push attempt; retryable=false means don't re-queue (permanent). */
+/** Result of a push attempt; retryable=false means don't re-queue (permanent).
+ *  note: a per-book condition worth surfacing in the review UI (e.g. "no page
+ *  count on Hardcover"); persisted on the match, cleared when absent. */
 export type PushResult =
-  | { ok: true }
+  | { ok: true; note?: string }
   | { ok: false; retryable: boolean; error: string; needsReauth?: boolean };
 
 /** Operational failure for connector lifecycle work. */
@@ -151,6 +160,13 @@ export interface Connector {
   /** Hidden from the connector list/UI (still registered; not user-linkable via the UI). */
   hidden?: boolean;
   /**
+   * Stealth: hidden from the connector list until the user reveals it (POST
+   * /connectors/:id/reveal, e.g. via the /kindle landing page). A linked account
+   * is always visible. For gated, experimental connectors that shouldn't be
+   * discoverable from the main UI alone.
+   */
+  revealable?: boolean;
+  /**
    * How a document is matched to this service.
    *  - 'metadata' (default): needs the book's title/author, so documents with no
    *    metadata can never match and are skipped on fan-out (no wasted attempts).
@@ -200,6 +216,26 @@ export interface Connector {
    * has what it needs. Optional; returns null if it can't be determined.
    */
   resolveEdition?(cred: Credential, externalId: string, http: HttpTransport): Promise<string | null>;
+
+  /**
+   * Force-refresh the connector's server-side library list (for a dashboard
+   * "refresh library" button). Returns the new item count. Optional — most
+   * connectors search a live catalog and have nothing to refresh.
+   */
+  refreshLibrary?(cred: Credential, http: HttpTransport): Promise<{ count: number } | null>;
+
+  /**
+   * Verify an externally-supplied book id against the user's account at this
+   * service (e.g. an ASIN pasted in the match UI), returning the verified book
+   * plus any resolved edition hint, or null when the id isn't owned/reachable.
+   * Stronger than a list-membership check where the service offers one.
+   * Optional.
+   */
+  lookup?(
+    cred: Credential,
+    externalId: string,
+    http: HttpTransport
+  ): Promise<(ExternalBook & { edition?: string | null }) | null>;
 
   /**
    * Pull position changes since a cursor (ms epoch), for bidirectional sync.

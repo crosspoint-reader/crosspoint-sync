@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "CrossPoint Sync — Kindle Link",
+  "version": "0.4.0",
+  "description": "Links your Kindle to your crosspoint-sync server. Registers a scoped device credential inside your browser — your Amazon password never leaves this machine.",
+  "permissions": ["storage"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "host_permissions": [
+    "https://firs-ta-g7g.amazon.com/*"
+  ],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_popup": "popup.html", "default_title": "CrossPoint Kindle Link" }
+}

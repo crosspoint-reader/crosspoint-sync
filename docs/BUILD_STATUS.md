@@ -37,7 +37,7 @@ The full connector framework from `docs/design/sync-hub.md`, plus both Tier-1 co
 - **Hardcover** (`src/connectors/hardcover.ts`, Tier 1) — token validate, search-based match,
   status mutation (reading/read). Write-only, carries progress+finished.
 - **Readwise** (`src/connectors/readwise.ts`, Tier 1) — token validate, highlight push (fan-out),
-  and `exportHighlights()` for the fan-in "aggregator hop" (Kindle highlights via Readwise).
+  and `exportHighlights()` for the fan-in "aggregator hop" (highlights via Readwise).
   Carries highlights.
 
 ## ⚠️ Live-verify gates before enabling in production
@@ -57,9 +57,9 @@ Both connectors are built against **documented** API shapes but not verified aga
 ## Not built (deliberately deferred)
 
 - **Fan-in wiring** — `exportHighlights()` exists but isn't hooked into a canonical-clippings
-  importer or a poll loop yet. That's the next chunk if you want Kindle-via-Readwise highlights
+  importer or a poll loop yet. That's the next chunk if you want Readwise-imported highlights
   landing in the clippings store / on-device.
-- **Tier 2/3 connectors** (Goodreads/StoryGraph cookie-replay, Kindle) — framework supports them
+- **Tier 2/3 connectors** (Goodreads/StoryGraph cookie-replay) — framework supports them
   (`credentialKind: 'cookies'`, `experimental` flag) but none implemented; they need the CSRF
   handshake + live capture work described in sync-hub.md, behind an experimental opt-in.
 - **Web UI** — token paste / OAuth / match-review screen. The API is UI-ready; the UI is the

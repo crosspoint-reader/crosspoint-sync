@@ -96,6 +96,7 @@ export interface MatchRow {
   confidence: number;
   source: string;
   query_used: string | null;
+  push_note: string | null;
   updated_at: number;
 }
 
@@ -138,6 +139,7 @@ export function saveMatch(
        confidence = excluded.confidence,
        source = excluded.source,
        query_used = excluded.query_used,
+       push_note = NULL,
        updated_at = excluded.updated_at`
   ).run(
     userId,
@@ -184,6 +186,19 @@ export function seedSidecarMatches(
   }
 }
 
+/** Record (or clear) a per-book push condition for the review UI. */
+export function setMatchNote(
+  db: DB,
+  userId: number,
+  connectorId: string,
+  document: string,
+  note: string | null
+): void {
+  db.prepare(
+    'UPDATE connector_matches SET push_note = ? WHERE user_id = ? AND connector_id = ? AND document = ?'
+  ).run(note, userId, connectorId, document);
+}
+
 export function listMatches(db: DB, userId: number, connectorId: string): MatchRow[] {
   return db
     .prepare(
@@ -215,6 +230,22 @@ export function backfillDocumentMeta(
        author = COALESCE(documents.author, excluded.author),
        updated_at = excluded.updated_at`
   ).run(userId, document, title ?? null, author ?? null, now);
+}
+
+/** Mark a stealth connector revealed for a user (idempotent). */
+export function revealConnector(db: DB, userId: number, connectorId: string, now = nowSeconds()): void {
+  db.prepare(
+    'INSERT OR IGNORE INTO connector_reveals (user_id, connector_id, revealed_at) VALUES (?, ?, ?)'
+  ).run(userId, connectorId, now);
+}
+
+/** The connector ids this user has revealed. */
+export function listReveals(db: DB, userId: number): string[] {
+  return (
+    db.prepare('SELECT connector_id FROM connector_reveals WHERE user_id = ?').all(userId) as {
+      connector_id: string;
+    }[]
+  ).map((r) => r.connector_id);
 }
 
 export function getPullCursor(db: DB, userId: number, connectorId: string): number {

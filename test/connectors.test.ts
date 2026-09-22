@@ -55,9 +55,51 @@ describe('connector management API', () => {
     expect(body.encryption).toBe('enabled');
     const ids = body.connectors.map((c: { id: string }) => c.id).sort();
     // The classic (highlights-only) readwise connector is hidden; still
-    // registered but not listed. readwise-reader (reading-state) is listed.
+    // registered but not listed. Kindle is stealth: hidden until revealed.
     expect(ids).toEqual(['audiobookshelf', 'bookfusion', 'hardcover', 'kosync', 'microblog', 'readwise-reader']);
     expect(body.connectors.every((c: { linked: boolean }) => !c.linked)).toBe(true);
+  });
+
+  it('reveals a stealth connector on demand, and always shows it once linked', async () => {
+    const fake = fakeTransport();
+    const { app } = makeTestApp({}, { connectorTransport: fake.transport });
+    const { headers } = await registerUser(app);
+
+    // Hidden by default.
+    let list = await (await app.request('/api/v1/connectors', { headers })).json();
+    expect(list.connectors.some((c: { id: string }) => c.id === 'kindle')).toBe(false);
+
+    // Reveal via the landing-page endpoint (idempotent).
+    const reveal = await app.request('/api/v1/connectors/kindle/reveal', { method: 'POST', headers });
+    expect(reveal.status).toBe(200);
+    expect((await reveal.json()).revealed).toBe(true);
+    list = await (await app.request('/api/v1/connectors', { headers })).json();
+    expect(list.connectors.some((c: { id: string }) => c.id === 'kindle')).toBe(true);
+
+    // Non-revealable connectors reject the endpoint.
+    const nope = await app.request('/api/v1/connectors/hardcover/reveal', { method: 'POST', headers });
+    expect(nope.status).toBe(400);
+
+    // A fresh user who LINKS kindle (e.g. via the extension) sees it without revealing.
+    const { headers: headers2 } = await registerUser(app);
+    fake.on('syncMetaData', 200, '<response/>');
+    const { generateKeyPairSync } = await import('node:crypto');
+    const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const good = await app.request('/api/v1/connectors/kindle', {
+      method: 'PUT',
+      headers: headers2,
+      body: JSON.stringify({
+        credential: {
+          adp_token: 'x',
+          private_key: Buffer.from(privateKey.export({ format: 'der', type: 'pkcs8' })).toString('base64'),
+          device_serial: 'd'.repeat(40),
+        },
+      }),
+    });
+    expect(good.status).toBe(200);
+    list = await (await app.request('/api/v1/connectors', { headers: headers2 })).json();
+    const kindle = list.connectors.find((c: { id: string }) => c.id === 'kindle');
+    expect(kindle?.linked).toBe(true);
   });
 
   it('rejects linking when TOKEN_ENC_KEY is unset', async () => {
@@ -241,6 +283,51 @@ describe('fan-out on progress sync', () => {
     expect(claimReady(db, 10)).toHaveLength(0);
     // A mutation call was made.
     expect(fake.calls.some((c) => c.body?.includes('insert_user_book'))).toBe(true);
+  });
+
+  it('surfaces a per-book push note in the review list and clears it when the push succeeds', async () => {
+    const fake = fakeTransport();
+    fake.on('graphql', 200, { data: { me: [{ username: 'julia' }] } });
+    const { app, db } = makeTestApp({}, { connectorTransport: fake.transport });
+    const { headers } = await registerUser(app);
+    await app.request('/api/v1/connectors/hardcover', {
+      method: 'PUT', headers, body: JSON.stringify({ credential: { token: 'hc' } }),
+    });
+    await app.request('/api/v1/documents', {
+      method: 'PUT', headers,
+      body: JSON.stringify({ items: [{ document: DOC, title: 'Obscure Book', author: 'Nobody' }] }),
+    });
+    await app.request('/syncs/progress', {
+      method: 'PUT', headers,
+      body: JSON.stringify({ document: DOC, progress: 'p', percentage: 0.3, device_id: 'd1' }),
+    });
+    // The matched book has no edition with a page count anywhere.
+    fake.on('Search', 200, {
+      data: { search: { results: [{ document: { id: 42, title: 'Obscure Book', author_names: ['Nobody'] } }] } },
+    });
+    fake.on('Ctx', 200, { data: { me: [{ user_books: [] }], books_by_pk: {}, editions: [] } });
+    fake.on('SetStatus', 200, { data: { insert_user_book: { user_book: { id: 10 } } } });
+    await drainQueue(db, fake.transport, 10);
+
+    const review = await (await app.request('/api/v1/connectors/hardcover/review', { headers })).json();
+    expect(review.books[0].push_note).toMatch(/page count/);
+
+    // Someone adds a page count on Hardcover; the next push succeeds and clears the note.
+    fake.on('Ctx', 200, {
+      data: {
+        me: [{ user_books: [{ id: 10, status_id: 2, edition: null, user_book_reads: [{ id: 77, started_at: '2026-08-01', finished_at: null, edition: null }] }] }],
+        books_by_pk: {},
+        editions: [{ id: 900, pages: 500 }],
+      },
+    });
+    fake.on('UpdRead', 200, { data: { update_user_book_read: { error: null, user_book_read: { id: 77 } } } });
+    await app.request('/syncs/progress', {
+      method: 'PUT', headers,
+      body: JSON.stringify({ document: DOC, progress: 'p2', percentage: 0.5, device_id: 'd1' }),
+    });
+    await drainQueue(db, fake.transport, 10);
+    const after = await (await app.request('/api/v1/connectors/hardcover/review', { headers })).json();
+    expect(after.books[0].push_note).toBeNull();
   });
 
   it('does not fan out when no connector is linked', async () => {

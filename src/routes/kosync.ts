@@ -11,6 +11,7 @@ import {
 } from '../auth/middleware.js';
 import { hashKey, looksLikeMd5, md5Hex } from '../auth/password.js';
 import { parsePosition } from '../models/position.js';
+import { resolveDocument } from '../models/merge.js';
 import { nowSeconds } from '../models/sync.js';
 import { fanOutProgress } from '../connectors/fanout.js';
 import { seedSidecarMatches } from '../connectors/store.js';
@@ -293,6 +294,10 @@ export function kosyncRoutes(db: DB, config: Config, refreshProgress: ProgressRe
     if (!parsed.ok) {
       return kosyncError(c, 403, parsed.code, parsed.message);
     }
+    // A merged document stores under its canonical hash; echo the client's own
+    // hash back so the device recognizes the response.
+    const clientDocument = parsed.record.document;
+    parsed.record.document = resolveDocument(db, user.id, clientDocument);
     upsertProgress(db, parsed.record);
     // Harvest this real device position as a (percentage -> position) sample so
     // fan-in can later replay a real position for a percentage-only update.
@@ -306,7 +311,7 @@ export function kosyncRoutes(db: DB, config: Config, refreshProgress: ProgressRe
       parsed.record.updatedAt
     );
     fanOutProgress(db, user.id, parsed.record.document, parsed.record.percentage, parsed.record.updatedAt, parsed.record.progress, parsed.record.position);
-    return c.json({ document: parsed.record.document, timestamp: parsed.record.updatedAt });
+    return c.json({ document: clientDocument, timestamp: parsed.record.updatedAt });
   });
 
   app.get('/syncs/progress/:document', auth, async (c) => {
@@ -315,8 +320,9 @@ export function kosyncRoutes(db: DB, config: Config, refreshProgress: ProgressRe
       return kosyncError(c, 403, 2004, "Field 'document' not provided.");
     }
     const user = c.get('user');
+    const canonical = resolveDocument(db, user.id, document);
     try {
-      await refreshProgress(user.id, document);
+      await refreshProgress(user.id, canonical);
     } catch (error) {
       const status = error instanceof Error && error.name === 'TimeoutError' ? 504 : 502;
       return c.json({ code: 2003, message: 'BookFusion progress refresh failed' }, status);
@@ -327,7 +333,7 @@ export function kosyncRoutes(db: DB, config: Config, refreshProgress: ProgressRe
          FROM progress WHERE user_id = ? AND document = ?
          ORDER BY updated_at DESC, device_id LIMIT 1`
       )
-      .get(user.id, document) as
+      .get(user.id, canonical) as
       | {
           document: string;
           progress: string;
@@ -342,7 +348,7 @@ export function kosyncRoutes(db: DB, config: Config, refreshProgress: ProgressRe
       return c.json({});
     }
     return c.json({
-      document: row.document,
+      document, // the hash the client asked about, not the canonical one
       progress: row.progress,
       percentage: row.percentage,
       device: row.device,

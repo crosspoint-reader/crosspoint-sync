@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root { color-scheme: dark; }
+  body { width: 340px; margin: 0; font: 13px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif;
+         background: #1c1917; color: #e7e5e4; }
+  main { padding: 14px 16px 16px; }
+  h1 { font-size: 14px; margin: 0 0 2px; }
+  .sub { color: #a8a29e; margin: 0 0 12px; font-size: 12px; }
+  label { display: block; margin: 8px 0 2px; color: #a8a29e; font-size: 12px; }
+  input, select { width: 100%; box-sizing: border-box; padding: 7px 8px; border-radius: 6px;
+                  border: 1px solid #44403c; background: #292524; color: #e7e5e4; font: inherit; }
+  input:focus, select:focus { outline: 1px solid #78716c; }
+  button { margin-top: 12px; width: 100%; padding: 8px; border-radius: 6px; border: 0;
+           background: #d6d3d1; color: #1c1917; font: inherit; font-weight: 600; cursor: pointer; }
+  button.secondary { background: transparent; border: 1px solid #57534e; color: #d6d3d1; font-weight: 400; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .error { margin-top: 10px; padding: 8px; border-radius: 6px; background: #451a1a; color: #fca5a5;
+           font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+  .note { margin-top: 10px; color: #a8a29e; font-size: 12px; }
+  .note b { color: #e7e5e4; }
+  .row { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; font-size: 12px; }
+  .row .k { color: #a8a29e; }
+  .ok { color: #86efac; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>CrossPoint Kindle Link</h1>
+  <p class="sub">Kindle reading progress → your crosspoint-sync server.</p>
+
+  <section id="connectSec">
+    <label>Sync server</label>
+    <input id="server" type="url" placeholder="https://sync.example.com" autocomplete="off">
+    <label>Sync username</label>
+    <input id="username" type="text" autocomplete="username">
+    <label>Sync password</label>
+    <input id="password" type="password" autocomplete="current-password">
+    <button id="connectBtn">Connect</button>
+    <p class="note">Password is md5-hashed here (kosync protocol) — the server never sees it.</p>
+  </section>
+
+  <section id="registerSec" hidden>
+    <div id="regForm">
+      <label>Amazon email</label>
+      <input id="email" type="email" autocomplete="off">
+      <label>Amazon password</label>
+      <input id="amazonPassword" type="password">
+      <button id="registerBtn">Register Kindle device</button>
+      <p class="note">Used once to register a new device with Amazon (it appears in your account as
+        something like &ldquo;Android Phone&rdquo;). Never stored, never leaves this browser.
+        Amazon will email you a code.</p>
+    </div>
+    <div id="otpForm" hidden>
+      <label>Code from Amazon's email</label>
+      <input id="otp" type="text" inputmode="numeric" autocomplete="one-time-code">
+      <button id="otpBtn">Complete registration</button>
+      <p class="note">The code is valid for 10 minutes. No email? Amazon sends one only when the
+        password was right; close and reopen this popup to try again.</p>
+    </div>
+  </section>
+
+  <section id="statusSec" hidden>
+    <div class="row"><span class="k">Device</span><span id="stDevice" class="ok"></span></div>
+    <div class="row"><span class="k">Server</span><span id="stServer"></span></div>
+    <div class="row"><span class="k">Uploaded</span><span id="stUpload"></span></div>
+    <button id="uploadBtn">Re-upload to server</button>
+    <button id="unlinkBtn" class="secondary">Remove Kindle link</button>
+    <p class="note">Reading on your Kindle now flows into crosspoint-sync. Purchased books match by
+      title automatically; for Send-to-Kindle docs, paste the ASIN on the server's match page.</p>
+  </section>
+
+  <div id="pending" class="note" hidden></div>
+  <div id="err" class="error" hidden></div>
+</main>
+<script type="module" src="popup.js"></script>
+</body>
+</html>

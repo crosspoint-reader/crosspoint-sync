@@ -3,6 +3,7 @@ import { withTransaction, type DB } from '../../db/db.js';
 import { kosyncError, type AppEnv } from '../../auth/middleware.js';
 import { isValidDocument } from '../kosync.js';
 import { nowSeconds } from '../../models/sync.js';
+import { mergeDocuments, resolveDocument, unmergeDocument } from '../../models/merge.js';
 
 const MAX_BATCH = 50;
 
@@ -62,6 +63,44 @@ export function documentRoutes(db: DB): Hono<AppEnv> {
       }
     });
     return c.json({ until: now, accepted: rows.length });
+  });
+
+  // Merge two synced listings that are really the same book (devices can hash
+  // the same file differently). `document` becomes an alias of `into`: existing
+  // data migrates onto `into`, and future pushes under `document` land there.
+  app.post('/documents/merge', async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return kosyncError(c, 403, 2003, 'Invalid request');
+    }
+    const o = (body ?? {}) as Record<string, unknown>;
+    if (!isValidDocument(o.document) || !isValidDocument(o.into)) {
+      return kosyncError(c, 403, 2003, 'Invalid request');
+    }
+    const user = c.get('user');
+    const from = resolveDocument(db, user.id, o.document);
+    const into = resolveDocument(db, user.id, o.into);
+    if (from === into) {
+      return kosyncError(c, 403, 2003, 'Documents are already merged');
+    }
+    mergeDocuments(db, user.id, from, into, nowSeconds());
+    return c.json({ document: into, merged: from });
+  });
+
+  // Undo a merge: the alias hash starts syncing separately again. Rows already
+  // migrated stay on the canonical document.
+  app.delete('/documents/merge/:alias', (c) => {
+    const alias = c.req.param('alias');
+    if (!isValidDocument(alias)) {
+      return kosyncError(c, 403, 2003, 'Invalid request');
+    }
+    const user = c.get('user');
+    if (!unmergeDocument(db, user.id, alias)) {
+      return c.json({ code: 2003, message: 'Unknown alias' }, 404);
+    }
+    return c.json({ alias, unmerged: true });
   });
 
   app.get('/documents', (c) => {

@@ -47,6 +47,11 @@ export async function pollConnector(
     const updatedAt = exact ? Math.floor(ch.updatedAtMs / 1000) : nowSeconds();
     if (exact && current && updatedAt <= current.updated_at) return 0;
     const pct = exact ? ch.percentage : ch.finished || ch.percentage >= 0.999 ? 1 : ch.percentage;
+    // Furthest-read-only sources (Kindle FRL): apply only when ADVANCING the
+    // canonical position. A lower-or-equal value is always stale — FRL can't be
+    // behind when the user has read further anywhere — so this also covers
+    // undated annotations, which can't be ordered by timestamp at all.
+    if (ch.furthestReadOnly && current && pct <= current.percentage) return 0;
     const samePosition = current && Math.abs(current.percentage - pct) < (exact ? 0.000001 : ECHO_EPSILON) &&
       (!exact || current.progress.replace(/\[1\]/g, '') === ch.progress!.replace(/\[1\]/g, ''));
     if (samePosition && !exact) return 0;
@@ -73,7 +78,8 @@ export async function pollConnector(
       try {
         const current = latestProgress(db, userId, match.document);
         const change = await conn.pullProgress(credential, {
-          externalId: match.external_id, confidence: match.confidence, fromSidecar: match.source === 'sidecar',
+          externalId: match.external_id, externalEdition: match.external_edition,
+          confidence: match.confidence, fromSidecar: match.source === 'sidecar',
         }, http, (current?.updated_at ?? 0) * 1000);
         options.signal?.throwIfAborted();
         // The account, match, or canonical progress can change while the request is in flight.

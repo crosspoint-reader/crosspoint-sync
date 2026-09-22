@@ -580,6 +580,7 @@ describe('hardcover progress push', () => {
       fake.transport
     );
     expect(r.ok).toBe(true);
+    expect(r.ok && r.note).toMatch(/page count/);
     expect(
       fake.calls.some((c) => c.body?.includes('InsRead') || c.body?.includes('UpdRead'))
     ).toBe(false);

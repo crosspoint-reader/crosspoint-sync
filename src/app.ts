@@ -13,6 +13,7 @@ import { clippingRoutes } from './routes/v1/clippings.js';
 import { statsRoutes } from './routes/v1/stats.js';
 import { documentRoutes } from './routes/v1/documents.js';
 import { connectorRoutes } from './routes/v1/connectors.js';
+import { kindleRegisterRoutes } from './routes/v1/kindle-register.js';
 import { createProgressRefresh } from './connectors/refresh.js';
 import type { HttpTransport } from './connectors/types.js';
 
@@ -66,6 +67,10 @@ export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<A
   v1.route('/', statsRoutes(db));
   v1.route('/', documentRoutes(db));
   v1.route('/', connectorRoutes(db, opts.connectorTransport, config.trustProxy));
+  // Self-host-only Amazon device registration (off unless explicitly enabled).
+  if (config.kindleServerRegistration) {
+    v1.route('/', kindleRegisterRoutes(db, opts.connectorTransport, config.trustProxy));
+  }
   app.route('/api/v1', v1);
 
   return app;
