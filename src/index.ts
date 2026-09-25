@@ -9,6 +9,7 @@ import { autoPause } from './models/pause.js';
 
 const DATABASE_PATH = process.env.DATABASE_PATH ?? '/data/crosspoint.db';
 const PORT = Number(process.env.PORT ?? 8080);
+const ADDRESS = process.env.LISTEN_ADDRESS ?? 'localhost';
 
 const db = openDatabase(DATABASE_PATH);
 migrate(db);
@@ -28,11 +29,12 @@ if (connectorsEnabled) {
 // Daily: pause books with no progress for 30 days (reads also check lazily).
 startFanInWorker(db, 24 * 60 * 60_000, async (d) => autoPause(d));
 
-serve({ fetch: app.fetch, port: PORT }, (info) => {
+serve({ fetch: app.fetch, port: PORT, hostname: ADDRESS }, (info) => {
   console.log(
     JSON.stringify({
       msg: 'crosspoint-sync listening',
       port: info.port,
+      address: info.address,
       db: DATABASE_PATH,
       connectors: connectorsEnabled ? 'enabled' : 'disabled (no TOKEN_ENC_KEY)',
     })
