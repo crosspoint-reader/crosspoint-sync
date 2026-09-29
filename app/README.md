@@ -1,7 +1,14 @@
 # CrossPoint Sync app
 
 Companion app for a crosspoint-sync server: reading stats, currently reading, clippings per book,
-and marking books reading / paused / finished / did not finish. Styled with the crosspoint-tools
+and marking books reading / paused / finished / did not finish. It also browses OPDS catalogs
+(Project Gutenberg built in; add Calibre, Kavita, Mayberry, or any OPDS 1.2/2.0 feed with no login,
+a password, or a token), downloads books, and sends them to a CrossPoint over Wi-Fi via its File
+Transfer server (`crosspoint.local`), optionally re-encoding EPUB images as JPEG first.
+
+The OPDS client (`src-tauri/src/opds`) and EPUB optimizer (`src-tauri/src/optimizer.rs`) are ported
+from common-stacks. Downloads live in `~/Books/CrossPoint Sync` on desktop and in app storage on
+phones. `cargo test -- --ignored` runs a live Gutenberg search-to-download check. Styled with the crosspoint-tools
 design tokens (`src/index.css`).
 
 Tauri 2 shell around a React + Tailwind UI, so one codebase builds for macOS, Windows, Linux,

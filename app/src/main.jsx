@@ -11,6 +11,14 @@ import '@fontsource/geist-mono/400.css'
 import '@fontsource/geist-mono/500.css'
 import './index.css'
 
+// Keep the field being typed into visible once the on-screen keyboard has opened
+// (Android resizes the window via adjustResize; this centres the field in what's left).
+document.addEventListener('focusin', (e) => {
+  if (e.target.matches('input:not([type=range]), textarea, select')) {
+    setTimeout(() => e.target.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300)
+  }
+})
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <App />

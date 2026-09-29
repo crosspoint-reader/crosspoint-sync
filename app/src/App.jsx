@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChartColumn, CircleUser, Eye, EyeOff, LibraryBig, Loader2, Lock, LogOut, Send as SendIcon, Server, User } from 'lucide-react'
+import { ChartColumn, Compass, Eye, EyeOff, LibraryBig, Loader2, Lock, LogOut, Send as SendIcon, Server, Settings, User } from 'lucide-react'
 import { DEFAULT_SERVER, api, lastServer, loadSession, login, logout } from './api.js'
 import { ErrorNote, Spinner, useLoad } from './ui.jsx'
 import Library from './Library.jsx'
 import Book from './Book.jsx'
 import Stats from './Stats.jsx'
 import Send from './Send.jsx'
+import Browse from './Browse.jsx'
 
 // A filled, full-width field with a leading icon: the native mobile idiom.
 function Field({ icon: Icon, trailing, inputRef, ...props }) {
@@ -180,7 +181,8 @@ function useHash() {
 }
 
 const NAV = [
-  { href: '#/', label: 'Library', icon: LibraryBig, active: (r) => r !== 'stats' && r !== 'send' },
+  { href: '#/', label: 'Library', icon: LibraryBig, active: (r) => !['stats', 'send', 'browse'].includes(r) },
+  { href: '#/browse', label: 'Browse', icon: Compass, active: (r) => r === 'browse' },
   { href: '#/stats', label: 'Stats', icon: ChartColumn, active: (r) => r === 'stats' },
   { href: '#/send', label: 'Send', icon: SendIcon, active: (r) => r === 'send' },
 ]
@@ -211,10 +213,10 @@ function AccountMenu({ session, onLogout }) {
       <button
         onClick={() => setOpen(!open)}
         className="grid size-11 place-items-center rounded-full text-stone-600 active:bg-stone-200/70"
-        aria-label="Account"
+        aria-label="Settings"
         aria-expanded={open}
       >
-        <CircleUser className="size-6" strokeWidth={1.75} />
+        <Settings className="size-6" strokeWidth={1.75} />
       </button>
       {open && (
         <>
@@ -224,6 +226,14 @@ function AccountMenu({ session, onLogout }) {
               <p className="truncate text-sm font-semibold text-stone-900">{session.username}</p>
               <p className="truncate font-mono text-xs text-stone-500">{new URL(session.server).host}</p>
             </div>
+            <a
+              href="#/browse/manage"
+              onClick={() => setOpen(false)}
+              className="flex w-full items-center gap-3 border-t border-stone-100 px-4 py-3 text-sm font-medium text-stone-700 active:bg-stone-50"
+            >
+              <Server className="size-4" strokeWidth={1.75} />
+              Catalogs
+            </a>
             <button
               onClick={onLogout}
               className="flex w-full items-center gap-3 border-t border-stone-100 px-4 py-3 text-sm font-medium text-red-600 active:bg-stone-50"
@@ -263,9 +273,13 @@ function Sidebar({ route, session, onLogout }) {
       <div className="mt-auto border-t border-stone-200 px-2 pt-4">
         <p className="truncate text-sm font-medium text-stone-900">{session.username}</p>
         <p className="truncate font-mono text-xs text-stone-500">{new URL(session.server).host}</p>
+        <a href="#/browse/manage" className="mt-3 flex items-center gap-2 text-sm font-medium text-stone-500 hover:text-stone-900">
+          <Server className="size-4" strokeWidth={1.75} />
+          Catalogs
+        </a>
         <button
           onClick={onLogout}
-          className="mt-3 flex items-center gap-2 text-sm font-medium text-stone-500 hover:text-stone-900"
+          className="mt-2 flex items-center gap-2 text-sm font-medium text-stone-500 hover:text-stone-900"
         >
           <LogOut className="size-4" strokeWidth={1.75} />
           Sign out
@@ -276,7 +290,8 @@ function Sidebar({ route, session, onLogout }) {
 }
 
 function Home({ session, onLogout }) {
-  const [route, id] = useHash()
+  const parts = useHash()
+  const [route, id] = parts
   const [books, error, reloadBooks] = useLoad(() => api.books(session), [session])
   const [summary, , reloadSummary] = useLoad(() => api.summary(session), [session])
   const [activity, , reloadActivity] = useLoad(() => api.activity(session), [session])
@@ -298,6 +313,7 @@ function Home({ session, onLogout }) {
 
   let page
   if (route === 'send') page = <Send />
+  else if (route === 'browse') page = <Browse parts={parts} />
   else if (error) page = <ErrorNote error={error} />
   else if (!books) page = <Spinner />
   else if (route === 'stats') page = <Stats summary={summary} activity={activity} books={books} />
@@ -318,7 +334,7 @@ function Home({ session, onLogout }) {
     <div className="min-h-dvh md:flex">
       <Sidebar route={route} session={session} onLogout={onLogout} />
       <main className="relative mx-auto w-full max-w-xl pb-24 md:max-w-6xl md:pb-10">
-        <AccountMenu key={route} session={session} onLogout={onLogout} />
+        <AccountMenu key={parts.join('/')} session={session} onLogout={onLogout} />
         {page}
       </main>
       <TabBar route={route} />

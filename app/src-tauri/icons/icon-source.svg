@@ -1,0 +1,17 @@
+<!-- Master app icon: full-bleed so platform masks (Android adaptive, iOS) crop
+     cleanly; the mark sits inside Android's 66% safe zone. Colors sampled from
+     crosspoint-tools/public/brand/crosspoint-icon.png. Regenerate icons with:
+     rsvg-convert -w 1024 icon-source.svg > /tmp/icon.png && cargo tauri icon /tmp/icon.png -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <radialGradient id="g" cx="50%" cy="50%" r="70%">
+      <stop offset="0" stop-color="#79a48d"/>
+      <stop offset="1" stop-color="#628b75"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#g)"/>
+  <g transform="translate(322.4 276.8) scale(1.2) translate(-98 -59)">
+    <path fill="#fff" d="M123 104L242 175L242 319L123 248ZM281 342.5L388 278L388 408Z"/>
+    <path fill="#000" fill-rule="evenodd" d="M98 104.97A26 26 0 0 1 137.4 82.69L256 154L374.6 82.69A26 26 0 0 1 414 104.97L414 405.03A26 26 0 0 1 374.6 427.31L256 356L137.4 427.31A26 26 0 0 1 98 405.03ZM123 104L242 175L242 319L123 248ZM281 342.5L388 278L388 408Z"/>
+  </g>
+</svg>
