@@ -104,12 +104,18 @@ export default function Book({ session, book, activity, onChange }) {
   if (!book) return <p className="py-16 text-center text-sm text-stone-500">Book not found.</p>
   return (
     <div className="px-4 pt-4 pb-6 md:px-8 md:pt-8 lg:px-12">
-      <a href="#/" className="inline-flex items-center gap-1.5 py-2 text-sm font-medium text-brand-600 hover:text-brand-700">
-        <ArrowLeft className="size-4" /> Library
-      </a>
+      {/* Top bar: same 44px row as the account avatar (top-4, size-11) so they line up. */}
+      <div className="flex h-11 items-center pr-12 md:pr-0">
+        <a
+          href="#/"
+          className="-ml-2 flex h-11 items-center gap-1.5 rounded-full pr-4 pl-2 text-lg font-semibold text-brand-600 transition active:bg-stone-200/70 md:hover:bg-stone-100"
+        >
+          <ArrowLeft className="size-6" strokeWidth={2} /> Library
+        </a>
+      </div>
       <div className="md:mt-4 md:grid md:grid-cols-[15rem_1fr] md:items-start md:gap-10 lg:grid-cols-[18rem_1fr] lg:gap-14">
         <aside className="md:sticky md:top-8">
-          <div className="relative mt-2 flex gap-4 md:mt-0 md:flex-col md:gap-5">
+          <div className="relative mt-3 flex gap-4 md:mt-0 md:flex-col md:gap-5">
             <Cover session={session} book={book} className="w-28 md:w-full" />
             <div className="min-w-0 flex-1 pt-1 md:pt-0">
               <h1 className="font-display text-2xl/tight font-semibold tracking-tight text-balance text-stone-900">
