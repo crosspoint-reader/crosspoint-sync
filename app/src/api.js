@@ -3,7 +3,8 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 
 // In the app, requests go through Rust (plain-http LAN servers, any CORS_ORIGINS);
 // in a plain browser, the webview fetch.
-const http = '__TAURI_INTERNALS__' in window ? tauriFetch : fetch
+export const isApp = '__TAURI_INTERNALS__' in window
+export const http = isApp ? tauriFetch : fetch
 
 // kosync auth: x-auth-user + MD5(password), same credential the reader uses.
 // ponytail: stored in localStorage; move to the OS keychain (tauri-plugin-stronghold) if that matters.

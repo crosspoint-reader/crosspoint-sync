@@ -113,9 +113,6 @@ export default function Library({ session, books, summary, activity }) {
         )}
       </div>
 
-      <p className="mt-8 text-center font-mono text-[0.65rem] text-stone-400 md:hidden">
-        {session.username} @ {new URL(session.server).host}
-      </p>
     </div>
   )
 }

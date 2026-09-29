@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChartColumn, Eye, EyeOff, LibraryBig, Loader2, Lock, LogOut, Server, User } from 'lucide-react'
+import { ChartColumn, CircleUser, Eye, EyeOff, LibraryBig, Loader2, Lock, LogOut, Send as SendIcon, Server, User } from 'lucide-react'
 import { DEFAULT_SERVER, api, lastServer, loadSession, login, logout } from './api.js'
 import { ErrorNote, Spinner, useLoad } from './ui.jsx'
 import Library from './Library.jsx'
 import Book from './Book.jsx'
 import Stats from './Stats.jsx'
+import Send from './Send.jsx'
 
 // A filled, full-width field with a leading icon: the native mobile idiom.
 function Field({ icon: Icon, trailing, inputRef, ...props }) {
@@ -179,12 +180,13 @@ function useHash() {
 }
 
 const NAV = [
-  { href: '#/', label: 'Library', icon: LibraryBig, active: (r) => r !== 'stats' },
+  { href: '#/', label: 'Library', icon: LibraryBig, active: (r) => r !== 'stats' && r !== 'send' },
   { href: '#/stats', label: 'Stats', icon: ChartColumn, active: (r) => r === 'stats' },
+  { href: '#/send', label: 'Send', icon: SendIcon, active: (r) => r === 'send' },
 ]
 
 // Phone: bottom tab bar.
-function TabBar({ route, onLogout }) {
+function TabBar({ route }) {
   const cls = (active) =>
     `flex flex-1 flex-col items-center gap-0.5 pt-2 pb-1.5 text-[0.7rem] font-semibold ${active ? 'text-brand-600' : 'text-stone-500'}`
   return (
@@ -196,12 +198,43 @@ function TabBar({ route, onLogout }) {
             {n.label}
           </a>
         ))}
-        <button onClick={onLogout} className={cls(false)}>
-          <LogOut className="size-6" strokeWidth={1.75} />
-          Sign out
-        </button>
       </div>
     </nav>
+  )
+}
+
+// Phone: account icon top right; tapping opens a small menu so sign out is one deliberate step away.
+function AccountMenu({ session, onLogout }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="absolute top-4 right-3 z-20 md:hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="grid size-11 place-items-center rounded-full text-stone-600 active:bg-stone-200/70"
+        aria-label="Account"
+        aria-expanded={open}
+      >
+        <CircleUser className="size-6" strokeWidth={1.75} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 mt-1 w-64 overflow-hidden rounded-2xl bg-white shadow-lg ring-1 ring-stone-950/10">
+            <div className="px-4 py-3">
+              <p className="truncate text-sm font-semibold text-stone-900">{session.username}</p>
+              <p className="truncate font-mono text-xs text-stone-500">{new URL(session.server).host}</p>
+            </div>
+            <button
+              onClick={onLogout}
+              className="flex w-full items-center gap-3 border-t border-stone-100 px-4 py-3 text-sm font-medium text-red-600 active:bg-stone-50"
+            >
+              <LogOut className="size-4" strokeWidth={1.75} />
+              Sign out
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 
@@ -264,7 +297,8 @@ function Home({ session, onLogout }) {
   })
 
   let page
-  if (error) page = <ErrorNote error={error} />
+  if (route === 'send') page = <Send />
+  else if (error) page = <ErrorNote error={error} />
   else if (!books) page = <Spinner />
   else if (route === 'stats') page = <Stats summary={summary} activity={activity} books={books} />
   else if (route === 'book') page = (
@@ -283,8 +317,11 @@ function Home({ session, onLogout }) {
   return (
     <div className="min-h-dvh md:flex">
       <Sidebar route={route} session={session} onLogout={onLogout} />
-      <main className="mx-auto w-full max-w-xl pb-24 md:max-w-6xl md:pb-10">{page}</main>
-      <TabBar route={route} onLogout={onLogout} />
+      <main className="relative mx-auto w-full max-w-xl pb-24 md:max-w-6xl md:pb-10">
+        <AccountMenu key={route} session={session} onLogout={onLogout} />
+        {page}
+      </main>
+      <TabBar route={route} />
     </div>
   )
 }
