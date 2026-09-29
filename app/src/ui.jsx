@@ -6,7 +6,7 @@ export const STATUS = [
   { id: 'reading', label: 'Reading', icon: BookOpen },
   { id: 'paused', label: 'Paused', icon: Pause },
   { id: 'finished', label: 'Finished', icon: CircleCheck },
-  { id: 'dnf', label: 'Did not finish', icon: CircleX },
+  { id: 'dnf', label: 'Did Not Finish', icon: CircleX },
 ]
 
 // Handwritten margin-note eyebrow, same as crosspoint-tools ui.jsx.

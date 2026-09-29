@@ -170,9 +170,9 @@ function PagesAndBooks({ activity: all, books }) {
 export default function Stats({ summary, activity, books }) {
   const hasTime = summary?.devices?.length > 0
   return (
-    <div className="px-4 pt-6 pb-4 md:px-8 md:pt-10 lg:px-12">
-      <Eyebrow>Reading stats</Eyebrow>
-      <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:text-4xl">How you read</h1>
+    <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
+      <Eyebrow className="md:hidden">Reading stats</Eyebrow>
+      <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">How you read</h1>
 
       <h2 className="mt-8 font-display text-xl font-semibold text-stone-900">Pages &amp; books</h2>
       {activity ? <PagesAndBooks activity={activity} books={books} /> : <p className="py-6 text-sm text-stone-500">Loading…</p>}

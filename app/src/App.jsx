@@ -252,7 +252,8 @@ function AccountMenu({ session, onLogout }) {
 function Sidebar({ route, session, onLogout }) {
   return (
     <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r border-stone-200 bg-white/60 px-4 py-6 md:flex lg:w-64">
-      <div className="flex items-center gap-2.5 px-2">
+      {/* 44px band at the top, matching each page's first row (back button / title). */}
+      <div className="flex h-11 items-center gap-2.5 px-2">
         <img src="/logo.png" alt="" className="size-8 rounded-lg" />
         <span className="font-display text-lg font-semibold text-stone-900">CrossPoint Sync</span>
       </div>

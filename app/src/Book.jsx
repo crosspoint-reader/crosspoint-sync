@@ -24,7 +24,7 @@ function StatusPicker({ session, book, onChange }) {
           key={s.id}
           disabled={busy !== null}
           onClick={() => pick(s.id)}
-          className={`flex items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-semibold transition disabled:opacity-60 ${
+          className={`flex items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-semibold whitespace-nowrap transition disabled:opacity-60 ${
             book.status === s.id
               ? 'bg-brand-500 text-white shadow-sm'
               : 'bg-white text-stone-700 shadow-sm ring-1 ring-stone-950/10 active:bg-stone-50'
@@ -103,7 +103,7 @@ function Clippings({ session, doc }) {
 export default function Book({ session, book, activity, onChange }) {
   if (!book) return <p className="py-16 text-center text-sm text-stone-500">Book not found.</p>
   return (
-    <div className="px-4 pt-4 pb-6 md:px-8 md:pt-8 lg:px-12">
+    <div className="px-4 pt-4 pb-6 md:px-8 md:pt-6 lg:px-12">
       {/* Top bar: same 44px row as the account avatar (top-4, size-11) so they line up. */}
       <div className="flex h-11 items-center pr-12 md:pr-0">
         <a
@@ -113,10 +113,10 @@ export default function Book({ session, book, activity, onChange }) {
           <ArrowLeft className="size-6" strokeWidth={2} /> Library
         </a>
       </div>
-      <div className="md:mt-4 md:grid md:grid-cols-[15rem_1fr] md:items-start md:gap-10 lg:grid-cols-[18rem_1fr] lg:gap-14">
+      <div className="md:mt-4 md:grid md:grid-cols-[19rem_1fr] md:items-start md:gap-8 lg:grid-cols-[23rem_1fr] lg:gap-10">
         <aside className="md:sticky md:top-8">
           <div className="relative mt-3 flex gap-4 md:mt-0 md:flex-col md:gap-5">
-            <Cover session={session} book={book} className="w-28 md:w-full" />
+            <Cover session={session} book={book} className="w-28 md:mx-auto md:w-full md:max-w-60" />
             <div className="min-w-0 flex-1 pt-1 md:pt-0">
               <h1 className="font-display text-2xl/tight font-semibold tracking-tight text-balance text-stone-900">
                 {book.title || book.filename || 'Untitled book'}

@@ -209,7 +209,7 @@ function BookPage({ cat, entryKey }) {
 
   if (!entry) {
     return (
-      <div className="px-4 pt-4 md:px-8 md:pt-8 lg:px-12">
+      <div className="px-4 pt-4 md:px-8 md:pt-6 lg:px-12">
         <TopBar back={href(cat)} label={cat.name} />
         <p className="py-16 text-center text-sm text-stone-500">Open this book again from the catalog.</p>
       </div>
@@ -235,14 +235,14 @@ function BookPage({ cat, entryKey }) {
   const facts = [entry.published?.slice(0, 4), entry.language?.toUpperCase(), cat.name].filter(Boolean)
 
   return (
-    <div className="px-4 pt-4 pb-8 md:px-8 md:pt-8 lg:px-12">
+    <div className="px-4 pt-4 pb-8 md:px-8 md:pt-6 lg:px-12">
       <TopBar back="history" label="Back" />
       <div className="mt-3 md:grid md:grid-cols-[15rem_1fr] md:items-start md:gap-10 lg:grid-cols-[18rem_1fr] lg:gap-14">
         <aside className="md:sticky md:top-8">
           <Cover entry={entry} large className="mx-auto w-44 shadow-lg md:w-full" />
         </aside>
 
-        <div className="mt-6 md:mt-0 md:max-w-2xl">
+        <div className="@container mt-6 md:mt-0 md:max-w-2xl">
           <h1 className="text-center font-display text-3xl/tight font-semibold tracking-tight text-balance text-stone-900 md:text-left md:text-4xl/tight">{entry.title}</h1>
           <p className="mt-2 text-center text-base text-stone-600 md:text-left">{entry.authors.map(person).join(', ')}</p>
           {entry.series && <p className="mt-1 text-center text-sm text-stone-500 md:text-left">{entry.series}</p>}
@@ -269,18 +269,19 @@ function BookPage({ cat, entryKey }) {
                   ))}
                 </div>
               )}
-              <div className="grid gap-2 sm:grid-cols-2">
+              {/* Side by side only when this column (not the screen) has room for both labels. */}
+              <div className="grid gap-2 @lg:grid-cols-2">
                 <button
                   disabled={job?.state === 'working'}
                   onClick={() => run(true)}
-                  className="flex h-14 items-center justify-center gap-2 rounded-2xl bg-brand-500 text-base font-semibold text-white shadow-sm active:scale-[0.98] disabled:opacity-60"
+                  className="flex h-14 min-w-0 items-center justify-center gap-2 rounded-2xl bg-brand-500 px-4 text-base font-semibold whitespace-nowrap text-white shadow-sm active:scale-[0.98] disabled:opacity-60"
                 >
                   {job?.state === 'working' ? <Loader2 className="size-5 animate-spin" /> : <SendIcon className="size-5" />} Send to CrossPoint
                 </button>
                 <button
                   disabled={job?.state === 'working'}
                   onClick={() => run(false)}
-                  className="flex h-14 items-center justify-center gap-2 rounded-2xl bg-white text-base font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100 disabled:opacity-60"
+                  className="flex h-14 min-w-0 items-center justify-center gap-2 rounded-2xl bg-white px-4 text-base font-semibold whitespace-nowrap text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100 disabled:opacity-60"
                 >
                   <Download className="size-5" /> Download
                 </button>
@@ -459,9 +460,9 @@ const searchAll = (q) => (location.hash = `#/browse/search/${encodeURIComponent(
 
 function Storefront({ catalogs }) {
   return (
-    <div className="px-4 pt-6 pb-4 md:px-8 md:pt-10 lg:px-12">
-      <Eyebrow>Find something to read</Eyebrow>
-      <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:text-4xl">Browse</h1>
+    <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
+      <Eyebrow className="md:hidden">Find something to read</Eyebrow>
+      <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">Browse</h1>
       <SearchBox placeholder="Search all catalogs" onSubmit={searchAll} />
       {catalogs.length === 0 && (
         <Card className="mt-6 p-4 text-sm/6 text-stone-600">
@@ -492,7 +493,7 @@ function SearchAll({ catalogs, query }) {
     }
   }, [catalogs, query])
   return (
-    <div className="px-4 pt-4 pb-4 md:px-8 md:pt-8 lg:px-12">
+    <div className="px-4 pt-4 pb-4 md:px-8 md:pt-6 lg:px-12">
       <TopBar back="#/browse" label="Browse" />
       <SearchBox value={query} placeholder="Search all catalogs" onSubmit={searchAll} />
       {catalogs.map((c) => {
@@ -546,7 +547,7 @@ function FeedView({ cat, url, query }) {
   const open = openBook(cat)
 
   return (
-    <div className="px-4 pt-4 pb-6 md:px-8 md:pt-8 lg:px-12">
+    <div className="px-4 pt-4 pb-6 md:px-8 md:pt-6 lg:px-12">
       <TopBar back={url || query ? 'history' : '#/browse'} label={url || query ? 'Back' : 'Browse'} />
       <h1 className="mt-2 font-display text-3xl/tight font-semibold tracking-tight text-stone-900">
         {query ? `“${query}”` : (feed?.title ?? cat.name)}
@@ -681,7 +682,7 @@ function Manage({ catalogs, setCatalogs }) {
     setEditing(null)
   }
   return (
-    <div className="px-4 pt-4 pb-4 md:px-8 md:pt-8 lg:px-12">
+    <div className="px-4 pt-4 pb-4 md:px-8 md:pt-6 lg:px-12">
       <TopBar back="history" label="Back" />
       <h1 className="mt-2 font-display text-3xl font-semibold tracking-tight text-stone-900">Catalogs</h1>
       <p className="mt-2 max-w-xl text-sm/6 text-stone-500">OPDS catalogs: public libraries like Project Gutenberg, or your own Calibre, Kavita or Mayberry server.</p>

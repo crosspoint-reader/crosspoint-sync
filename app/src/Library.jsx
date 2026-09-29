@@ -52,11 +52,11 @@ export default function Library({ session, books, summary, activity }) {
   const [hero, ...rest] = tab === 'reading' ? shown : [null, ...shown]
 
   return (
-    <div className="px-4 pt-6 pb-4 md:px-8 md:pt-10 lg:px-12">
-      <div className="md:flex md:items-end md:justify-between md:gap-8">
+    <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
+      <div className="md:flex md:items-start md:justify-between md:gap-8">
       <div>
-      <Eyebrow>{greeting()}</Eyebrow>
-      <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:text-4xl">Your library</h1>
+      <Eyebrow className="md:hidden">{greeting()}</Eyebrow>
+      <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">Your library</h1>
       </div>
 
       {(summary?.devices?.length > 0 || activity) && (

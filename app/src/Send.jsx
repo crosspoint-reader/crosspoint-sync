@@ -297,9 +297,9 @@ export default function Send() {
   const pending = files.filter((f) => f.state !== 'done').length
 
   return (
-    <div className="px-4 pt-6 pb-4 md:px-8 md:pt-10 lg:px-12">
-      <Eyebrow>Send to reader</Eyebrow>
-      <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:text-4xl">Send books</h1>
+    <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
+      <Eyebrow className="md:hidden">Send to reader</Eyebrow>
+      <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">Send books</h1>
       <p className="mt-2 max-w-xl text-sm/6 text-stone-500">
         Copy EPUB, Markdown and text files to your CrossPoint over Wi-Fi, from this device or from catalogs in Browse.
       </p>
