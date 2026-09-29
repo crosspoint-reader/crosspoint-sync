@@ -340,13 +340,25 @@ Item shape:
 - `para` optional — omit when the firmware has `paragraphIndex == UINT16_MAX`.
 - Page/word fields are layout hints, kept verbatim for CrossInk↔CrossInk restore; `para` + `text`
   are the portable anchors.
-- `text` ≤ 2048 bytes (the firmware's export cap), `chapter` ≤ 64 chars, `note` ≤ 4096 bytes.
-- `note` and `color` are server-side extensions for future firmware / web UI; send them back
-  unchanged if unused.
-- No 64-per-book cap server-side (that's a device storage limit).
+- `text` ≤ 4096 UTF-8 bytes, `chapter` ≤ 64 chars, `note` ≤ 4096 bytes.
+- `note` and `color` are preserved when omitted from updates.
+- No per-book cap server-side; the current firmware stores up to 256 active clippings per book.
 
 Endpoints: `GET /api/v1/clippings/{document}?since=&limit=` and
-`PUT /api/v1/clippings/{document}` (batch max 50) — identical semantics to bookmarks.
+`PUT /api/v1/clippings/{document}` (batch max 50).
+
+Clipping clients should use `GET ...?cursor=0&limit=1&format=reader`. Responses
+advertise `sync_version: 2`, include each item's `revision`, and return a monotonic
+`cursor` for the next page. Continue until `more` is false. This avoids losing
+items that share a second-resolution timestamp. `format=reader` omits `note` and
+`color` to bound firmware response memory. Legacy `since` requests remain supported.
+
+`start_offset` and `end_offset` are optional chapter-visible Unicode-codepoint
+positions, `[start, end)`, independent of pagination. Supply both or neither.
+`layout_signature` preserves compatibility with older page-local word ranges.
+A deleted ID cannot be resurrected by a delayed upload; create a new ID to save
+the same quote again. Enable **Sync Clippings** in the firmware's **CrossPoint Sync**
+settings to sync clippings alongside the current book's manual progress sync.
 
 ### Reading stats
 
