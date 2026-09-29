@@ -72,7 +72,8 @@ export async function login(server, username, password) {
 }
 
 export const api = {
-  books: (s) => call(s, '/api/v1/progress?limit=500').then((r) => r.items),
+  // Books a device synced without any metadata can't be shown meaningfully; hide them.
+  books: (s) => call(s, '/api/v1/progress?limit=500').then((r) => r.items.filter((b) => b.title || b.filename)),
   summary: (s) => call(s, '/api/v1/stats/summary'),
   // tz: minutes behind UTC, so the server buckets pages into local days.
   activity: (s) => call(s, `/api/v1/stats/activity?tz=${new Date().getTimezoneOffset()}`),

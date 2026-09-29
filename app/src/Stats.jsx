@@ -136,8 +136,11 @@ function Finished({ list, titles }) {
   )
 }
 
-function PagesAndBooks({ activity, books }) {
+function PagesAndBooks({ activity: all, books }) {
   const titles = new Map(books.map((b) => [b.document, b.title || b.filename]))
+  // Only books the library shows (metadata-less ones are hidden everywhere).
+  const shown = all.books.filter((b) => titles.has(b.document))
+  const activity = { ...all, books: shown, pages_total: shown.reduce((n, b) => n + (b.pages_read ?? 0), 0) }
   const finished = activity.books.filter((b) => b.finished_at).sort((a, b) => b.finished_at - a.finished_at)
   const spans = finished.map((b) => (b.finished_at - b.started_at) / 86400).filter((d) => d >= 1)
   const known = activity.books.filter((b) => b.page_count).length

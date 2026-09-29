@@ -1,33 +1,46 @@
-import { useEffect, useState } from 'react'
-import { ChartColumn, LibraryBig, LogOut } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { ChartColumn, Eye, EyeOff, LibraryBig, Loader2, Lock, LogOut, Server, User } from 'lucide-react'
 import { DEFAULT_SERVER, api, lastServer, loadSession, login, logout } from './api.js'
-import { Card, ErrorNote, Eyebrow, Spinner, useLoad } from './ui.jsx'
+import { ErrorNote, Spinner, useLoad } from './ui.jsx'
 import Library from './Library.jsx'
 import Book from './Book.jsx'
 import Stats from './Stats.jsx'
 
-const inputClass =
-  'mt-1 w-full rounded-lg border border-stone-200 bg-stone-50 px-4 py-2.5 text-base text-stone-900 placeholder:text-stone-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/20'
+// A filled, full-width field with a leading icon: the native mobile idiom.
+function Field({ icon: Icon, trailing, inputRef, ...props }) {
+  return (
+    <label className="flex h-14 items-center gap-3 rounded-2xl bg-white px-4 ring-1 ring-stone-950/10 transition focus-within:ring-2 focus-within:ring-brand-500/60">
+      <Icon className="size-5 shrink-0 text-stone-400" strokeWidth={1.75} />
+      <input
+        ref={inputRef}
+        required
+        className="h-full min-w-0 flex-1 bg-transparent text-base text-stone-900 outline-none placeholder:text-stone-400"
+        {...props}
+      />
+      {trailing}
+    </label>
+  )
+}
 
 function Login({ onLogin }) {
   const [form, setForm] = useState(() => {
     const server = lastServer()
     return { selfHosted: server !== DEFAULT_SERVER, server: server === DEFAULT_SERVER ? '' : server, username: '', password: '' }
   })
+  const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
-  const field = (name, label, props) => (
-    <label className="block text-sm font-medium text-stone-700">
-      {label}
-      <input
-        {...props}
-        required
-        value={form[name]}
-        onChange={(e) => setForm({ ...form, [name]: e.target.value })}
-        className={inputClass}
-      />
-    </label>
-  )
+  const passwordRef = useRef(null)
+  const usernameRef = useRef(null)
+  const set = (name) => (e) => setForm({ ...form, [name]: e.target.value })
+  // Keyboard "Next" moves to the following field instead of submitting early.
+  const next = (ref) => (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      ref.current?.focus()
+    }
+  }
+
   async function submit(e) {
     e.preventDefault()
     setBusy(true)
@@ -39,63 +52,115 @@ function Login({ onLogin }) {
     }
     setBusy(false)
   }
+
   return (
-    <div className="relative mx-auto flex min-h-dvh max-w-sm flex-col justify-center px-6">
-      <div className="dot-field pointer-events-none absolute inset-x-0 top-0 h-64 text-stone-200 [mask-image:linear-gradient(to_bottom,black,transparent)]" />
-      <div className="relative flex flex-col items-center text-center">
-        <img src="/logo.png" alt="" className="size-14 rounded-2xl" />
-        <Eyebrow className="mt-4">Your reading, everywhere</Eyebrow>
-        <h1 className="mt-2 font-display text-3xl font-semibold tracking-tight text-stone-900">CrossPoint Sync</h1>
-        <p className="mt-2 text-sm text-stone-600">Sign in with the sync account your reader uses.</p>
+    <div className="flex min-h-dvh flex-col bg-stone-50 md:flex-row">
+      <div className="relative m-3 h-[36dvh] min-h-60 shrink-0 overflow-hidden rounded-[28px] bg-brand-900 md:m-4 md:h-auto md:flex-1">
+        <img src="/hero.jpg" alt="" className="absolute inset-0 size-full object-cover" />
+        <div className="absolute inset-0 bg-gradient-to-t from-brand-950/95 via-brand-950/40 to-transparent" />
+        <div className="absolute inset-x-0 bottom-0 p-6 md:p-10">
+          <img src="/logo.png" alt="" className="size-12 rounded-xl ring-1 ring-white/20 md:size-14" />
+          <p className="mt-4 inline-block -rotate-1 font-hand text-2xl/7 text-brand-200">Your reading, everywhere</p>
+          <h1 className="font-display text-3xl/tight font-semibold tracking-tight text-white md:text-5xl/tight">CrossPoint Sync</h1>
+          <p className="mt-2 hidden max-w-md text-base/7 text-white/75 md:block">
+            Progress, clippings and reading stats from every CrossPoint and CrossInk reader, in one place.
+          </p>
+        </div>
       </div>
-      <Card className="relative mt-8 p-6">
-        <form onSubmit={submit} className="space-y-4">
-          <div>
-            <p className="text-sm font-medium text-stone-700">Server</p>
-            <div className="mt-1 grid grid-cols-2 gap-1 rounded-lg bg-stone-100 p-1">
-              {[
-                [false, 'CrossPoint'],
-                [true, 'Self-hosted'],
-              ].map(([v, label]) => (
-                <button
-                  key={label}
-                  type="button"
-                  onClick={() => setForm({ ...form, selfHosted: v })}
-                  className={`rounded-md py-1.5 text-sm font-semibold transition ${
-                    form.selfHosted === v ? 'bg-white text-stone-900 shadow-sm ring-1 ring-stone-950/5' : 'text-stone-500'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            {form.selfHosted ? (
-              <input
-                required
-                inputMode="url"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-                placeholder="192.168.1.20:8080 or sync.example.com"
-                value={form.server}
-                onChange={(e) => setForm({ ...form, server: e.target.value })}
-                className={`${inputClass} mt-2`}
-              />
-            ) : (
-              <p className="mt-2 font-mono text-xs text-stone-500">{new URL(DEFAULT_SERVER).host}</p>
-            )}
-          </div>
-          {field('username', 'Username', { autoComplete: 'username', autoCapitalize: 'none', spellCheck: false })}
-          {field('password', 'Password', { type: 'password', autoComplete: 'current-password' })}
-          {error && <p className="text-sm text-red-600">{error}</p>}
+
+      <form
+        onSubmit={submit}
+        className="flex flex-1 flex-col px-5 pt-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:max-w-md md:justify-center md:px-10 lg:max-w-lg lg:px-16"
+      >
+        <h2 className="font-display text-2xl font-semibold text-stone-900">Sign in</h2>
+        <p className="mt-1 text-sm/6 text-stone-500">Use the username and password from CrossPoint Sync on your reader.</p>
+
+        <div className="mt-5 grid grid-cols-2 gap-1 rounded-2xl bg-stone-200/60 p-1">
+          {[
+            [false, 'CrossPoint'],
+            [true, 'Self-hosted'],
+          ].map(([v, label]) => (
+            <button
+              key={label}
+              type="button"
+              onClick={() => setForm({ ...form, selfHosted: v })}
+              className={`h-10 rounded-xl text-sm font-semibold transition ${
+                form.selfHosted === v ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 active:bg-stone-200'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-3 space-y-3">
+          {form.selfHosted ? (
+            <Field
+              icon={Server}
+              value={form.server}
+              onChange={set('server')}
+              onKeyDown={next(usernameRef)}
+              placeholder="192.168.1.20:8080 or sync.example.com"
+              inputMode="url"
+              enterKeyHint="next"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+          ) : (
+            <p className="flex items-center gap-2 px-1 font-mono text-xs text-stone-500">
+              <Server className="size-3.5" /> {new URL(DEFAULT_SERVER).host}
+            </p>
+          )}
+          <Field
+            icon={User}
+            inputRef={usernameRef}
+            value={form.username}
+            onChange={set('username')}
+            onKeyDown={next(passwordRef)}
+            placeholder="Username"
+            autoComplete="username"
+            enterKeyHint="next"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+          <Field
+            icon={Lock}
+            inputRef={passwordRef}
+            value={form.password}
+            onChange={set('password')}
+            placeholder="Password"
+            type={showPassword ? 'text' : 'password'}
+            autoComplete="current-password"
+            enterKeyHint="go"
+            trailing={
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="-mr-2 grid size-10 place-items-center rounded-full text-stone-400 active:bg-stone-100"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? <EyeOff className="size-5" strokeWidth={1.75} /> : <Eye className="size-5" strokeWidth={1.75} />}
+              </button>
+            }
+          />
+        </div>
+
+        {error && <p className="mt-3 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
+
+        <div className="mt-auto pt-6 md:mt-8">
           <button
             disabled={busy}
-            className="w-full rounded-md bg-brand-500 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-600 disabled:opacity-50"
+            className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-brand-500 text-base font-semibold text-white shadow-sm transition active:scale-[0.98] active:bg-brand-600 disabled:opacity-60"
           >
-            {busy ? 'Signing in…' : 'Sign in'}
+            {busy ? <Loader2 className="size-5 animate-spin" /> : 'Sign in'}
           </button>
-        </form>
-      </Card>
+          <p className="mt-4 text-center text-xs/5 text-stone-500">
+            No account yet? Create one on your reader under Settings, CrossPoint Sync.
+          </p>
+        </div>
+      </form>
     </div>
   )
 }

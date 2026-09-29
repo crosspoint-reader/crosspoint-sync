@@ -1,11 +1,10 @@
 /* Design tokens copied from crosspoint-tools/src/index.css (Free-Ink). Keep in sync by hand. */
-@import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Geist+Mono:wght@400;500;600&family=Caveat:wght@500;600&display=swap');
 @import "tailwindcss";
 
 @theme {
   /* Inter for body/UI, Lora for headlines (the original CrossPoint serif),
      Geist Mono for technical text. */
-  --font-sans: "InterVariable", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter Variable", "InterVariable", "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-sans--font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   --font-display: "Lora", ui-serif, serif;
   --font-serif: "Lora", ui-serif, serif;
