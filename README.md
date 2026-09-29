@@ -61,6 +61,8 @@ DATABASE_PATH=./data/crosspoint.db PORT=8080 node dist/index.js
 | `AUTH_RATE_LIMIT_PER_MINUTE` | `30` | Per-IP limit on registration (0 disables) |
 | `TOKEN_ENC_KEY` | _(unset)_ | Enables external-service connectors. 64 hex chars, a base64 32-byte key, or a ≥32-char passphrase. Encrypts stored connector credentials at rest; unset = connectors disabled. |
 | `TRUST_PROXY` | `false` (`true` on Railway) | Set `true` only when direct access is blocked and a trusted reverse proxy overwrites any client-supplied `X-Forwarded-Proto`; permits connector linking through an HTTPS-terminating proxy. Defaults to `true` when `RAILWAY_ENVIRONMENT` is present, since Railway always fronts the service with its TLS-terminating edge; set `TRUST_PROXY=false` to override. |
+| `GOOGLE_BOOKS_API_KEY` | _(unset)_ | Optional. Fallback source for print page counts when Open Library has none (keyless Google Books has no quota). |
+| `SEARCHAPI_KEY` | _(unset)_ | Optional, paid ([searchapi.io](https://www.searchapi.io)). Last fallback for print page counts: Amazon search + product "Print length", 2 requests per book, only for books the free sources miss. Cached forever. |
 | `CORS_ORIGINS` | `*` | Origins allowed to call the sync API from browsers (comma-separated). The default wildcard is safe: the API authenticates with headers, not cookies, and the web UI's cookie routes never get CORS headers. |
 
 ### Link Micro.blog

@@ -64,8 +64,8 @@ export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<A
   v1.route('/', progressRoutes(db, refreshProgress));
   v1.route('/', bookmarkRoutes(db));
   v1.route('/', clippingRoutes(db));
-  v1.route('/', statsRoutes(db));
-  v1.route('/', documentRoutes(db));
+  v1.route('/', statsRoutes(db, opts.connectorTransport));
+  v1.route('/', documentRoutes(db, opts.connectorTransport));
   v1.route('/', connectorRoutes(db, opts.connectorTransport, config.trustProxy));
   // Self-host-only Amazon device registration (off unless explicitly enabled).
   if (config.kindleServerRegistration) {

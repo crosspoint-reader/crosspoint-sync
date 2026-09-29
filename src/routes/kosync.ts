@@ -160,6 +160,19 @@ export function nearestProgressSample(
 }
 
 export function upsertProgress(db: DB, p: ProgressUpsert): void {
+  // History for server-derived activity stats; skip re-pushes of the same spot.
+  const prev = db
+    .prepare('SELECT percentage FROM progress WHERE user_id = ? AND document = ? AND device_id = ?')
+    .get(p.userId, p.document, p.deviceId) as { percentage: number } | undefined;
+  if (prev?.percentage !== p.percentage) {
+    db.prepare('INSERT INTO progress_log (user_id, document, device_id, percentage, at) VALUES (?, ?, ?, ?, ?)').run(
+      p.userId,
+      p.document,
+      p.deviceId,
+      p.percentage,
+      p.updatedAt
+    );
+  }
   db.prepare(
     `INSERT INTO progress (user_id, document, device_id, device, percentage, progress, position, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)

@@ -14,6 +14,7 @@ const DOCUMENT_TABLES = [
   'clippings',
   'bookmarks',
   'progress_samples',
+  'progress_log',
   'progress',
   'documents',
 ] as const;

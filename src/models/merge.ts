@@ -67,15 +67,22 @@ export function mergeDocuments(db: DB, userId: number, from: string, into: strin
       from
     );
 
+    // progress_log is an append-only history: just re-home it.
+    db.prepare('UPDATE progress_log SET document = ? WHERE user_id = ? AND document = ?').run(into, userId, from);
+
     // documents: canonical metadata wins, alias fills the gaps.
     db.prepare(
-      `INSERT INTO documents (user_id, document, title, author, filename, filesize, updated_at)
-       SELECT user_id, ?, title, author, filename, filesize, ? FROM documents WHERE user_id = ? AND document = ?
+      `INSERT INTO documents (user_id, document, title, author, filename, filesize, status, status_at, cover_url, page_count, updated_at)
+       SELECT user_id, ?, title, author, filename, filesize, status, status_at, cover_url, page_count, ? FROM documents WHERE user_id = ? AND document = ?
        ON CONFLICT(user_id, document) DO UPDATE SET
          title = COALESCE(documents.title, excluded.title),
          author = COALESCE(documents.author, excluded.author),
          filename = COALESCE(documents.filename, excluded.filename),
          filesize = COALESCE(documents.filesize, excluded.filesize),
+         status = COALESCE(documents.status, excluded.status),
+         status_at = COALESCE(documents.status_at, excluded.status_at),
+         cover_url = COALESCE(documents.cover_url, excluded.cover_url),
+         page_count = COALESCE(documents.page_count, excluded.page_count),
          updated_at = excluded.updated_at`
     ).run(into, now, userId, from);
     db.prepare('DELETE FROM documents WHERE user_id = ? AND document = ?').run(userId, from);

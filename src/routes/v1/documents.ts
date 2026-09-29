@@ -4,10 +4,14 @@ import { kosyncError, type AppEnv } from '../../auth/middleware.js';
 import { isValidDocument } from '../kosync.js';
 import { nowSeconds } from '../../models/sync.js';
 import { mergeDocuments, resolveDocument, unmergeDocument } from '../../models/merge.js';
+import { documentInfo } from '../../models/cover.js';
+import { fanOutProgress } from '../../connectors/fanout.js';
+import type { HttpTransport } from '../../connectors/types.js';
 
 const MAX_BATCH = 50;
+export const STATUSES = ['reading', 'finished', 'dnf', 'paused'] as const;
 
-export function documentRoutes(db: DB): Hono<AppEnv> {
+export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   app.put('/documents', async (c) => {
@@ -103,11 +107,46 @@ export function documentRoutes(db: DB): Hono<AppEnv> {
     return c.json({ alias, unmerged: true });
   });
 
+  // Manual reading status; null clears it back to "derive from progress".
+  // Marking finished also fans out to linked services (Hardcover, Micro.blog...).
+  app.put('/documents/:document/status', async (c) => {
+    const param = c.req.param('document');
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return kosyncError(c, 403, 2003, 'Invalid request');
+    }
+    const status = (body as Record<string, unknown> | null)?.status ?? null;
+    if (!isValidDocument(param) || (status !== null && !STATUSES.includes(status as never))) {
+      return kosyncError(c, 403, 2003, 'Invalid request');
+    }
+    const user = c.get('user');
+    const document = resolveDocument(db, user.id, param);
+    const now = nowSeconds();
+    db.prepare(
+      `INSERT INTO documents (user_id, document, status, status_at, updated_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(user_id, document) DO UPDATE SET status = excluded.status, status_at = excluded.status_at`
+    ).run(user.id, document, status as string | null, now, now);
+    if (status === 'finished') fanOutProgress(db, user.id, document, 1, now);
+    return c.json({ document, status, status_at: now });
+  });
+
+  app.get('/documents/:document/cover', async (c) => {
+    const param = c.req.param('document');
+    if (!isValidDocument(param)) {
+      return kosyncError(c, 403, 2004, "Field 'document' not provided.");
+    }
+    const user = c.get('user');
+    const info = await documentInfo(db, user.id, resolveDocument(db, user.id, param), http);
+    return c.json({ url: info.cover, pages: info.pages });
+  });
+
   app.get('/documents', (c) => {
     const user = c.get('user');
     const rows = db
       .prepare(
-        'SELECT document, title, author, filename, filesize, updated_at FROM documents WHERE user_id = ? ORDER BY updated_at DESC LIMIT 500'
+        'SELECT document, title, author, filename, filesize, status, status_at, cover_url, page_count, updated_at FROM documents WHERE user_id = ? ORDER BY updated_at DESC LIMIT 500'
       )
       .all(user.id);
     return c.json({ items: rows });

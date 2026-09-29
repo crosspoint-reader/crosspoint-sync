@@ -11,8 +11,12 @@ import {
   type BookStatsSnapshot,
   type GlobalStatsSnapshot,
 } from '../../models/stats.js';
+import { computeActivity, type DocInfo, type LogRow } from '../../models/activity.js';
+import { documentInfo } from '../../models/cover.js';
+import type { HttpTransport } from '../../connectors/types.js';
 
 const MAX_BOOK_BATCH = 20;
+const MAX_INFO_LOOKUPS = 25;
 
 function deviceIdFrom(o: Record<string, unknown>): string | null {
   return typeof o.device_id === 'string' && o.device_id.length > 0 && o.device_id.length <= 128
@@ -20,7 +24,7 @@ function deviceIdFrom(o: Record<string, unknown>): string | null {
     : null;
 }
 
-export function statsRoutes(db: DB): Hono<AppEnv> {
+export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   app.put('/stats/global', async (c) => {
@@ -147,6 +151,34 @@ export function statsRoutes(db: DB): Hono<AppEnv> {
         stats: JSON.parse(r.payload),
       })),
     });
+  });
+
+  // Pages/books activity from the progress history (print pages), for readers
+  // that don't send stats. ?tz= is the client's Date#getTimezoneOffset().
+  app.get('/stats/activity', async (c) => {
+    const user = c.get('user');
+    const tzRaw = Number(c.req.query('tz') ?? 0);
+    const tz = Number.isFinite(tzRaw) && Math.abs(tzRaw) <= 14 * 60 ? tzRaw : 0;
+    // Books never looked up yet get their page count now (bounded per request).
+    const pending = db
+      .prepare(
+        `SELECT document FROM documents WHERE user_id = ? AND cover_checked_at IS NULL
+           AND (title IS NOT NULL OR filename IS NOT NULL) LIMIT ?`
+      )
+      .all(user.id, MAX_INFO_LOOKUPS) as { document: string }[];
+    await Promise.all(pending.map((d) => documentInfo(db, user.id, d.document, http).catch(() => null)));
+
+    const rows = db
+      .prepare('SELECT document, percentage, at FROM progress_log WHERE user_id = ?')
+      .all(user.id) as unknown as LogRow[];
+    const docs = new Map(
+      (
+        db
+          .prepare('SELECT document, page_count, status, status_at FROM documents WHERE user_id = ?')
+          .all(user.id) as unknown as (DocInfo & { document: string })[]
+      ).map((d) => [d.document, d])
+    );
+    return c.json(computeActivity(rows, docs, tz));
   });
 
   return app;

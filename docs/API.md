@@ -442,6 +442,38 @@ weighted by `pace_n`, `start_date` = earliest non-zero, `finished_date` = latest
 `GET /api/v1/documents` lists them. Most clients don't need this endpoint — progress-PUT
 `metadata` capture populates the same table.
 
+#### PUT /api/v1/documents/{document}/status
+
+Manual reading status: `{"status": "reading" | "paused" | "finished" | "dnf"}`, or
+`{"status": null}` to go back to deriving it from progress. `finished` also fans out a finished
+event to linked write-connectors. `GET /api/v1/progress` items carry the effective `status`
+(manual, else `finished` at ≥ 98%, else `reading`) and `cover_url`.
+
+#### GET /api/v1/documents/{document}/cover
+
+`{"url": "https://..." | null, "pages": 433 | null}`: cover URL and print-edition page count,
+resolved from the document's title/author and cached (a miss is retried after 7 days). Covers come
+from iTunes Search (ebooks), then Open Library; page counts from Open Library, then Google Books when
+the server has `GOOGLE_BOOKS_API_KEY`, then Amazon's "Print length" via SearchAPI when it has
+`SEARCHAPI_KEY`. `GET /api/v1/progress` items also carry `page_count`.
+
+#### GET /api/v1/stats/activity?tz=
+
+Pages and books derived from the progress history, for readers that never send stats (stock
+CrossPoint, KOReader). Every progress change is logged server-side. `tz` is the client's
+`Date#getTimezoneOffset()` so days bucket locally.
+
+```json
+{"pages_total": 1923,
+ "books": [{"document": "...", "started_at": 1790000000, "last_at": 1790600000, "percentage": 0.997,
+            "finished_at": 1790600000, "page_count": 400, "pages_read": 399}],
+ "days": [{"day": "2026-09-28", "pages": 56}]}
+```
+
+Pages are print pages (furthest percent x page count), not screen pages. `days` counts only forward
+progress after a book's first logged sync, as a running max across devices. `finished_at` is the
+first sync at >= 98%, overridden by a manual status. This never estimates reading time.
+
 ### Connectors (master sync hub)
 
 Pair external services (Hardcover, Readwise, …) to the account; reading activity fans out to them
