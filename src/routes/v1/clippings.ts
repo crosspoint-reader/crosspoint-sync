@@ -7,7 +7,7 @@ import { fanOutHighlight } from '../../connectors/fanout.js';
 import { documentMeta } from '../../connectors/store.js';
 
 const MAX_BATCH = 50;
-const MAX_TEXT = 2048; // matches the firmware's My Clippings.txt export cap
+const MAX_TEXT = 4096; // full firmware clipping, not the text-export cap
 const MAX_NOTE = 4096;
 const MAX_CHAPTER = 64;
 
@@ -28,6 +28,10 @@ interface ClippingRow {
   created_at: number;
   deleted: number;
   updated_at: number;
+  revision: number;
+  layout_signature: number;
+  start_offset: number | null;
+  end_offset: number | null;
 }
 
 function uint(v: unknown, fallback?: number): number | undefined {
@@ -46,23 +50,31 @@ export function clippingRoutes(db: DB): Hono<AppEnv> {
     }
     const user = c.get('user');
     const { since, limit } = parseListParams(c);
+    const cursorRaw = c.req.query('cursor');
+    const cursor = Number(cursorRaw ?? 0);
+    if (!Number.isSafeInteger(cursor) || cursor < 0) return kosyncError(c, 403, 2003, 'Invalid cursor');
+    const revisionMode = cursorRaw !== undefined;
     const rows = db
       .prepare(
         `SELECT id, spine_index, start_page, end_page, page_count, start_word, end_word, word_count,
-                paragraph_index, chapter_title, text, note, color, created_at, deleted, updated_at
-         FROM clippings WHERE user_id = ? AND document = ? AND updated_at > ?
-         ORDER BY updated_at, id LIMIT ?`
+                paragraph_index, chapter_title, text, note, color, created_at, deleted, updated_at,
+                revision, layout_signature, start_offset, end_offset
+         FROM clippings WHERE user_id = ? AND document = ? AND ${revisionMode ? 'revision' : 'updated_at'} > ?
+         ORDER BY ${revisionMode ? 'revision' : 'updated_at, id'} LIMIT ?`
       )
-      .all(user.id, document, since, limit + 1) as unknown as ClippingRow[];
+      .all(user.id, document, revisionMode ? cursor : since, limit + 1) as unknown as ClippingRow[];
     const more = rows.length > limit;
     const items = more ? rows.slice(0, limit) : rows;
     const until = more ? items[items.length - 1].updated_at : nowSeconds();
     return c.json({
       document,
+      sync_version: 2,
+      cursor: items.length ? items[items.length - 1].revision : cursor,
       until,
       more,
       items: items.map((r) => ({
         id: r.id,
+        revision: r.revision,
         spine: r.spine_index,
         start_page: r.start_page,
         end_page: r.end_page,
@@ -73,11 +85,13 @@ export function clippingRoutes(db: DB): Hono<AppEnv> {
         para: r.paragraph_index,
         chapter: r.chapter_title,
         text: r.text,
-        note: r.note,
-        color: r.color,
+        ...(c.req.query('format') === 'reader' ? {} : { note: r.note, color: r.color }),
         created_at: r.created_at,
         deleted: r.deleted,
         updated_at: r.updated_at,
+        layout_signature: r.layout_signature,
+        start_offset: r.start_offset,
+        end_offset: r.end_offset,
       })),
     });
   });
@@ -100,11 +114,13 @@ export function clippingRoutes(db: DB): Hono<AppEnv> {
     const user = c.get('user');
     const now = nowSeconds();
 
+    const bumpRevision = db.prepare('UPDATE clipping_sync_clock SET revision = revision + 1 WHERE id = 1');
     const upsert = db.prepare(
       `INSERT INTO clippings (user_id, document, id, spine_index, start_page, end_page, page_count,
                               start_word, end_word, word_count, paragraph_index, chapter_title, text,
-                              note, color, created_at, deleted, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                              note, color, created_at, deleted, updated_at, layout_signature, start_offset, end_offset, revision)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?,
+               (SELECT revision FROM clipping_sync_clock WHERE id = 1))
        ON CONFLICT(user_id, document, id) DO UPDATE SET
          spine_index = excluded.spine_index,
          start_page = excluded.start_page,
@@ -116,25 +132,33 @@ export function clippingRoutes(db: DB): Hono<AppEnv> {
          paragraph_index = excluded.paragraph_index,
          chapter_title = excluded.chapter_title,
          text = excluded.text,
-         note = excluded.note,
-         color = excluded.color,
+         note = CASE WHEN ? THEN excluded.note ELSE clippings.note END,
+         color = CASE WHEN ? THEN excluded.color ELSE clippings.color END,
          created_at = excluded.created_at,
          deleted = 0,
-         updated_at = excluded.updated_at`
+         updated_at = excluded.updated_at,
+         layout_signature = excluded.layout_signature,
+         start_offset = excluded.start_offset,
+         end_offset = excluded.end_offset,
+         revision = excluded.revision
+       WHERE clippings.deleted = 0`
     );
     const tombstone = db.prepare(
-      `INSERT INTO clippings (user_id, document, id, deleted, updated_at)
-       VALUES (?, ?, ?, 1, ?)
+      `INSERT INTO clippings (user_id, document, id, deleted, updated_at, revision)
+       VALUES (?, ?, ?, 1, ?, (SELECT revision FROM clipping_sync_clock WHERE id = 1))
        ON CONFLICT(user_id, document, id) DO UPDATE SET
          deleted = 1,
-         updated_at = excluded.updated_at`
+         updated_at = excluded.updated_at,
+         revision = excluded.revision`
     );
 
     type Op = () => void;
     const ops: Op[] = [];
-    type Highlight = { id: string; text: string; note: string | null; chapter: string; createdAt: number };
-    const highlights: Highlight[] = [];
+    const highlightIds = new Set<string>();
     for (const raw of items) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        return kosyncError(c, 403, 2003, 'Invalid request');
+      }
       const o = raw as Record<string, unknown>;
       if (!isItemId(o.id)) {
         return kosyncError(c, 403, 2003, 'Invalid request');
@@ -152,8 +176,14 @@ export function clippingRoutes(db: DB): Hono<AppEnv> {
       const endWord = uint(o.end_word, 0);
       const words = uint(o.words, 0);
       const createdAt = uint(o.created_at, 0);
+      const layoutSignature = uint(o.layout_signature, 0);
+      const startOffset = o.start_offset == null ? null : uint(o.start_offset);
+      const endOffset = o.end_offset == null ? null : uint(o.end_offset);
       const para = o.para === undefined || o.para === null ? null : uint(o.para);
       if (
+        layoutSignature === undefined || startOffset === undefined || endOffset === undefined ||
+        ((startOffset === null) !== (endOffset === null)) ||
+        (startOffset !== null && endOffset !== null && endOffset <= startOffset) ||
         spine === undefined ||
         startPage === undefined ||
         endPage === undefined ||
@@ -174,34 +204,44 @@ export function clippingRoutes(db: DB): Hono<AppEnv> {
         typeof o.note === 'string' && Buffer.byteLength(o.note) <= MAX_NOTE ? o.note : null;
       const color = typeof o.color === 'string' ? o.color.slice(0, 32) : null;
       const text = o.text;
-      ops.push(() =>
-        upsert.run(
+      ops.push(() => {
+        const result = upsert.run(
           user.id, document, id, spine, startPage, endPage, pages,
           startWord, endWord, words, para, chapter, text,
-          note, color, createdAt, now
-        )
-      );
-      highlights.push({ id, text, note, chapter, createdAt });
+          note, color, createdAt, now, layoutSignature, startOffset, endOffset,
+          Number(Object.hasOwn(o, 'note')), Number(Object.hasOwn(o, 'color'))
+        );
+        if (result.changes) highlightIds.add(id);
+      });
     }
     withTransaction(db, () => {
-      for (const op of ops) op();
+      for (const op of ops) {
+        bumpRevision.run();
+        op();
+      }
     });
     // Fan out highlights to connectors that carry them (e.g. Readwise). Best
     // effort; the document's title/author (if synced) become the Readwise book.
-    if (highlights.length > 0) {
+    if (highlightIds.size > 0) {
       const meta = documentMeta(db, user.id, document);
-      for (const h of highlights) {
+      const readHighlight = db.prepare(
+        'SELECT text, note, created_at FROM clippings WHERE user_id = ? AND document = ? AND id = ? AND deleted = 0'
+      );
+      for (const id of highlightIds) {
+        const h = readHighlight.get(user.id, document, id) as
+          { text: string; note: string | null; created_at: number } | undefined;
+        if (!h) continue;
         fanOutHighlight(
           db,
           user.id,
           document,
-          h.id,
+          id,
           {
             text: h.text,
             note: h.note,
             title: meta.title,
             author: meta.author,
-            highlightedAt: h.createdAt > 0 ? h.createdAt : null,
+            highlightedAt: h.created_at > 0 ? h.created_at : null,
           },
           now
         );
