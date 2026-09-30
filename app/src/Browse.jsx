@@ -4,7 +4,7 @@ import { isApp } from './api.js'
 import { loadDevicePrefs } from './device.js'
 import { download, feed as fetchFeed, loadCatalogs, navRows, readable, saveCatalogs, search, sendDownload } from './catalogs.js'
 import { progressLabel } from './Send.jsx'
-import { Card, Eyebrow, Spinner } from './ui.jsx'
+import { Card, Eyebrow, Spinner, folderLabel, notify } from './ui.jsx'
 
 // Hash routes:
 //   #/browse                         storefront: a block of rails per catalog
@@ -222,10 +222,17 @@ function BookPage({ cat, entryKey }) {
     setJob({ state: 'working', progress: null })
     try {
       const book = await download(cat, entry, chosen, (progress) => setJob((j) => ({ ...j, progress })))
-      if (alsoSend) await sendDownload(book.name, loadDevicePrefs(), (progress) => setJob((j) => ({ ...j, progress })))
+      const prefs = loadDevicePrefs()
+      const used = alsoSend ? await sendDownload(book.name, prefs, (progress) => setJob((j) => ({ ...j, progress }))) : null
       setJob({ state: 'done', sent: alsoSend })
+      notify(
+        alsoSend
+          ? { title: 'Sent to your reader', detail: `${used} in ${folderLabel(prefs.folder)}` }
+          : { title: 'Downloaded', detail: `${entry.title} is on your shelf in Send` }
+      )
     } catch (e) {
       setJob({ state: 'error', error: String(e) })
+      notify({ error: true, title: alsoSend ? "Couldn't send that book" : "Couldn't download that book", detail: String(e) })
     }
   }
 

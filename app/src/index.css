@@ -101,3 +101,10 @@ body {
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-y: none;
 }
+
+/* Toast entrance: rise and fade in. */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+}
+.toast-in { animation: toast-in 180ms ease-out; }
+@media (prefers-reduced-motion: reduce) { .toast-in { animation: none; } }

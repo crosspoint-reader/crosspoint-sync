@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BookOpen, CircleCheck, CircleX, Pause } from 'lucide-react'
+import { BookOpen, CircleAlert, CircleCheck, CircleX, Pause } from 'lucide-react'
 import { api } from './api.js'
 
 export const STATUS = [
@@ -106,3 +106,48 @@ export function ago(unix) {
 }
 
 export const pct = (p) => `${Math.round(p * 100)}%`
+
+// App-wide confirmation toast: notify({ title, detail?, error? }) from anywhere;
+// <Toaster /> in the shell shows the latest one above the tab bar.
+const toasts = new EventTarget()
+export function notify(toast) {
+  toasts.dispatchEvent(new CustomEvent('toast', { detail: { id: Date.now() + Math.random(), ...toast } }))
+}
+
+export const folderLabel = (folder) => (!folder || folder === '/' ? 'the top of the SD card' : folder)
+
+export function Toaster() {
+  const [toast, setToast] = useState(null)
+  useEffect(() => {
+    const on = (e) => setToast(e.detail)
+    toasts.addEventListener('toast', on)
+    return () => toasts.removeEventListener('toast', on)
+  }, [])
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), toast.error ? 7000 : 4000)
+    return () => clearTimeout(t)
+  }, [toast])
+  if (!toast) return null
+  const Icon = toast.error ? CircleAlert : CircleCheck
+  return (
+    <div className="pointer-events-none fixed inset-x-0 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-50 flex justify-center px-4 md:bottom-6 md:pl-60 lg:pl-64">
+      <button
+        key={toast.id}
+        type="button"
+        role="status"
+        aria-live="polite"
+        onClick={() => setToast(null)}
+        className="toast-in pointer-events-auto flex w-full max-w-sm items-center gap-3 rounded-2xl bg-raised px-4 py-3 text-left shadow-lg ring-1 ring-stone-950/10"
+      >
+        <span className={`grid size-9 shrink-0 place-items-center rounded-full ${toast.error ? 'bg-red-50 text-red-600' : 'bg-brand-50 text-brand-600'}`}>
+          <Icon className="size-5" strokeWidth={2} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-semibold text-stone-900">{toast.title}</span>
+          {toast.detail && <span className="block truncate text-xs text-stone-500">{toast.detail}</span>}
+        </span>
+      </button>
+    </div>
+  )
+}

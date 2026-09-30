@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, Download, ImagePlus, Loader2, RotateCcw, RotateCw, Send as SendIcon, Sparkles, Wand2 } from 'lucide-react'
+import { ArrowLeft, Download, ImagePlus, Loader2, RotateCcw, RotateCw, Search, Send as SendIcon, Sparkles, Wand2 } from 'lucide-react'
 import { isApp } from './api.js'
 import { reader, sendFile } from './catalogs.js'
 import { folders, loadDevicePrefs, makeFolder } from './device.js'
 import { saveImage } from './shareCard.js'
-import { Card, Eyebrow } from './ui.jsx'
+import { Card, Eyebrow, notify } from './ui.jsx'
+import { CATEGORIES, canFilter, communityPage, fullImage } from './wallpaper/community.js'
 import { DEFAULTS, DEVICES, DITHERS, autoLevels, placement, renderWallpaper, toBmp } from './wallpaper/render.js'
 
 // Sleep-screen wallpaper creator, ported from zgredex's crosspoint-pxc-converter.
@@ -48,6 +49,138 @@ function Slider({ label, value, min, max, step, onChange, format = (v) => v }) {
   )
 }
 
+// Grid columns for the community grid: grid-cols-3 sm:grid-cols-4 lg:grid-cols-6.
+const COLUMN_QUERIES = [
+  ['(min-width: 64rem)', 6],
+  ['(min-width: 40rem)', 4],
+]
+function useColumns() {
+  const current = () => COLUMN_QUERIES.find(([q]) => window.matchMedia(q).matches)?.[1] ?? 3
+  const [cols, setCols] = useState(current)
+  useEffect(() => {
+    const lists = COLUMN_QUERIES.map(([q]) => window.matchMedia(q))
+    const on = () => setCols(current())
+    lists.forEach((l) => l.addEventListener('change', on))
+    return () => lists.forEach((l) => l.removeEventListener('change', on))
+  }, [])
+  return cols
+}
+
+// Community wallpapers from readme.club: category, search and paging in the app;
+// the newest 50 (search by title) in a plain browser.
+function Community({ onPick }) {
+  const [category, setCategory] = useState('')
+  const [q, setQ] = useState('')
+  const [query, setQuery] = useState('') // debounced q
+  const [pages, setPages] = useState([]) // loaded pages of items
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    const t = setTimeout(() => setQuery(q), canFilter ? 400 : 0)
+    return () => clearTimeout(t)
+  }, [q])
+
+  function load(page) {
+    setLoading(true)
+    setError(null)
+    return communityPage({ category, q: query, page })
+      .then((r) => {
+        setPages((cur) => (page === 1 ? [r.items] : [...cur, r.items]))
+        setTotal(r.total)
+      })
+      .catch((e) => setError(String(e?.message ?? e)))
+      .finally(() => setLoading(false))
+  }
+  useEffect(() => {
+    setPages([])
+    load(1)
+  }, [category, query])
+
+  let items = pages.flat()
+  // The RSS fallback has no server search: match titles here.
+  if (!canFilter) {
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+    items = items.filter((w) => words.every((t) => w.title.toLowerCase().includes(t)))
+  }
+  const more = canFilter && pages.length > 0 && pages.length * 32 < total && pages.at(-1).length > 0
+  // Only whole rows while more can load; the remainder shows with the next page.
+  const cols = useColumns()
+  if (more && items.length >= cols) items = items.slice(0, items.length - (items.length % cols))
+
+  return (
+    <section className="mt-8">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+        <h2 className="font-display text-xl font-semibold text-stone-900">Community wallpapers</h2>
+        <a href="https://www.readme.club/wallpapers" target="_blank" rel="noreferrer" className="text-xs font-medium text-stone-500">
+          from readme.club
+        </a>
+      </div>
+      <div className="mt-3 flex max-w-xl gap-2">
+        {canFilter && (
+          <label className="flex h-11 shrink-0 items-center rounded-xl bg-surface px-3 ring-1 ring-stone-950/10">
+            <span className="sr-only">Category</span>
+            <select value={category} onChange={(e) => setCategory(e.target.value)} className="h-full bg-transparent text-sm text-stone-900 outline-none">
+              {CATEGORIES.map(([v, l]) => (
+                <option key={v} value={v}>
+                  {l}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-xl bg-surface px-3 ring-1 ring-stone-950/10 focus-within:ring-2 focus-within:ring-brand-500/60">
+          <Search className="size-4 shrink-0 text-stone-400" />
+          <input
+            type="search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder={canFilter ? 'Search wallpapers' : 'Search the newest wallpapers'}
+            className="h-full min-w-0 flex-1 bg-transparent text-sm text-stone-900 outline-none placeholder:text-stone-400"
+          />
+        </label>
+      </div>
+      {canFilter && total > 0 && <p className="mt-2 font-mono text-xs text-stone-500">{total.toLocaleString()} wallpapers</p>}
+
+      {items.length > 0 && (
+        <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+          {items.map((w) => (
+            <button key={w.id} type="button" onClick={() => onPick(w)} className="group min-w-0 text-left">
+              <img
+                src={w.thumb}
+                alt=""
+                loading="lazy"
+                className="aspect-[3/5] w-full rounded-lg bg-stone-100 object-cover ring-1 ring-stone-950/10 transition group-active:scale-[0.97]"
+              />
+              <p className="mt-1 truncate text-xs text-stone-600">{w.title}</p>
+            </button>
+          ))}
+        </div>
+      )}
+      {error ? (
+        <p className="mt-4 text-sm text-stone-500">Couldn&apos;t load readme.club wallpapers ({error}).</p>
+      ) : loading ? (
+        <div className="mt-6 grid place-items-center">
+          <Loader2 className="size-6 animate-spin text-stone-400" />
+        </div>
+      ) : !items.length ? (
+        <p className="mt-4 text-sm text-stone-500">No wallpapers match.</p>
+      ) : (
+        more && (
+          <button
+            type="button"
+            onClick={() => load(pages.length + 1)}
+            className="mx-auto mt-6 flex h-11 w-full max-w-xs items-center justify-center rounded-xl bg-surface px-6 text-sm font-semibold text-stone-800 ring-1 ring-stone-950/10 active:bg-stone-50 md:hover:bg-stone-50"
+          >
+            Load more
+          </button>
+        )
+      )}
+    </section>
+  )
+}
+
 const baseName = (name) => name.replace(/\.[^.]+$/, '').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'wallpaper'
 
 export default function Wallpaper() {
@@ -78,16 +211,28 @@ export default function Wallpaper() {
     set(patch)
   }
 
-  function open(file) {
-    if (!file) return
+  function load(src, name, failure) {
     const el = new Image()
+    el.crossOrigin = 'anonymous' // community images: keep the canvas readable
     el.onload = () => {
-      setImg({ el, name: file.name })
+      setImg({ el, name })
       set({ zoom: 1, cx: 0.5, cy: 0.5, rotation: 0 })
       setAuto(true)
+      window.scrollTo(0, 0)
     }
-    el.onerror = () => setStatus({ error: true, text: "That file isn't an image this device can open." })
-    el.src = URL.createObjectURL(file)
+    el.onerror = () => setStatus({ error: true, text: failure })
+    setStatus(null)
+    el.src = src
+  }
+  const open = (file) => file && load(URL.createObjectURL(file), file.name, "That file isn't an image this device can open.")
+  const pick = async (w) => {
+    const failed = "Couldn't download that wallpaper. Check your connection and try again."
+    setStatus({ busy: true, text: 'Loading wallpaper…' })
+    try {
+      load(await fullImage(w), w.title, failed)
+    } catch {
+      setStatus({ error: true, text: failed })
+    }
   }
 
   // Re-run auto levels when the framing changes while it's on.
@@ -147,18 +292,21 @@ export default function Wallpaper() {
     const file = new File([toBmp(result.current)], fileName(), { type: 'image/bmp' })
     try {
       const base = await reader(prefs)
+      let folder = '/.sleep'
       try {
-        await sendFile(file, { ...prefs, folder: '/.sleep' })
-        setStatus({ text: 'Added to your sleep screens (/.sleep).' })
+        await sendFile(file, { ...prefs, folder })
       } catch {
         // No /.sleep yet, and the reader won't create dot folders over Wi-Fi: use /sleep,
         // which CrossPoint reads whenever /.sleep has no wallpapers.
+        folder = '/sleep'
         if (!(await folders(base)).includes('sleep')) await makeFolder(base, '/', 'sleep')
-        await sendFile(file, { ...prefs, folder: '/sleep' })
-        setStatus({ text: 'Added to your sleep screens (/sleep).' })
+        await sendFile(file, { ...prefs, folder })
       }
+      setStatus(null)
+      notify({ title: 'Wallpaper sent to your reader', detail: `${file.name} in ${folder}` })
     } catch (e) {
-      setStatus({ error: true, text: String(e?.message ?? e) })
+      setStatus(null)
+      notify({ error: true, title: "Couldn't send the wallpaper", detail: String(e?.message ?? e) })
     }
   }
 
@@ -167,9 +315,11 @@ export default function Wallpaper() {
     try {
       const name = fileName()
       await saveImage(toBmp(result.current), { fileName: name })
-      setStatus({ text: isApp ? `Saved ${name} to Downloads.` : `Downloaded ${name}.` })
+      setStatus(null)
+      notify({ title: isApp ? 'Saved to Downloads' : 'Downloaded', detail: name })
     } catch (e) {
-      setStatus({ error: true, text: String(e?.message ?? e) })
+      setStatus(null)
+      notify({ error: true, title: "Couldn't save the wallpaper", detail: String(e?.message ?? e) })
     }
   }
 
@@ -189,15 +339,7 @@ export default function Wallpaper() {
       <Eyebrow className="mt-4">Sleep screen</Eyebrow>
       <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:text-4xl">Wallpaper</h1>
       <p className="mt-2 max-w-xl text-sm/6 text-stone-500">
-        Turn a photo into a sleep screen, dithered to your reader&apos;s four shades of grey. Based on the{' '}
-        <a href="https://github.com/itsthisjustin/crosspoint-pxc-converter" target="_blank" rel="noreferrer" className="font-medium text-brand-600">
-          CrossPoint wallpaper converter
-        </a>{' '}
-        by{' '}
-        <a href="https://github.com/zgredex" target="_blank" rel="noreferrer" className="font-medium text-brand-600">
-          zgredex
-        </a>
-        .
+        Turn a photo into a sleep screen, dithered to your reader&apos;s four shades of grey.
       </p>
 
       <input
@@ -221,7 +363,8 @@ export default function Wallpaper() {
           <span className="text-xs text-stone-500">PNG, JPG, WebP, GIF or BMP</span>
         </button>
       ) : null}
-      {!img && status?.text && <p className="mt-3 text-sm text-red-700">{status.text}</p>}
+      {!img && status?.text && <p className={`mt-3 text-sm ${status.error ? 'text-red-700' : 'text-stone-600'}`}>{status.text}</p>}
+      {!img && <Community onPick={pick} />}
       {!img ? null : (
         <div className="mt-6 md:grid md:grid-cols-[minmax(0,22rem)_1fr] md:items-start md:gap-8">
           <div className="md:sticky md:top-6">
@@ -339,8 +482,8 @@ export default function Wallpaper() {
               <button onClick={save} disabled={status?.busy} className={`${actionBase} bg-surface text-stone-800 ring-1 ring-stone-950/10`}>
                 <Download className="size-4" /> Save image
               </button>
-              <button onClick={() => input.current?.click()} className={`${actionBase} bg-surface text-stone-800 ring-1 ring-stone-950/10`}>
-                <ImagePlus className="size-4" /> New photo
+              <button onClick={() => setImg(null)} className={`${actionBase} bg-surface text-stone-800 ring-1 ring-stone-950/10`}>
+                <ImagePlus className="size-4" /> Start over
               </button>
             </div>
             {status?.text && <p className={`text-sm ${status.error ? 'text-red-700' : 'text-stone-600'}`}>{status.text}</p>}

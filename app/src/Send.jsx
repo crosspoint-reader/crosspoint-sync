@@ -22,7 +22,7 @@ import {
 import { isApp } from './api.js'
 import { DEFAULT_HOST, EXTENSIONS, connect, deleteFiles, folders, isBook, joinPath, listFiles, loadDevicePrefs, makeFolder, renameFile, saveDevicePrefs } from './device.js'
 import { downloads as listDownloads, removeDownload, sendDownload, sendFile } from './catalogs.js'
-import { Card, Eyebrow } from './ui.jsx'
+import { Card, Eyebrow, folderLabel, notify } from './ui.jsx'
 
 const size = (n) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`)
 // Android's picker filters by MIME type and has none for .md, so let it show everything there.
@@ -204,8 +204,10 @@ function Shelf({ prefs, ready }) {
     try {
       const used = await sendDownload(name, prefs, (progress) => set({ progress }))
       set({ state: 'done', sentAs: used !== name ? used : null })
+      notify({ title: 'Sent to your reader', detail: `${used} in ${folderLabel(prefs.folder)}` })
     } catch (e) {
       set({ state: 'error', error: String(e) })
+      notify({ error: true, title: "Couldn't send that book", detail: String(e) })
     }
   }
 
@@ -415,6 +417,8 @@ export default function Send() {
 
   async function sendAll() {
     setSending(true)
+    const sent = []
+    const failed = []
     for (const item of files) {
       if (item.state === 'done') continue
       const update = (patch) => setFiles((cur) => cur.map((f) => (f.file === item.file ? { ...f, ...patch } : f)))
@@ -422,11 +426,23 @@ export default function Send() {
       try {
         const used = await sendFile(item.file, prefs)
         update({ state: 'done', sentAs: used !== item.file.name ? used : null })
+        sent.push(used)
       } catch (e) {
         update({ state: 'error', error: String(e) })
+        failed.push(String(e))
       }
     }
     setSending(false)
+    const books = (n) => `${n} book${n === 1 ? '' : 's'}`
+    if (failed.length) {
+      notify({
+        error: true,
+        title: sent.length ? `Sent ${books(sent.length)}, ${failed.length} failed` : `Couldn't send ${failed.length === 1 ? 'that book' : books(failed.length)}`,
+        detail: failed[0],
+      })
+    } else if (sent.length) {
+      notify({ title: sent.length === 1 ? 'Sent to your reader' : `Sent ${books(sent.length)} to your reader`, detail: `${sent.length === 1 ? `${sent[0]} in ` : 'In '}${folderLabel(prefs.folder)}` })
+    }
   }
 
   const pending = files.filter((f) => f.state !== 'done').length

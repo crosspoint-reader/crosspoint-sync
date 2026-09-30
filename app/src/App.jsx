@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ChartColumn, CloudOff, Compass, Quote, Eye, EyeOff, LibraryBig, Loader2, Lock, LogOut, Monitor, Moon, Send as SendIcon, Server, Settings, Sun, User } from 'lucide-react'
 import { useTheme } from './theme.js'
 import { DEFAULT_SERVER, api, lastServer, loadSession, login, logout, offline } from './api.js'
-import { ErrorNote, Spinner, useLoad } from './ui.jsx'
+import { ErrorNote, Spinner, Toaster, useLoad } from './ui.jsx'
 import Library from './Library.jsx'
 import Book from './Book.jsx'
 import Stats from './Stats.jsx'
@@ -395,6 +395,7 @@ function Home({ session, onLogout, theme }) {
           </div>
         )}
         <AccountMenu key={parts.join('/')} session={session} onLogout={onLogout} theme={theme} />
+        <Toaster />
         {page}
       </main>
       <TabBar route={route} />
