@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { ChevronRight, Merge } from 'lucide-react'
+import { looksLikeSame } from './Book.jsx'
 import { STATUS, Card, Cover, Eyebrow, ProgressBar, ago, duration, pct } from './ui.jsx'
 
 function greeting() {
@@ -49,6 +51,8 @@ export default function Library({ session, books, summary, activity }) {
   const [tab, setTab] = useState('reading')
   const counts = Object.fromEntries(STATUS.map((s) => [s.id, books.filter((b) => b.status === s.id).length]))
   const shown = books.filter((b) => b.status === tab)
+  // First book that looks like another synced copy of itself.
+  const dupe = books.find((b) => books.some((o) => looksLikeSame(b, o)))
   const [hero, ...rest] = tab === 'reading' ? shown : [null, ...shown]
 
   return (
@@ -81,6 +85,16 @@ export default function Library({ session, books, summary, activity }) {
         </div>
       )}
       </div>
+
+      {dupe && (
+        <a href={`#/book/${dupe.document}`} className="mt-4 flex items-center gap-2 rounded-xl bg-brand-50 px-4 py-3 text-sm text-brand-800 active:bg-brand-100">
+          <Merge className="size-4 shrink-0" />
+          <span className="min-w-0 flex-1">
+            <span className="font-semibold">{dupe.title}</span> appears more than once. Merge the copies to keep progress together.
+          </span>
+          <ChevronRight className="size-4 shrink-0" />
+        </a>
+      )}
 
       <div className="-mx-4 mt-5 md:mx-0 md:mt-8 md:px-0 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none]">
         {STATUS.map((s) => (

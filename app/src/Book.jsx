@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
-import { ArrowLeft, Copy, Download, Share2, X } from 'lucide-react'
+import { useState } from 'react'
+import { ArrowLeft, Hash, Image as ImageIcon, Loader2, Merge, Share2, X } from 'lucide-react'
 import { api } from './api.js'
-import { PLATFORMS, canShareNatively, copyImage, postTo, renderCard, saveImage, shareNatively } from './shareCard.js'
+import { renderCard } from './shareCard.js'
+import ShareSheet from './ShareSheet.jsx'
 import { STATUS, Card, Cover, ErrorNote, ProgressBar, Spinner, ago, duration, pct, useLoad } from './ui.jsx'
 
 const date = (unix) =>
@@ -74,109 +75,20 @@ function Stats({ session, doc, activity: a }) {
   )
 }
 
-// Preview of a clipping's share card, then the native share sheet.
-function ShareSheet({ session, book, clip, onClose }) {
-  const [card, setCard] = useState(null) // { blob, url }
-  const [status, setStatus] = useState(null)
+// A clipping's share card: the quote with its book's cover, title and author.
+export function ClipShare({ session, book, clip, onClose }) {
   const meta = { quote: clip.text, title: book.title || book.filename, author: book.author, chapter: clip.chapter }
-
-  useEffect(() => {
-    let url
-    let live = true
-    ;(async () => {
-      const coverUrl = book.cover_url ?? (await api.cover(session, book.document).then((r) => r.url, () => null))
-      const blob = await renderCard({ ...meta, coverUrl })
-      url = URL.createObjectURL(blob)
-      if (live) setCard({ blob, url })
-    })().catch(() => live && setStatus({ error: "Couldn't make the share card." }))
-    return () => {
-      live = false
-      if (url) URL.revokeObjectURL(url)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clip.id])
-
-  const native = card && canShareNatively(card.blob)
-  const desktop = !/android|iphone|ipad/i.test(navigator.userAgent)
-  async function act(fn, done) {
-    setStatus({ busy: true })
-    try {
-      const note = await fn()
-      setStatus(note ? { note: done(note) } : null)
-    } catch (e) {
-      if (e?.name !== 'AbortError') setStatus({ error: "That didn't work on this device." })
-      else setStatus(null)
-    }
-  }
-
   return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center md:items-center">
-      <div className="absolute inset-0 bg-stone-950/40" onClick={onClose} />
-      <div className="relative max-h-[92dvh] w-full overflow-y-auto rounded-t-[28px] bg-stone-50 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:max-w-md md:rounded-[28px] md:p-6">
-        <div className="mx-auto mb-4 h-1.5 w-10 rounded-full bg-stone-300 md:hidden" />
-        <button onClick={onClose} className="absolute top-3 right-3 grid size-10 place-items-center rounded-full text-stone-500 active:bg-stone-200" aria-label="Close">
-          <X className="size-5" />
-        </button>
-        <h2 className="font-display text-xl font-semibold text-stone-900">Share clipping</h2>
-        <div className="mx-auto mt-4 aspect-[4/5] w-full max-w-72 overflow-hidden rounded-xl shadow-lg ring-1 ring-stone-950/10">
-          {card ? <img src={card.url} alt="Share card preview" className="size-full" /> : <div className="grid size-full place-items-center bg-[#f5f4ef]"><Spinner /></div>}
-        </div>
-
-        {native && (
-          <button
-            disabled={status?.busy}
-            onClick={() => act(() => shareNatively(card.blob, meta).then(() => null), () => null)}
-            className="mt-5 flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-brand-500 text-base font-semibold text-white shadow-sm active:scale-[0.98] disabled:opacity-60"
-          >
-            <Share2 className="size-5" /> Share
-          </button>
-        )}
-
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <button
-            disabled={!card || status?.busy}
-            onClick={() => act(() => copyImage(card.blob, meta).then((ok) => (ok ? 'copied' : 'nocopy')), (r) => (r === 'copied' ? 'Image copied to the clipboard.' : "This device can't copy images; use Save instead."))}
-            className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-white text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100 disabled:opacity-50"
-          >
-            <Copy className="size-4" /> Copy image
-          </button>
-          <button
-            disabled={!card || status?.busy}
-            onClick={() => act(() => saveImage(card.blob, meta).then(() => 'saved'), () => (desktop ? 'Saved to your Downloads folder.' : 'Image saved.'))}
-            className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-white text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100 disabled:opacity-50"
-          >
-            <Download className="size-4" /> Save image
-          </button>
-        </div>
-
-        {desktop && (
-          <>
-            <p className="mt-5 text-xs font-medium text-stone-500">Post to</p>
-            <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-5">
-              {PLATFORMS.map((p) => (
-                <button
-                  key={p.id}
-                  disabled={!card || status?.busy}
-                  onClick={() =>
-                    act(
-                      () => postTo(p, card.blob, meta).then((copied) => (copied ? 'posted' : 'posted-nocopy')),
-                      (r) => (r === 'posted' ? `Image copied. Paste it into your ${p.name} post.` : `Opened ${p.name}. Save the image to attach it.`)
-                    )
-                  }
-                  className="h-11 rounded-xl bg-white text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100 disabled:opacity-50 md:hover:bg-stone-100"
-                >
-                  {p.name}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-
-        {(status?.note || status?.error) && (
-          <p className={`mt-4 text-center text-sm ${status.error ? 'text-red-600' : 'text-stone-600'}`}>{status.note ?? status.error}</p>
-        )}
-      </div>
-    </div>
+    <ShareSheet
+      heading="Share clipping"
+      meta={meta}
+      renderKey={clip.id}
+      onClose={onClose}
+      render={async () => {
+        const coverUrl = book.cover_url ?? (await api.cover(session, book.document).then((r) => r.url, () => null))
+        return renderCard({ ...meta, coverUrl })
+      }}
+    />
   )
 }
 
@@ -213,12 +125,211 @@ function Clippings({ session, book }) {
           </div>
         )
       })}
-      {sharing && <ShareSheet session={session} book={book} clip={sharing} onClose={() => setSharing(null)} />}
+      {sharing && <ClipShare session={session} book={book} clip={sharing} onClose={() => setSharing(null)} />}
     </div>
   )
 }
 
-export default function Book({ session, book, activity, onChange }) {
+const norm = (s) => (s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+// Same normalized title (and author when both have one): probably the same book synced twice.
+export const looksLikeSame = (a, b) =>
+  a.document !== b.document && norm(a.title) && norm(a.title) === norm(b.title) && (!a.author || !b.author || norm(a.author) === norm(b.author))
+
+function Sheet({ title, onClose, children }) {
+  return (
+    <div className="fixed inset-0 z-40 flex items-end justify-center md:items-center">
+      <div className="absolute inset-0 bg-stone-950/40" onClick={onClose} />
+      <div className="relative max-h-[88dvh] w-full overflow-y-auto rounded-t-[28px] bg-stone-50 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:max-w-lg md:rounded-[28px] md:p-6">
+        <div className="mx-auto mb-4 h-1.5 w-10 rounded-full bg-stone-300 md:hidden" />
+        <button onClick={onClose} className="absolute top-3 right-3 grid size-10 place-items-center rounded-full text-stone-500 active:bg-stone-200" aria-label="Close">
+          <X className="size-5" />
+        </button>
+        <h2 className="pr-10 font-display text-xl font-semibold text-stone-900">{title}</h2>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+const field =
+  'h-11 w-full rounded-xl bg-white px-3 text-base text-stone-900 ring-1 ring-stone-950/10 outline-none placeholder:text-stone-400 focus:ring-2 focus:ring-brand-500/60'
+
+function CoverPicker({ session, book, onDone, onClose }) {
+  const [q, setQ] = useState('')
+  const [search, setSearch] = useState('')
+  const [url, setUrl] = useState('')
+  const [items, error] = useLoad(() => api.coverCandidates(session, book.document, search), [session, book.document, search])
+  const [busy, setBusy] = useState(false)
+  async function choose(patch) {
+    setBusy(true)
+    try {
+      await api.setInfo(session, book.document, patch)
+      onDone()
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Sheet title="Choose a cover" onClose={onClose}>
+      <form
+        className="mt-4 flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault()
+          setSearch(q.trim())
+        }}
+      >
+        <input className={field} value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search a different title (${book.title})`} enterKeyHint="search" />
+      </form>
+      {error ? (
+        <p className="mt-4 text-sm text-red-600">{error.message}</p>
+      ) : !items ? (
+        <Spinner />
+      ) : items.length === 0 ? (
+        <p className="mt-6 text-center text-sm text-stone-500">No covers found. Try another search or paste an image link.</p>
+      ) : (
+        <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-4">
+          {items.map((c) => (
+            <button key={c.url} disabled={busy} onClick={() => choose({ cover_url: c.url })} className="group text-left">
+              <img src={c.url} alt="" loading="lazy" className="aspect-[2/3] w-full rounded-md object-cover shadow-sm ring-1 ring-stone-950/10 group-active:scale-[0.98]" />
+              <p className="mt-1 truncate text-[0.7rem] text-stone-500">{c.source}</p>
+            </button>
+          ))}
+        </div>
+      )}
+      <form
+        className="mt-5 flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (/^https?:\/\//.test(url.trim())) choose({ cover_url: url.trim() })
+        }}
+      >
+        <input className={field} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Or paste an image link" inputMode="url" autoCapitalize="none" />
+        <button disabled={busy} className="h-11 shrink-0 rounded-xl bg-brand-500 px-4 text-sm font-semibold text-white disabled:opacity-60">
+          Use
+        </button>
+      </form>
+      <button disabled={busy} onClick={() => choose({ cover_url: null })} className="mt-3 w-full py-2 text-sm font-medium text-stone-500 active:text-stone-800">
+        Use automatic cover
+      </button>
+    </Sheet>
+  )
+}
+
+function MergePicker({ session, book, books, onDone, onClose }) {
+  const [busy, setBusy] = useState(null)
+  const [err, setErr] = useState(null)
+  const others = books
+    .filter((b) => b.document !== book.document)
+    .sort((a, b) => Number(looksLikeSame(book, b)) - Number(looksLikeSame(book, a)) || (a.title ?? '').localeCompare(b.title ?? ''))
+  async function merge(other) {
+    if (!confirm(`Merge "${other.title || other.filename}" into this book? Its progress, clippings and stats move here, and future syncs of it land here too.`)) return
+    setBusy(other.document)
+    setErr(null)
+    try {
+      await api.merge(session, other.document, book.document)
+      onDone()
+    } catch (e) {
+      setErr(e.message)
+      setBusy(null)
+    }
+  }
+  return (
+    <Sheet title="Merge a duplicate into this book" onClose={onClose}>
+      <p className="mt-2 text-sm/6 text-stone-500">
+        When two readers identify the same book differently, it shows up twice. Pick the copy to fold into this one.
+      </p>
+      {err && <p className="mt-3 text-sm text-red-600">{err}</p>}
+      <Card className="mt-4 divide-y divide-stone-100">
+        {others.map((b) => (
+          <button key={b.document} disabled={busy !== null} onClick={() => merge(b)} className="flex w-full items-center gap-3 px-4 py-3 text-left active:bg-stone-50">
+            <Cover session={session} book={b} small className="w-9" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-stone-900">{b.title || b.filename}</p>
+              <p className="truncate text-xs text-stone-500">
+                {[b.author, pct(b.percentage), b.device].filter(Boolean).join(' · ')}
+              </p>
+            </div>
+            {busy === b.document ? (
+              <Loader2 className="size-4 animate-spin text-brand-500" />
+            ) : (
+              looksLikeSame(book, b) && <span className="shrink-0 rounded-full bg-brand-50 px-2 py-0.5 text-[0.65rem] font-semibold text-brand-700">Likely duplicate</span>
+            )}
+          </button>
+        ))}
+      </Card>
+    </Sheet>
+  )
+}
+
+// Fix what the automatic lookups got wrong, and fold duplicates together.
+function BookTools({ session, book, books, onChange }) {
+  const [open, setOpen] = useState(null) // 'cover' | 'merge'
+  const [pages, setPages] = useState(book.page_count ?? '')
+  const [saving, setSaving] = useState(false)
+  const dupes = books.filter((b) => looksLikeSame(book, b)).length
+  async function savePages(value) {
+    setSaving(true)
+    try {
+      await api.setInfo(session, book.document, { page_count: value })
+      onChange()
+    } finally {
+      setSaving(false)
+    }
+  }
+  const done = () => {
+    setOpen(null)
+    onChange()
+  }
+  return (
+    <Card className="mt-4 divide-y divide-stone-100">
+      <button onClick={() => setOpen('cover')} className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-stone-800 active:bg-stone-50">
+        <ImageIcon className="size-4 text-stone-400" /> Change cover
+      </button>
+      <form
+        className="flex items-center gap-3 px-4 py-2"
+        onSubmit={(e) => {
+          e.preventDefault()
+          const n = parseInt(pages, 10)
+          if (n > 0) savePages(n)
+        }}
+      >
+        <Hash className="size-4 shrink-0 text-stone-400" />
+        <label className="min-w-0 flex-1 text-sm font-medium text-stone-800" htmlFor="print-pages">
+          Print pages
+        </label>
+        <input id="print-pages" value={pages} onChange={(e) => setPages(e.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder="?" className="h-9 w-20 rounded-lg bg-stone-50 px-2 text-right text-sm text-stone-900 ring-1 ring-stone-950/10 outline-none focus:ring-2 focus:ring-brand-500/60" />
+        {String(pages) !== String(book.page_count ?? '') && (
+          <button disabled={saving} className="h-9 rounded-lg bg-brand-500 px-3 text-xs font-semibold text-white disabled:opacity-60">
+            Save
+          </button>
+        )}
+      </form>
+      <button onClick={() => setOpen('merge')} className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-stone-800 active:bg-stone-50">
+        <Merge className="size-4 text-stone-400" /> Merge a duplicate
+        {dupes > 0 && <span className="ml-auto rounded-full bg-brand-50 px-2 py-0.5 text-[0.65rem] font-semibold text-brand-700">{dupes} likely</span>}
+      </button>
+      {book.aliases?.length > 0 && (
+        <div className="px-4 py-3 text-sm text-stone-600">
+          Also synced as {book.aliases.length === 1 ? 'another copy' : `${book.aliases.length} other copies`}.{' '}
+          <button
+            className="font-semibold text-brand-600"
+            onClick={async () => {
+              if (!confirm('Separate the merged copies again? Future syncs from them will show as their own books.')) return
+              for (const alias of book.aliases) await api.unmerge(session, alias)
+              onChange()
+            }}
+          >
+            Separate
+          </button>
+        </div>
+      )}
+      {open === 'cover' && <CoverPicker session={session} book={book} onDone={done} onClose={() => setOpen(null)} />}
+      {open === 'merge' && <MergePicker session={session} book={book} books={books} onDone={done} onClose={() => setOpen(null)} />}
+    </Card>
+  )
+}
+
+export default function Book({ session, book, books, activity, onChange }) {
   if (!book) return <p className="py-16 text-center text-sm text-stone-500">Book not found.</p>
   return (
     <div className="px-4 pt-4 pb-6 md:px-8 md:pt-6 lg:px-12">
@@ -250,6 +361,7 @@ export default function Book({ session, book, activity, onChange }) {
             <StatusPicker session={session} book={book} onChange={onChange} />
           </div>
           <Stats session={session} doc={book.document} activity={activity} />
+          <BookTools key={`${book.document}-${book.page_count}`} session={session} book={book} books={books} onChange={onChange} />
         </aside>
 
         <section className="md:max-w-2xl">

@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">CrossPoint Sync</string>
     <string name="main_activity_title">CrossPoint Sync</string>
+    <string name="widget_description">Your current book and reading totals</string>
 </resources>

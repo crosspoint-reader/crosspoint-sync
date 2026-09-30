@@ -195,6 +195,8 @@ const byline = ({ title, author }) => `${title}${author ? `, ${author}` : ''}`
 
 /** "quote" — Title, Author, trimming the quote so the whole post fits `limit` characters. */
 export function shareText(meta, limit = Infinity) {
+  // Stats and other non-quote cards bring their own text.
+  if (meta.text) return meta.text.length > limit ? `${meta.text.slice(0, limit - 1).replace(/\s+\S*$/, '')}\u2026` : meta.text
   const tail = `\u201D\n\u2014 ${byline(meta)}`
   const room = limit - tail.length - 1
   const quote = meta.quote.length > room ? `${meta.quote.slice(0, Math.max(0, room - 1)).replace(/\s+\S*$/, '')}\u2026` : meta.quote
@@ -231,8 +233,8 @@ export async function copyImage(blob, meta) {
 
 /** Save the card: Downloads in the app, a file download in a browser. */
 export async function saveImage(blob, meta) {
-  const name = `${meta.title} clipping.png`
-  if (isApp) return invoke('save_image', new Uint8Array(await blob.arrayBuffer()), { headers: { 'x-name': encodeURIComponent(name) } })
+  const name = meta.fileName ?? `${meta.title} clipping.png`
+  if (isApp) return invoke('save_file', new Uint8Array(await blob.arrayBuffer()), { headers: { 'x-name': encodeURIComponent(name) } })
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
   a.download = name
@@ -250,7 +252,7 @@ export const PLATFORMS = [
     id: 'reddit',
     name: 'Reddit',
     limit: 10000,
-    url: (t, meta) => `https://www.reddit.com/submit?type=TEXT&title=${encodeURIComponent(`From ${byline(meta)}`)}&text=${encodeURIComponent(t)}`,
+    url: (t, meta) => `https://www.reddit.com/submit?type=TEXT&title=${encodeURIComponent(meta.postTitle ?? `From ${byline(meta)}`)}&text=${encodeURIComponent(t)}`,
   },
 ]
 
@@ -260,4 +262,108 @@ export async function postTo(platform, blob, meta) {
   if (isApp) await openUrl(url)
   else window.open(url, '_blank', 'noopener')
   return copied
+}
+
+// Reading stats card: headline numbers, recently finished covers, and a 12-week
+// pages chart. `tiles` are [label, value] pairs (value already formatted).
+export async function renderStatsCard({ heading, tiles, covers, weeks }) {
+  await Promise.all(['600 48px Lora', '500 34px "Inter Variable"', '500 40px Caveat', '400 24px "Geist Mono"'].map((f) => document.fonts.load(f)))
+  const [logo, ...images] = await Promise.all([loadImage('/logo.png', false), ...covers.slice(0, 5).map((u) => loadImage(u, isApp))])
+
+  const canvas = document.createElement('canvas')
+  canvas.width = W
+  canvas.height = H
+  const ctx = canvas.getContext('2d')
+  ctx.fillStyle = C.paper
+  ctx.fillRect(0, 0, W, H)
+  ctx.fillStyle = 'rgba(0,0,0,0.035)'
+  for (let i = 0; i < 9000; i++) ctx.fillRect(Math.random() * W, Math.random() * H, 1.5, 1.5)
+
+  ctx.fillStyle = C.brand
+  ctx.font = '500 44px Caveat'
+  ctx.save()
+  ctx.translate(PAD, 150)
+  ctx.rotate(-0.02)
+  ctx.fillText('My reading', 0, 0)
+  ctx.restore()
+  ctx.fillStyle = C.ink
+  ctx.font = '600 84px Lora'
+  ctx.fillText(heading, PAD, 250)
+
+  // Headline numbers, two per row.
+  const colW = (W - PAD * 2) / 2
+  tiles.slice(0, 4).forEach(([label, value], i) => {
+    const x = PAD + (i % 2) * colW
+    const y = 400 + Math.floor(i / 2) * 170
+    ctx.fillStyle = C.ink
+    ctx.font = '600 76px Lora'
+    ctx.fillText(String(value), x, y)
+    ctx.fillStyle = C.soft
+    ctx.font = '500 30px "Inter Variable"'
+    ctx.fillText(label, x, y + 48)
+  })
+
+  // Recently finished covers.
+  const shown = images.filter(Boolean)
+  const coverTop = 400 + Math.ceil(Math.min(tiles.length, 4) / 2) * 170 + 10
+  if (shown.length) {
+    const cw = 150
+    const chh = 225
+    const gap = (W - PAD * 2 - cw * 5) / 4
+    shown.forEach((img, i) => {
+      const x = PAD + i * (cw + gap)
+      ctx.save()
+      ctx.shadowColor = 'rgba(0,0,0,0.2)'
+      ctx.shadowBlur = 18
+      ctx.shadowOffsetY = 8
+      ctx.beginPath()
+      ctx.roundRect(x, coverTop, cw, chh, 8)
+      ctx.fillStyle = '#fff'
+      ctx.fill()
+      ctx.restore()
+      ctx.save()
+      ctx.beginPath()
+      ctx.roundRect(x, coverTop, cw, chh, 8)
+      ctx.clip()
+      const s = Math.max(cw / img.width, chh / img.height)
+      ctx.drawImage(img, x + (cw - img.width * s) / 2, coverTop + (chh - img.height * s) / 2, img.width * s, img.height * s)
+      ctx.restore()
+    })
+  }
+
+  // Pages per week, oldest to newest.
+  const chartTop = shown.length ? coverTop + 290 : coverTop + 40
+  const chartH = H - 150 - chartTop
+  if (chartH > 60 && weeks.some((w) => w.pages)) {
+    ctx.fillStyle = C.faint
+    ctx.font = '400 22px "Geist Mono"'
+    ctx.fillText('PAGES PER WEEK', PAD, chartTop)
+    const max = Math.max(...weeks.map((w) => w.pages), 1)
+    const bw = (W - PAD * 2) / weeks.length
+    weeks.forEach((w, i) => {
+      const h = Math.max(w.pages ? 4 : 0, ((chartH - 40) * w.pages) / max)
+      ctx.fillStyle = i === weeks.length - 1 ? C.brand : C.brandRule
+      ctx.beginPath()
+      ctx.roundRect(PAD + i * bw + 6, chartTop + chartH - h, bw - 12, h, 5)
+      ctx.fill()
+    })
+    ctx.fillStyle = C.rule
+    ctx.fillRect(PAD, chartTop + chartH + 2, W - PAD * 2, 2)
+  }
+
+  ctx.fillStyle = C.faint
+  ctx.font = '500 26px "Inter Variable"'
+  ctx.textAlign = 'right'
+  ctx.fillText('CrossPoint Sync', W - PAD, H - 58)
+  ctx.textAlign = 'left'
+  if (logo) {
+    const lw = ctx.measureText('CrossPoint Sync').width
+    ctx.save()
+    ctx.beginPath()
+    ctx.roundRect(W - PAD - lw - 50, H - 90, 38, 38, 9)
+    ctx.clip()
+    ctx.drawImage(logo, W - PAD - lw - 50, H - 90, 38, 38)
+    ctx.restore()
+  }
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
 }

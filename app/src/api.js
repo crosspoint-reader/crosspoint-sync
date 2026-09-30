@@ -27,18 +27,43 @@ export function logout() {
   localStorage.removeItem(KEY)
 }
 
+// Offline: every successful GET is kept on the device; when the network is down
+// the last copy is served and an event lets the UI say so.
+// ponytail: localStorage (~5 MB); move to IndexedDB if libraries outgrow it.
+const OFFLINE = 'crosspoint-offline:'
+export const offline = new EventTarget()
+
 async function call(session, path, init = {}) {
-  const res = await http(session.server + path, {
-    ...init,
-    headers: {
-      'content-type': 'application/json',
-      'x-auth-user': session.username,
-      'x-auth-key': session.key,
-    },
-  })
+  const key = `${OFFLINE}${session.username}@${session.server}${path}`
+  const isGet = !init.method || init.method === 'GET'
+  let res
+  try {
+    res = await http(session.server + path, {
+      ...init,
+      headers: {
+        'content-type': 'application/json',
+        'x-auth-user': session.username,
+        'x-auth-key': session.key,
+      },
+    })
+  } catch (e) {
+    const saved = isGet && localStorage.getItem(key)
+    if (!saved) throw e
+    offline.dispatchEvent(new Event('offline'))
+    return JSON.parse(saved)
+  }
   if (res.status === 401) throw Object.assign(new Error('Signed out'), { status: 401 })
-  if (!res.ok) throw new Error(`Server error ${res.status}`)
-  return res.json()
+  if (!res.ok) throw Object.assign(new Error(`Server error ${res.status}`), { status: res.status })
+  const data = await res.json()
+  if (isGet) {
+    offline.dispatchEvent(new Event('online'))
+    try {
+      localStorage.setItem(key, JSON.stringify(data))
+    } catch {
+      // storage full: offline copy just stays older
+    }
+  }
+  return data
 }
 
 // "192.168.1.20:8080" or "sync.example.com" -> candidate base URLs, https first.
@@ -80,6 +105,21 @@ export const api = {
   activity: (s) => call(s, `/api/v1/stats/activity?tz=${new Date().getTimezoneOffset()}`),
   bookStats: (s, doc) => call(s, `/api/v1/stats/books/${doc}`),
   cover: (s, doc) => call(s, `/api/v1/documents/${doc}/cover`),
+  setInfo: (s, doc, patch) => call(s, `/api/v1/documents/${doc}/info`, { method: 'PUT', body: JSON.stringify(patch) }),
+  coverCandidates: (s, doc, q) => call(s, `/api/v1/documents/${doc}/cover/candidates${q ? `?q=${encodeURIComponent(q)}` : ''}`).then((r) => r.items),
+  // `document` becomes an alias of `into`: its progress, clippings and stats move there.
+  merge: (s, document, into) => call(s, '/api/v1/documents/merge', { method: 'POST', body: JSON.stringify({ document, into }) }),
+  unmerge: (s, alias) => call(s, `/api/v1/documents/merge/${alias}`, { method: 'DELETE' }),
+  // Every clipping across books; older servers without /clippings get fetched book by book.
+  async allClippings(s, books) {
+    try {
+      return (await call(s, '/api/v1/clippings')).items
+    } catch (e) {
+      if (e.status !== 404) throw e
+      const per = await Promise.all(books.map((b) => api.clippings(s, b.document).then((items) => items.map((c) => ({ ...c, document: b.document })))))
+      return per.flat().sort((a, b) => b.created_at - a.created_at)
+    }
+  },
   setStatus: (s, doc, status) =>
     call(s, `/api/v1/documents/${doc}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
   async clippings(s, doc) {

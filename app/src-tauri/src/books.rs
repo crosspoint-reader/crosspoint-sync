@@ -184,10 +184,10 @@ pub async fn send_bytes(request: Request<'_>) -> Res<()> {
   send(&base, &folder, &name, bytes.clone(), quality, None).await
 }
 
-/// Desktop fallback for sharing a clipping card: save the PNG to Downloads.
-/// Body = raw PNG bytes; x-name header = file name.
+/// Save a generated file (share card PNG, clippings Markdown) to Downloads.
+/// Body = raw bytes; x-name header = file name.
 #[tauri::command]
-pub async fn save_image(app: AppHandle, request: Request<'_>) -> Res<String> {
+pub async fn save_file(app: AppHandle, request: Request<'_>) -> Res<String> {
   let name = request
     .headers()
     .get("x-name")
@@ -195,9 +195,9 @@ pub async fn save_image(app: AppHandle, request: Request<'_>) -> Res<String> {
     .and_then(urlencoding_decode)
     .map(|n| sanitize_filename::sanitize(n))
     .filter(|n| !n.is_empty())
-    .unwrap_or_else(|| "clipping.png".into());
+    .unwrap_or_else(|| "crosspoint-sync".into());
   let InvokeBody::Raw(bytes) = request.body() else {
-    return Err("expected raw image bytes".into());
+    return Err("expected raw file bytes".into());
   };
   let dir = app.path().download_dir().map_err(err)?;
   let name = unique_name(&dir, &name);

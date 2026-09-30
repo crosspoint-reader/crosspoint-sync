@@ -4,9 +4,12 @@ import { kosyncError, type AppEnv } from '../../auth/middleware.js';
 import { isValidDocument } from '../kosync.js';
 import { nowSeconds } from '../../models/sync.js';
 import { mergeDocuments, resolveDocument, unmergeDocument } from '../../models/merge.js';
-import { documentInfo } from '../../models/cover.js';
+import { coverCandidates, documentInfo } from '../../models/cover.js';
+import { extractTitleAuthor } from '../../connectors/matching.js';
+import { documentMeta } from '../../connectors/store.js';
 import { fanOutProgress } from '../../connectors/fanout.js';
 import type { HttpTransport } from '../../connectors/types.js';
+import { fetchTransport } from '../../connectors/registry.js';
 
 const MAX_BATCH = 50;
 export const STATUSES = ['reading', 'finished', 'dnf', 'paused'] as const;
@@ -140,6 +143,52 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     const user = c.get('user');
     const info = await documentInfo(db, user.id, resolveDocument(db, user.id, param), http);
     return c.json({ url: info.cover, pages: info.pages });
+  });
+
+  // Covers to choose from when the automatic one is wrong. ?q= searches a different title.
+  app.get('/documents/:document/cover/candidates', async (c) => {
+    const param = c.req.param('document');
+    if (!isValidDocument(param)) {
+      return kosyncError(c, 403, 2004, "Field 'document' not provided.");
+    }
+    const user = c.get('user');
+    const meta = extractTitleAuthor(documentMeta(db, user.id, resolveDocument(db, user.id, param)));
+    const q = c.req.query('q')?.trim().slice(0, 200);
+    const title = q || meta?.title;
+    if (!title) return c.json({ items: [] });
+    return c.json({ items: await coverCandidates(http ?? fetchTransport, title, q ? '' : (meta?.author ?? '')) });
+  });
+
+  // Manual cover / print page count when the lookup got it wrong. Manual values stick
+  // (lookups only fill blanks); null clears a field so it's looked up again.
+  app.put('/documents/:document/info', async (c) => {
+    const param = c.req.param('document');
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return kosyncError(c, 403, 2003, 'Invalid request');
+    }
+    const o = (body ?? {}) as Record<string, unknown>;
+    const cover = o.cover_url;
+    const pages = o.page_count;
+    const coverOk = cover === undefined || cover === null || (typeof cover === 'string' && /^https?:\/\/\S{1,2000}$/.test(cover));
+    const pagesOk = pages === undefined || pages === null || (Number.isInteger(pages) && (pages as number) > 0 && (pages as number) <= 100000);
+    if (!isValidDocument(param) || !coverOk || !pagesOk) {
+      return kosyncError(c, 403, 2003, 'Invalid request');
+    }
+    const user = c.get('user');
+    const document = resolveDocument(db, user.id, param);
+    const now = nowSeconds();
+    db.prepare('INSERT INTO documents (user_id, document, updated_at) VALUES (?, ?, ?) ON CONFLICT(user_id, document) DO NOTHING').run(user.id, document, now);
+    if (cover !== undefined) {
+      db.prepare('UPDATE documents SET cover_url = ?, cover_checked_at = ? WHERE user_id = ? AND document = ?').run(cover as string | null, cover === null ? null : now, user.id, document);
+    }
+    if (pages !== undefined) {
+      db.prepare('UPDATE documents SET page_count = ?, cover_checked_at = CASE WHEN ? IS NULL THEN NULL ELSE cover_checked_at END WHERE user_id = ? AND document = ?').run(pages as number | null, pages as number | null, user.id, document);
+    }
+    const row = db.prepare('SELECT cover_url, page_count FROM documents WHERE user_id = ? AND document = ?').get(user.id, document) as { cover_url: string | null; page_count: number | null };
+    return c.json({ document, cover_url: row.cover_url, page_count: row.page_count });
   });
 
   app.get('/documents', (c) => {

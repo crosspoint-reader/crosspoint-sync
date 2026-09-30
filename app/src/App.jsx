@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChartColumn, Compass, Eye, EyeOff, LibraryBig, Loader2, Lock, LogOut, Send as SendIcon, Server, Settings, User } from 'lucide-react'
-import { DEFAULT_SERVER, api, lastServer, loadSession, login, logout } from './api.js'
+import { ChartColumn, CloudOff, Compass, Quote, Eye, EyeOff, LibraryBig, Loader2, Lock, LogOut, Send as SendIcon, Server, Settings, User } from 'lucide-react'
+import { DEFAULT_SERVER, api, lastServer, loadSession, login, logout, offline } from './api.js'
 import { ErrorNote, Spinner, useLoad } from './ui.jsx'
 import Library from './Library.jsx'
 import Book from './Book.jsx'
 import Stats from './Stats.jsx'
 import Send from './Send.jsx'
 import Browse from './Browse.jsx'
+import Clippings from './Clippings.jsx'
+import { updateWidget } from './widget.js'
 
 // A filled, full-width field with a leading icon: the native mobile idiom.
 function Field({ icon: Icon, trailing, inputRef, ...props }) {
@@ -181,8 +183,9 @@ function useHash() {
 }
 
 const NAV = [
-  { href: '#/', label: 'Library', icon: LibraryBig, active: (r) => !['stats', 'send', 'browse'].includes(r) },
+  { href: '#/', label: 'Library', icon: LibraryBig, active: (r) => !['stats', 'send', 'browse', 'clippings'].includes(r) },
   { href: '#/browse', label: 'Browse', icon: Compass, active: (r) => r === 'browse' },
+  { href: '#/clippings', label: 'Clippings', icon: Quote, active: (r) => r === 'clippings' },
   { href: '#/stats', label: 'Stats', icon: ChartColumn, active: (r) => r === 'stats' },
   { href: '#/send', label: 'Send', icon: SendIcon, active: (r) => r === 'send' },
 ]
@@ -292,10 +295,25 @@ function Sidebar({ route, session, onLogout }) {
 
 function Home({ session, onLogout }) {
   const parts = useHash()
+  // Offline: api.js serves the last saved copy and says so; show a slim notice until the network is back.
+  const [isOffline, setOffline] = useState(false)
+  useEffect(() => {
+    const on = () => setOffline(true)
+    const off = () => setOffline(false)
+    offline.addEventListener('offline', on)
+    offline.addEventListener('online', off)
+    return () => {
+      offline.removeEventListener('offline', on)
+      offline.removeEventListener('online', off)
+    }
+  }, [])
   const [route, id] = parts
   const [books, error, reloadBooks] = useLoad(() => api.books(session), [session])
   const [summary, , reloadSummary] = useLoad(() => api.summary(session), [session])
   const [activity, , reloadActivity] = useLoad(() => api.activity(session), [session])
+  useEffect(() => {
+    updateWidget({ books, summary, activity })
+  }, [books, summary, activity])
 
   useEffect(() => {
     if (error?.status === 401) onLogout()
@@ -317,11 +335,13 @@ function Home({ session, onLogout }) {
   else if (route === 'browse') page = <Browse parts={parts} />
   else if (error) page = <ErrorNote error={error} />
   else if (!books) page = <Spinner />
+  else if (route === 'clippings') page = <Clippings session={session} books={books} />
   else if (route === 'stats') page = <Stats summary={summary} activity={activity} books={books} />
   else if (route === 'book') page = (
       <Book
         session={session}
         book={books.find((b) => b.document === id)}
+        books={books}
         activity={activity?.books.find((b) => b.document === id)}
         onChange={() => {
           reloadBooks()
@@ -335,6 +355,11 @@ function Home({ session, onLogout }) {
     <div className="min-h-dvh md:flex">
       <Sidebar route={route} session={session} onLogout={onLogout} />
       <main className="relative mx-auto w-full max-w-xl pb-24 md:max-w-6xl md:pb-10">
+        {isOffline && (
+          <div className="sticky top-0 z-30 flex items-center justify-center gap-2 bg-stone-800 px-4 py-2 text-xs font-medium text-stone-100">
+            <CloudOff className="size-3.5" /> Offline. Showing what was saved on this device.
+          </div>
+        )}
         <AccountMenu key={parts.join('/')} session={session} onLogout={onLogout} />
         {page}
       </main>

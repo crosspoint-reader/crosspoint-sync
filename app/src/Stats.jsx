@@ -1,3 +1,7 @@
+import { useState } from 'react'
+import { Share2 } from 'lucide-react'
+import ShareSheet from './ShareSheet.jsx'
+import { renderStatsCard } from './shareCard.js'
 import { Card, Eyebrow, duration } from './ui.jsx'
 
 const WEEKS = 52 // phones show the newest 26
@@ -81,17 +85,21 @@ const DAY_MS = 86400000
 const localDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
 // Print pages per week (Monday start), newest week last.
-function WeeklyPages({ days, weeks = 12 }) {
+function weeklyPages(days, weeks = 12) {
   const byDay = new Map(days.map((d) => [d.day, d.pages]))
   const monday = new Date()
   monday.setHours(12, 0, 0, 0)
   monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7))
-  const cols = Array.from({ length: weeks }, (_, i) => {
+  return Array.from({ length: weeks }, (_, i) => {
     const start = new Date(monday.getTime() - (weeks - 1 - i) * 7 * DAY_MS)
     let pages = 0
     for (let d = 0; d < 7; d++) pages += byDay.get(localDay(new Date(start.getTime() + d * DAY_MS))) ?? 0
     return { start, pages }
   })
+}
+
+function WeeklyPages({ days, weeks = 12 }) {
+  const cols = weeklyPages(days, weeks)
   const max = Math.max(...cols.map((c) => c.pages), 1)
   return (
     <Card className="mt-4 p-4">
@@ -167,12 +175,62 @@ function PagesAndBooks({ activity: all, books }) {
   )
 }
 
+// The stats share card: this year's headline numbers, recent covers, weekly pages.
+function StatsShare({ summary, activity, books, onClose }) {
+  const year = new Date().getFullYear()
+  const shown = new Map(books.map((b) => [b.document, b]))
+  const finished = activity.books
+    .filter((b) => b.finished_at && shown.has(b.document))
+    .sort((a, b) => b.finished_at - a.finished_at)
+  const thisYear = finished.filter((b) => new Date(b.finished_at * 1000).getFullYear() === year)
+  const pages = activity.books.filter((b) => shown.has(b.document)).reduce((n, b) => n + (b.pages_read ?? 0), 0)
+  const hasTime = summary?.devices?.length > 0
+  const tiles = [
+    [`finished in ${year}`, thisYear.length],
+    ['pages read', pages.toLocaleString()],
+    ...(hasTime
+      ? [
+          ['hours read', Math.round(summary.seconds / 3600).toLocaleString()],
+          ['day streak', summary.current_streak],
+        ]
+      : [['reading now', books.filter((b) => b.status === 'reading').length]]),
+  ]
+  const covers = finished.map((b) => shown.get(b.document).cover_url).filter(Boolean)
+  const meta = {
+    title: `${year} in books`,
+    postTitle: `My ${year} in books`,
+    fileName: `${year} in books.png`,
+    text: `My ${year} in books: ${thisYear.length} finished, ${pages.toLocaleString()} pages read. Tracked with CrossPoint Sync.`,
+  }
+  return (
+    <ShareSheet
+      heading="Share your stats"
+      meta={meta}
+      renderKey={`${year}-${pages}-${thisYear.length}`}
+      onClose={onClose}
+      render={() => renderStatsCard({ heading: `${year} in books`, tiles, covers, weeks: weeklyPages(activity.days) })}
+    />
+  )
+}
+
 export default function Stats({ summary, activity, books }) {
   const hasTime = summary?.devices?.length > 0
+  const [sharing, setSharing] = useState(false)
   return (
     <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
       <Eyebrow className="md:hidden">Reading stats</Eyebrow>
-      <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">How you read</h1>
+      <div className="flex items-center justify-between gap-4 pr-12 md:pr-0">
+        <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">How you read</h1>
+        {activity && (
+          <button
+            onClick={() => setSharing(true)}
+            className="flex h-10 shrink-0 items-center gap-1.5 rounded-full bg-white px-4 text-sm font-semibold text-brand-700 ring-1 ring-stone-950/10 active:bg-stone-100"
+          >
+            <Share2 className="size-4" /> Share
+          </button>
+        )}
+      </div>
+      {sharing && <StatsShare summary={summary} activity={activity} books={books} onClose={() => setSharing(false)} />}
 
       <h2 className="mt-8 font-display text-xl font-semibold text-stone-900">Pages &amp; books</h2>
       {activity ? <PagesAndBooks activity={activity} books={books} /> : <p className="py-6 text-sm text-stone-500">Loading…</p>}

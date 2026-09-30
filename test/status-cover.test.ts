@@ -93,3 +93,44 @@ describe('Amazon page count fallback (SearchAPI)', () => {
     expect(calls.some((u) => u.includes('searchapi'))).toBe(false);
   });
 });
+
+describe('manual book info, cover candidates, all clippings', () => {
+  it('keeps a manual cover and page count, and clears back to lookup', async () => {
+    const http: HttpTransport = async (url) =>
+      url.includes('itunes')
+        ? json({ results: [{ trackName: 'Foundryside', artistName: 'Robert Jackson Bennett', artworkUrl100: 'https://a/100x100bb.jpg' }] })
+        : json({ docs: [{ title: 'Foundryside', author_name: ['Robert Jackson Bennett'], cover_i: 7, number_of_pages_median: 500 }] });
+    const { app } = makeTestApp({}, { connectorTransport: http });
+    const { headers } = await registerUser(app);
+    await app.request('/syncs/progress', { method: 'PUT', headers, body: JSON.stringify(PUT_BODY) });
+    const put = (body: unknown) => app.request(`/api/v1/documents/${DOC}/info`, { method: 'PUT', headers, body: JSON.stringify(body) });
+
+    expect((await put({ cover_url: 'javascript:alert(1)' })).status).toBe(403);
+    expect((await put({ page_count: -3 })).status).toBe(403);
+    expect(await (await put({ cover_url: 'https://mine/cover.jpg', page_count: 612 })).json()).toMatchObject({ cover_url: 'https://mine/cover.jpg', page_count: 612 });
+    // A later lookup never overwrites manual values.
+    expect(await (await app.request(`/api/v1/documents/${DOC}/cover`, { headers })).json()).toEqual({ url: 'https://mine/cover.jpg', pages: 612 });
+
+    const cands = await (await app.request(`/api/v1/documents/${DOC}/cover/candidates`, { headers })).json();
+    expect(cands.items.map((c: { source: string }) => c.source)).toEqual(['Apple Books', 'Open Library']);
+    expect(cands.items[0].url).toBe('https://a/600x600bb.jpg');
+
+    await put({ cover_url: null });
+    expect((await (await app.request(`/api/v1/documents/${DOC}/cover`, { headers })).json()).url).toBe('https://a/600x600bb.jpg');
+  });
+
+  it('lists every live clipping across books, newest first', async () => {
+    const { app } = makeTestApp();
+    const { headers } = await registerUser(app);
+    const clip = (id: string, created_at: number) => ({ id, spine: 1, start_page: 0, end_page: 0, pages: 1, start_word: 0, end_word: 1, words: 1, chapter: 'One', text: `quote ${id}`, created_at });
+    const other = 'b1b2c3d4e5f60718293a4b5c6d7e8f91';
+    await app.request(`/api/v1/clippings/${DOC}`, { method: 'PUT', headers, body: JSON.stringify({ items: [clip('aaaaaaaaaaaaaaa1', 100), clip('aaaaaaaaaaaaaaa2', 300)] }) });
+    await app.request(`/api/v1/clippings/${other}`, { method: 'PUT', headers, body: JSON.stringify({ items: [clip('bbbbbbbbbbbbbbb1', 200)] }) });
+    await app.request(`/api/v1/clippings/${DOC}`, { method: 'PUT', headers, body: JSON.stringify({ items: [{ id: 'aaaaaaaaaaaaaaa1', deleted: 1 }] }) });
+    const all = await (await app.request('/api/v1/clippings', { headers })).json();
+    expect(all.items.map((i: { id: string; document: string }) => [i.id, i.document])).toEqual([
+      ['aaaaaaaaaaaaaaa2', DOC],
+      ['bbbbbbbbbbbbbbb1', other],
+    ]);
+  });
+});

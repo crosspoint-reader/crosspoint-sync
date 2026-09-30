@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   BookUp,
+  ChevronRight,
+  FolderPlus,
+  Pencil,
   CircleAlert,
   CircleCheck,
   FileText,
@@ -15,7 +18,7 @@ import {
   X,
 } from 'lucide-react'
 import { isApp } from './api.js'
-import { DEFAULT_HOST, EXTENSIONS, connect, folders, isBook, loadDevicePrefs, saveDevicePrefs } from './device.js'
+import { DEFAULT_HOST, EXTENSIONS, connect, deleteFiles, folders, isBook, joinPath, listFiles, loadDevicePrefs, makeFolder, renameFile, saveDevicePrefs } from './device.js'
 import { downloads as listDownloads, removeDownload, sendDownload, sendFile } from './catalogs.js'
 import { Card, Eyebrow } from './ui.jsx'
 
@@ -239,6 +242,124 @@ function Shelf({ prefs, ready }) {
   )
 }
 
+// Browse and tidy the reader's SD card over its File Transfer server.
+function ReaderFiles({ base, onFoldersChanged }) {
+  const [path, setPath] = useState('/')
+  const [files, setFiles] = useState(null)
+  const [error, setError] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    let live = true
+    setFiles(null)
+    setError(null)
+    listFiles(base, path).then(
+      (f) => live && setFiles(f),
+      (e) => live && setError(e.message)
+    )
+    return () => {
+      live = false
+    }
+  }, [base, path, tick])
+
+  async function run(fn, foldersChanged) {
+    setBusy(true)
+    setError(null)
+    try {
+      await fn()
+      setTick((t) => t + 1)
+      if (foldersChanged) onFoldersChanged()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const crumbs = path.split('/').filter(Boolean)
+
+  return (
+    <section className="mt-8">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="font-display text-xl font-semibold text-stone-900">On your reader</h2>
+        <button
+          disabled={busy}
+          onClick={() => {
+            const name = prompt('New folder name')?.trim()
+            if (name) run(() => makeFolder(base, path, name), true)
+          }}
+          className="flex h-9 items-center gap-1.5 rounded-full bg-white px-3 text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100"
+        >
+          <FolderPlus className="size-4" /> New folder
+        </button>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-1 text-sm">
+        <button onClick={() => setPath('/')} className="rounded-md px-1.5 py-0.5 font-medium text-brand-600 active:bg-stone-100">
+          SD card
+        </button>
+        {crumbs.map((c, i) => (
+          <span key={i} className="flex items-center gap-1">
+            <ChevronRight className="size-3.5 text-stone-300" />
+            <button onClick={() => setPath(`/${crumbs.slice(0, i + 1).join('/')}`)} className="rounded-md px-1.5 py-0.5 font-medium text-brand-600 active:bg-stone-100">
+              {c}
+            </button>
+          </span>
+        ))}
+      </div>
+      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      <Card className="mt-3 divide-y divide-stone-100">
+        {!files ? (
+          <div className="py-6">
+            <Loader2 className="mx-auto size-5 animate-spin text-stone-400" />
+          </div>
+        ) : files.length === 0 ? (
+          <p className="px-4 py-6 text-center text-sm text-stone-500">This folder is empty.</p>
+        ) : (
+          files.map((f) => {
+            const full = joinPath(path, f.name)
+            return (
+              <div key={f.name} className="flex items-center gap-3 px-4 py-2.5">
+                <button
+                  disabled={!f.isDirectory}
+                  onClick={() => setPath(full)}
+                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                >
+                  {f.isDirectory ? <Folder className="size-5 shrink-0 text-brand-500" strokeWidth={1.75} /> : <FileText className="size-5 shrink-0 text-stone-400" strokeWidth={1.75} />}
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-medium text-stone-900">{f.name}</span>
+                    {!f.isDirectory && <span className="block text-xs text-stone-500">{size(f.size)}</span>}
+                  </span>
+                </button>
+                <button
+                  disabled={busy}
+                  onClick={() => {
+                    const name = prompt(`Rename "${f.name}" to`, f.name)?.trim()
+                    if (name && name !== f.name) run(() => renameFile(base, full, name), f.isDirectory)
+                  }}
+                  className="grid size-9 place-items-center rounded-full text-stone-400 active:bg-stone-100"
+                  aria-label={`Rename ${f.name}`}
+                >
+                  <Pencil className="size-4" />
+                </button>
+                <button
+                  disabled={busy}
+                  onClick={() =>
+                    confirm(`Delete "${f.name}"${f.isDirectory ? ' and everything in it' : ''} from your reader?`) &&
+                    run(() => deleteFiles(base, [full]), f.isDirectory)
+                  }
+                  className="-mr-2 grid size-9 place-items-center rounded-full text-stone-400 active:bg-stone-100"
+                  aria-label={`Delete ${f.name}`}
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              </div>
+            )
+          })
+        )}
+      </Card>
+    </section>
+  )
+}
+
 export default function Send() {
   const [prefs, setPrefsState] = useState(loadDevicePrefs)
   const [device, setDevice] = useState({ state: 'searching', dirs: [] })
@@ -392,6 +513,7 @@ export default function Send() {
             )}
 
             <Shelf prefs={prefs} ready={device.state === 'ok'} />
+            {device.state === 'ok' && <ReaderFiles base={device.base} onFoldersChanged={() => folders(device.base).then((dirs) => setDevice((d) => ({ ...d, dirs })), () => {})} />}
           </div>
         </div>
       )}

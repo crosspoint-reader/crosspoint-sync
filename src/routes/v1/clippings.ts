@@ -43,6 +43,30 @@ function uint(v: unknown, fallback?: number): number | undefined {
 export function clippingRoutes(db: DB): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
+  // Every live clipping across all books, newest first: the app's clippings hub.
+  app.get('/clippings', (c) => {
+    const user = c.get('user');
+    const rows = db
+      .prepare(
+        `SELECT document, id, spine_index, paragraph_index, start_offset, chapter_title, text, note, created_at
+         FROM clippings WHERE user_id = ? AND deleted = 0 ORDER BY created_at DESC, id LIMIT 5000`
+      )
+      .all(user.id) as unknown as (Pick<ClippingRow, 'id' | 'spine_index' | 'paragraph_index' | 'start_offset' | 'chapter_title' | 'text' | 'note' | 'created_at'> & { document: string })[];
+    return c.json({
+      items: rows.map((r) => ({
+        document: r.document,
+        id: r.id,
+        spine: r.spine_index,
+        para: r.paragraph_index,
+        start_offset: r.start_offset,
+        chapter: r.chapter_title,
+        text: r.text,
+        note: r.note,
+        created_at: r.created_at,
+      })),
+    });
+  });
+
   app.get('/clippings/:document', (c) => {
     const document = c.req.param('document');
     if (!isValidDocument(document)) {

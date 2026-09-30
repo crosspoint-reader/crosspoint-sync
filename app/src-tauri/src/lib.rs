@@ -2,6 +2,7 @@ mod books;
 mod mdns;
 mod opds;
 mod optimizer;
+mod widget;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -20,7 +21,8 @@ pub fn run() {
       books::delete_download,
       books::send_download,
       books::send_bytes,
-      books::save_image,
+      books::save_file,
+      widget::update_widget,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

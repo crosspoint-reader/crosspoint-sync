@@ -49,3 +49,26 @@ export function saveDevicePrefs(p) {
     // per-device convenience only
   }
 }
+
+// File manager: the same endpoints CrossPoint's own web page uses.
+export async function listFiles(base, path = '/') {
+  const res = await http(`${base}/api/files?path=${encodeURIComponent(path)}`, { signal: AbortSignal.timeout(10000) })
+  if (!res.ok) throw new Error(`Couldn't open ${path}`)
+  return (await res.json())
+    .filter((f) => !f.name.startsWith('.'))
+    .sort((a, b) => Number(b.isDirectory) - Number(a.isDirectory) || a.name.localeCompare(b.name, undefined, { numeric: true }))
+}
+
+async function post(base, endpoint, fields) {
+  const res = await http(`${base}/${endpoint}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(fields).toString(),
+  })
+  if (!res.ok) throw new Error((await res.text()).trim() || `${endpoint} failed`)
+}
+
+export const joinPath = (dir, name) => (dir === '/' ? `/${name}` : `${dir}/${name}`)
+export const renameFile = (base, path, name) => post(base, 'rename', { path, name })
+export const makeFolder = (base, path, name) => post(base, 'mkdir', { path, name })
+export const deleteFiles = (base, paths) => post(base, 'delete', { paths: JSON.stringify(paths) })

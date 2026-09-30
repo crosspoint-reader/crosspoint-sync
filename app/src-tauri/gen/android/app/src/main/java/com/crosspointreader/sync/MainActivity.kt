@@ -34,6 +34,18 @@ class MainActivity : TauriActivity() {
   // through this bridge: window.CrossPointShare.share(text, pngBase64, title).
   override fun onWebViewCreate(webView: WebView) {
     webView.addJavascriptInterface(ShareBridge(), "CrossPointShare")
+    webView.addJavascriptInterface(WidgetBridge(), "CrossPointWidget")
+  }
+
+  // Home screen widget data: window.CrossPointWidget.update(json, coverPngBase64 or "").
+  inner class WidgetBridge {
+    @JavascriptInterface
+    fun update(json: String, coverBase64: String) {
+      getSharedPreferences(ReadingWidget.PREFS, MODE_PRIVATE).edit().putString("data", json).apply()
+      val cover = File(filesDir, ReadingWidget.COVER)
+      if (coverBase64.isEmpty()) cover.delete() else cover.writeBytes(Base64.decode(coverBase64, Base64.DEFAULT))
+      ReadingWidget.refresh(this@MainActivity)
+    }
   }
 
   inner class ShareBridge {

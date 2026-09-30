@@ -151,6 +151,30 @@ export async function findBookInfo(
   return { cover, pages };
 }
 
+export interface CoverCandidate {
+  url: string;
+  title: string;
+  author: string | null;
+  source: 'Apple Books' | 'Open Library';
+  pages: number | null;
+}
+
+/** Every cover the sources offer for a title, best matches first: the app's cover picker. */
+export async function coverCandidates(http: HttpTransport, title: string, author: string): Promise<CoverCandidate[]> {
+  const [apple, ol] = await Promise.all([safe(itunes(http, title, author)), safe(openLibrary(http, title, author))]);
+  const tagged = [
+    ...apple.map((c) => ({ ...c, source: 'Apple Books' as const })),
+    ...ol.map((c) => ({ ...c, source: 'Open Library' as const })),
+  ].filter((c) => c.url);
+  const seen = new Set<string>();
+  return tagged
+    .map((c) => ({ c, score: scoreCandidate(title, author, c) }))
+    .sort((a, b) => b.score - a.score)
+    .filter(({ c }) => !seen.has(c.url!) && seen.add(c.url!))
+    .slice(0, 12)
+    .map(({ c }) => ({ url: c.url!, title: c.title, author: c.author ?? null, source: c.source, pages: c.pages ?? null }));
+}
+
 /** Cached cover URL + print page count for a document, resolving on first ask. */
 export async function documentInfo(
   db: DB,

@@ -55,6 +55,8 @@ targets:
         CFBundleVersion: 0.1.0
     entitlements:
       path: crosspoint-sync-app_iOS/crosspoint-sync-app_iOS.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.crosspointreader.sync]
     scheme:
       environmentVariables:
         RUST_BACKTRACE: full
@@ -70,6 +72,9 @@ targets:
         EXCLUDED_ARCHS[sdk=iphoneos*]: x86_64
       groups: [app]
     dependencies:
+      - target: CrossPointWidget
+        embed: true
+        codeSign: true
       - framework: libapp.a
         embed: false
       - sdk: CoreGraphics.framework
@@ -86,3 +91,33 @@ targets:
         outputFiles:
           - $(SRCROOT)/Externals/x86_64/${CONFIGURATION}/libapp.a
           - $(SRCROOT)/Externals/arm64/${CONFIGURATION}/libapp.a
+  # Home screen widget (WidgetKit). Reads what the app writes into the shared App Group.
+  CrossPointWidget:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: CrossPointWidget
+    info:
+      path: CrossPointWidget/Info.plist
+      properties:
+        CFBundleDisplayName: CrossPoint Sync
+        CFBundleShortVersionString: 0.1.0
+        CFBundleVersion: 0.1.0
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: CrossPointWidget/CrossPointWidget.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.crosspointreader.sync]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.crosspointreader.sync.widget
+        PRODUCT_NAME: CrossPointWidget
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SKIP_INSTALL: true
+    dependencies:
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
+

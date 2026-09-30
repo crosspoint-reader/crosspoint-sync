@@ -457,6 +457,23 @@ from iTunes Search (ebooks), then Open Library; page counts from Open Library, t
 the server has `GOOGLE_BOOKS_API_KEY`, then Amazon's "Print length" via SearchAPI when it has
 `SEARCHAPI_KEY`. `GET /api/v1/progress` items also carry `page_count`.
 
+#### PUT /api/v1/documents/{document}/info
+
+Manual fixes when the lookup got it wrong: `{"cover_url": "https://...", "page_count": 433}` (either
+field optional). Manual values stick, since lookups only fill blanks; `null` clears a field so it's
+looked up again. Returns the stored `{document, cover_url, page_count}`.
+
+#### GET /api/v1/documents/{document}/cover/candidates?q=
+
+Up to 12 covers to choose from (`{"items": [{url, title, author, source, pages}]}`), best matches
+first, from Apple Books and Open Library. `q` searches a different title.
+
+#### GET /api/v1/clippings
+
+Every live clipping across all books, newest first (max 5000): `{"items": [{document, id, spine,
+para, start_offset, chapter, text, note, created_at}]}`. Read-only convenience for apps; devices
+keep using the per-document delta sync.
+
 #### GET /api/v1/stats/activity?tz=
 
 Pages and books derived from the progress history, for readers that never send stats (stock
