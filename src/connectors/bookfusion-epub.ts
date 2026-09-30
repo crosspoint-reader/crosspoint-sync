@@ -1,14 +1,25 @@
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
-import { crc32 } from 'node:zlib';
-import { DOMParser, onErrorStopParsing, type Element, type Node } from '@xmldom/xmldom';
-import { fromBufferPromise, type Entry } from 'yauzl';
+import { crc32, gunzipSync, gzipSync } from 'node:zlib';
+import { DOMParser, onErrorStopParsing, XMLSerializer, type Element, type Node } from '@xmldom/xmldom';
+import { fromBufferPromise } from 'yauzl';
+import type { DB } from '../db/db.js';
 import { ConnectorOperationError, type HttpTransport } from './types.js';
 
-const MAX_ARCHIVE = 32 * 1024 * 1024;
+// Providers (BookFusion) ignore Range, so image-heavy books arrive whole. Only the
+// download is this big, and only briefly: the cache keeps just the text entries.
+const MAX_ARCHIVE = 200 * 1024 * 1024;
 const MAX_XML = 1024 * 1024;
+const MAX_CACHE = 32 * 1024 * 1024;
 const CACHE_TTL = 15 * 60 * 1000;
-const cache = new Map<string, { bytes: Buffer; expires: number }>();
+// Everything a position lookup can read: container, package, and XHTML chapters.
+const TEXT_ENTRY = /^META-INF\/|\.(?:x?html?|xml|opf|ncx)$/i;
+
+/** An EPUB's text entries by path; null marks an entry too large to parse. */
+export type TextEpub = Map<string, Buffer | null>;
+export type Epub = Buffer | TextEpub;
+
+const cache = new Map<string, { book: TextEpub; size: number; expires: number }>();
 
 export function clearBookFusionEpubCache(): void { cache.clear(); }
 
@@ -24,10 +35,10 @@ function checkStatus(status: number, authenticated = true): void {
   );
 }
 
-/** Cache only archives, bounded across all accounts. Tokens never appear in cache keys. */
+/** Cache only archive text, bounded across all accounts. Tokens never appear in cache keys. */
 export async function bookFusionEpub(
   token: string, bookId: string, headers: Record<string, string>, http: HttpTransport
-): Promise<Buffer> {
+): Promise<TextEpub> {
   return cachedEpub([token, bookId], async (signal) => {
     const link = await http(`https://www.bookfusion.com/api/user/books/${encodeURIComponent(bookId)}/download`, {
       method: 'POST', headers, body: '{}', signal,
@@ -47,21 +58,48 @@ export async function bookFusionEpub(
   });
 }
 
+/** Unzip just the text entries; images, fonts, and media are skipped without inflating. */
+async function textEntries(bytes: Buffer): Promise<TextEpub> {
+  const zip = await fromBufferPromise(bytes, { lazyEntries: true, strictFileNames: true });
+  const book: TextEpub = new Map();
+  const seen = new Set<string>();
+  try {
+    for await (const entry of zip.eachEntry()) {
+      if (seen.size >= 10_000) invalid('EPUB has too many entries');
+      if (seen.has(entry.fileName)) invalid('duplicate EPUB entry');
+      seen.add(entry.fileName);
+      if (!TEXT_ENTRY.test(entry.fileName)) continue;
+      if (entry.uncompressedSize > MAX_XML) { book.set(entry.fileName, null); continue; }
+      const chunks: Buffer[] = [];
+      let size = 0;
+      for await (const chunk of await zip.openReadStreamPromise(entry)) {
+        size += chunk.length;
+        if (size > MAX_XML) invalid('EPUB XML exceeds 1 MiB');
+        chunks.push(chunk);
+      }
+      const data = Buffer.concat(chunks, size);
+      if (crc32(data) !== entry.crc32) invalid('EPUB entry checksum mismatch');
+      book.set(entry.fileName, data);
+    }
+  } finally { zip.close(); }
+  return book;
+}
+
 /**
- * Download an EPUB once per key (hashed, so tokens never sit in cache keys),
- * capped at 32 MiB and cached briefly across all accounts. `load` returns the
- * checked response whose body is the archive.
+ * Download an EPUB once per key (hashed, so tokens never sit in cache keys), capped
+ * at 200 MiB, and cache only its text entries briefly across all accounts. `load`
+ * returns the checked response whose body is the archive.
  */
 export async function cachedEpub(
   keyParts: unknown[], load: (signal: AbortSignal) => Promise<Awaited<ReturnType<HttpTransport>>>
-): Promise<Buffer> {
+): Promise<TextEpub> {
   const key = createHash('sha256').update(JSON.stringify(keyParts)).digest('hex');
   for (const [id, entry] of cache) if (entry.expires <= Date.now()) cache.delete(id);
   const cached = cache.get(key);
   if (cached) {
     cache.delete(key);
     cache.set(key, cached);
-    return cached.bytes;
+    return cached.book;
   }
   const signal = AbortSignal.timeout(30_000);
   const res = await load(signal);
@@ -74,22 +112,23 @@ export async function cachedEpub(
       const { done, value } = await reader.read();
       if (done) break;
       size += value.length;
-      if (size > MAX_ARCHIVE) invalid('EPUB exceeds 32 MiB');
+      if (size > MAX_ARCHIVE) invalid('EPUB exceeds 200 MiB');
       chunks.push(value);
     }
   } finally {
     await reader.cancel().catch(() => {});
     reader.releaseLock();
   }
-  const bytes = Buffer.concat(chunks, size);
-  let retained = [...cache.values()].reduce((sum, entry) => sum + entry.bytes.length, 0);
+  const book = await textEntries(Buffer.concat(chunks, size));
+  const bookSize = [...book.values()].reduce((sum, data) => sum + (data?.length ?? 0), 0);
+  let retained = [...cache.values()].reduce((sum, entry) => sum + entry.size, 0);
   for (const [id, entry] of cache) {
-    if (retained + size <= MAX_ARCHIVE && cache.size < 32) break;
-    retained -= entry.bytes.length;
+    if (retained + bookSize <= MAX_CACHE && cache.size < 32) break;
+    retained -= entry.size;
     cache.delete(id);
   }
-  cache.set(key, { bytes, expires: Date.now() + CACHE_TTL });
-  return bytes;
+  cache.set(key, { book, size: bookSize, expires: Date.now() + CACHE_TTL });
+  return book;
 }
 
 function children(node: Node): Node[] { return Array.from(node.childNodes ?? []); }
@@ -114,6 +153,69 @@ function xml(bytes: Buffer, xhtml = false): Element {
   return root ?? invalid('XML root missing');
 }
 
+const PACKAGE_ENTRY = /^META-INF\/|\.opf$/i;
+const MAP_UNUSED_DAYS = 30;
+
+/**
+ * The book's structure without its content: chapter text becomes same-length filler
+ * (astral characters stay astral, so UTF-16 and codepoint counts both survive),
+ * comments and PIs are emptied, and only id attributes remain. Every position
+ * lookup here depends only on tags, ids, and text lengths, so it resolves the same.
+ */
+export function redactEpub(book: TextEpub): TextEpub {
+  const out: TextEpub = new Map();
+  for (const [path, data] of book) {
+    if (!data || PACKAGE_ENTRY.test(path)) { out.set(path, data); continue; }
+    if (!/\.(?:x?html?|xml)$/i.test(path)) continue; // e.g. the NCX: never read
+    let root: Element;
+    try { root = xml(data, true); } catch { continue; }
+    for (let node: Node | null = root; node;) {
+      if (text(node)) {
+        (node as Node & { data: string }).data = node.nodeValue =
+          Array.from(node.nodeValue ?? '', ch => ch.length > 1 ? '\u{10000}' : 'x').join('');
+      } else if (node.nodeType === 7 || node.nodeType === 8) {
+        (node as Node & { data: string }).data = node.nodeValue = '';
+      } else if (node.nodeType === 1) {
+        const el = node as Element;
+        for (const attr of Array.from(el.attributes)) {
+          if (!['id', 'xml:id'].includes(attr.name) && !attr.name.startsWith('xmlns')) el.removeAttributeNode(attr);
+        }
+      }
+      if (node.firstChild) { node = node.firstChild; continue; }
+      while (node !== root && !node.nextSibling) node = node.parentNode!;
+      node = node === root ? null : node.nextSibling;
+    }
+    out.set(path, Buffer.from(new XMLSerializer().serializeToString(root)));
+  }
+  return out;
+}
+
+export interface EpubMapContext { db: DB; userId: number; }
+
+export function loadEpubMap(ctx: EpubMapContext, connectorId: string, externalId: string): TextEpub | null {
+  const row = ctx.db.prepare(
+    'SELECT map FROM epub_maps WHERE user_id = ? AND connector_id = ? AND external_id = ?'
+  ).get(ctx.userId, connectorId, externalId) as { map: Uint8Array } | undefined;
+  if (!row) return null;
+  ctx.db.prepare('UPDATE epub_maps SET used_at = ? WHERE user_id = ? AND connector_id = ? AND external_id = ?')
+    .run(Math.floor(Date.now() / 1000), ctx.userId, connectorId, externalId);
+  const entries = JSON.parse(gunzipSync(row.map).toString()) as [string, string | null][];
+  return new Map(entries.map(([path, data]) => [path, data === null ? null : Buffer.from(data, 'base64')]));
+}
+
+/** Store a redacted map, pruning maps whose book is no longer matched or long unused. */
+export function saveEpubMap(ctx: EpubMapContext, connectorId: string, externalId: string, map: TextEpub): void {
+  const now = Math.floor(Date.now() / 1000);
+  ctx.db.prepare(`DELETE FROM epub_maps WHERE used_at < ? OR NOT EXISTS (
+    SELECT 1 FROM connector_matches m WHERE m.user_id = epub_maps.user_id
+      AND m.connector_id = epub_maps.connector_id AND m.external_id = epub_maps.external_id)`)
+    .run(now - MAP_UNUSED_DAYS * 86400);
+  const json = JSON.stringify([...map].map(([path, data]) => [path, data?.toString('base64') ?? null]));
+  ctx.db.prepare(`INSERT INTO epub_maps (user_id, connector_id, external_id, map, used_at) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT (user_id, connector_id, external_id) DO UPDATE SET map = excluded.map, used_at = excluded.used_at`)
+    .run(ctx.userId, connectorId, externalId, gzipSync(json), now);
+}
+
 export interface BookFusionPosition {
   chapter_index: number;
   page_position_in_book: number;
@@ -130,56 +232,38 @@ interface Chapter {
 }
 
 async function withChapter<T>(
-  bytes: Buffer,
+  epub: Epub,
   select: (opf: Element, spine: Element, items: Element[]) => number,
   resolve: (chapter: Chapter) => T
 ): Promise<T> {
-  const zip = await fromBufferPromise(bytes, { lazyEntries: true, strictFileNames: true });
-  try {
-    const entries = new Map<string, Entry>();
-    for await (const entry of zip.eachEntry()) {
-      if (entries.size >= 10_000) invalid('EPUB has too many entries');
-      if (entries.has(entry.fileName)) invalid('duplicate EPUB entry');
-      entries.set(entry.fileName, entry);
-    }
-    async function read(path: string): Promise<Buffer> {
-      const entry = entries.get(path) ?? invalid('EPUB entry missing');
-      if (entry.uncompressedSize > MAX_XML) invalid('EPUB XML exceeds 1 MiB');
-      const stream = await zip.openReadStreamPromise(entry);
-      const chunks: Buffer[] = [];
-      let size = 0;
-      for await (const chunk of stream) {
-        size += chunk.length;
-        if (size > MAX_XML) invalid('EPUB XML exceeds 1 MiB');
-        chunks.push(chunk);
-      }
-      const data = Buffer.concat(chunks, size);
-      if (crc32(data) !== entry.crc32) invalid('EPUB entry checksum mismatch');
-      return data;
-    }
-    const container = xml(await read('META-INF/container.xml'));
-    const rootfiles = elements(child(container, 'rootfiles'));
-    const rootfile = rootfiles.find(e => e.getAttribute('media-type') === 'application/oebps-package+xml')
-      ?? rootfiles[0] ?? invalid('EPUB package missing');
-    const opfPath = rootfile.getAttribute('full-path') ?? invalid('EPUB package path missing');
-    const opf = xml(await read(opfPath));
-    const spine = child(opf, 'spine');
-    const spineItems = elements(spine).filter(e => e.localName === 'itemref');
-    const index = select(opf, spine, spineItems);
-    if (!Number.isSafeInteger(index) || index < 0 || index >= spineItems.length) invalid('chapter out of range');
-    const item = elements(child(opf, 'manifest')).find(
-      e => e.localName === 'item' && e.getAttribute('id') === spineItems[index].getAttribute('idref')
-    ) ?? invalid('spine item missing from manifest');
-    const href = item.getAttribute('href') ?? invalid('chapter path missing');
-    const chapterPath = posix.join(posix.dirname(opfPath), decodeURIComponent(href.split('#')[0]));
-    const html = xml(await read(chapterPath), true);
-    const body = child(html, 'body');
-    return resolve({ opf, spine, spineItems, index, html, body });
-  } finally { zip.close(); }
+  const book = epub instanceof Map ? epub : await textEntries(epub);
+  const read = (path: string): Buffer => {
+    const data = book.get(path);
+    if (data === null) invalid('EPUB XML exceeds 1 MiB');
+    return data ?? invalid('EPUB entry missing');
+  };
+  const container = xml(read('META-INF/container.xml'));
+  const rootfiles = elements(child(container, 'rootfiles'));
+  const rootfile = rootfiles.find(e => e.getAttribute('media-type') === 'application/oebps-package+xml')
+    ?? rootfiles[0] ?? invalid('EPUB package missing');
+  const opfPath = rootfile.getAttribute('full-path') ?? invalid('EPUB package path missing');
+  const opf = xml(read(opfPath));
+  const spine = child(opf, 'spine');
+  const spineItems = elements(spine).filter(e => e.localName === 'itemref');
+  const index = select(opf, spine, spineItems);
+  if (!Number.isSafeInteger(index) || index < 0 || index >= spineItems.length) invalid('chapter out of range');
+  const item = elements(child(opf, 'manifest')).find(
+    e => e.localName === 'item' && e.getAttribute('id') === spineItems[index].getAttribute('idref')
+  ) ?? invalid('spine item missing from manifest');
+  const href = item.getAttribute('href') ?? invalid('chapter path missing');
+  const chapterPath = posix.join(posix.dirname(opfPath), decodeURIComponent(href.split('#')[0]));
+  const html = xml(read(chapterPath), true);
+  const body = child(html, 'body');
+  return resolve({ opf, spine, spineItems, index, html, body });
 }
 
 /** Resolve the device's XPath in the actual EPUB, including absolute sibling indices. */
-export async function epubPosition(bytes: Buffer, xpath: string): Promise<BookFusionPosition> {
+export async function epubPosition(bytes: Epub, xpath: string): Promise<BookFusionPosition> {
   const match = /^\/body\/DocFragment(?:\[(\d+)\])?\/body(?:\/(.*))?$/.exec(xpath);
   if (!match || xpath.length > 4096) invalid('expected a KOReader XPath');
   return withChapter(bytes, () => Number(match[1] ?? 1) - 1, ({ opf, spine, spineItems, index, html, body }) => {
@@ -289,7 +373,7 @@ function cfiElement(parent: Node, step: CfiStep): Element {
 }
 
 /** Resolve a point CFI to the same codepoint-based XPath understood by CrossPoint. */
-export async function epubXPath(bytes: Buffer, cfi: string): Promise<string> {
+export async function epubXPath(bytes: Epub, cfi: string): Promise<string> {
   const [packagePath, contentPath] = cfiPaths(cfi);
   return withChapter(bytes, (opf, spine, items) => {
     if (cfiElement(opf, packagePath[0]) !== spine) invalid('CFI does not reference the spine');
@@ -362,7 +446,7 @@ function textPoint(html: Element, node: Node, offset: number): string {
  * check it against the clipping before trusting it.
  */
 export async function epubRangeCfi(
-  bytes: Buffer, spineIndex: number, start: number, end: number
+  bytes: Epub, spineIndex: number, start: number, end: number
 ): Promise<{ cfi: string; text: string }> {
   if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end <= start) invalid('bad clipping offsets');
   return withChapter(bytes, () => spineIndex, ({ opf, spine, spineItems, index, html, body }) => {

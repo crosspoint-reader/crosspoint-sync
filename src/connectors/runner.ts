@@ -143,7 +143,7 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
 
   const cred = decryptCredential(account);
   try {
-    const result = await connector.push(cred, match, ev, http);
+    const result = await connector.push(cred, match, ev, http, { db, userId: row.user_id });
     if (result.ok) {
       // Persist (or clear) the per-book condition so the review UI can show it.
       setMatchNote(db, row.user_id, row.connector_id, row.document, result.note ?? null);

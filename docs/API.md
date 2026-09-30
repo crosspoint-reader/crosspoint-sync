@@ -132,10 +132,15 @@ Validates credentials. `200 {"authorized": "OK"}` or `401`.
   BookFusion progress. The provider does not offer an atomic conditional update, so a
   simultaneous edit between that check and the POST is still possible.
 
-  The server reuses downloaded archives for 15 minutes in an account-scoped memory cache
-  capped at 32 MiB total and 32 entries. Downloads are limited to 32 MiB and 30 seconds;
-  each extracted XML file is limited to 1 MiB. Only the package metadata and target chapter
-  are decompressed. Books matched by title or manual selection retain percentage-only
+  BookFusion's storage ignores Range requests, so an EPUB is downloaded whole (limited
+  to 200 MiB and 30 seconds), and only its text entries (container, package, and XHTML)
+  are decompressed; each is limited to 1 MiB. The server then stores a redacted position
+  map per linked book in `epub_maps`: chapter text is replaced with same-length filler and
+  only `id` attributes are kept, so no readable book text is stored, yet positions resolve
+  identically. Later syncs use the map without downloading; a position that fails against
+  it triggers one fresh download and rebuild (the book may have changed). Maps are removed
+  when the connector is unlinked or the account deleted, and pruned when their book is no
+  longer matched or unused for 30 days. Books matched by title or manual selection retain percentage-only
   outbound updates and are excluded from inbound position conversion because those matches do not establish that the reader has the same EPUB edition.
 
 ### GET /syncs/progress/{document}

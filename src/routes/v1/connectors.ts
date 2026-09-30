@@ -255,6 +255,7 @@ export function connectorRoutes(
         user.id,
         conn.id
       );
+      db.prepare('DELETE FROM epub_maps WHERE user_id = ? AND connector_id = ?').run(user.id, conn.id);
     });
     return c.json({ id: conn.id, linked: false });
   });

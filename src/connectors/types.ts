@@ -1,9 +1,14 @@
+import type { DB } from '../db/db.js';
+
 /**
  * Connector framework types. A connector adapts crosspoint-sync's canonical
  * reading state to one external service. See docs/design/sync-hub.md.
  */
 
 export type Capability = { read: boolean; write: boolean };
+
+/** Per-user storage a connector may use for derived book data (e.g. EPUB position maps). */
+export interface ConnectorContext { db: DB; userId: number; }
 
 /** What data types a connector carries (progress/shelves vs highlights). */
 export type DataKind = 'progress' | 'finished' | 'highlight';
@@ -203,7 +208,7 @@ export interface Connector {
   ): Promise<Match | null>;
 
   /** Push one outbound event. Only called for write-capable connectors. */
-  push(cred: Credential, match: Match, ev: OutboundEvent, http: HttpTransport): Promise<PushResult>;
+  push(cred: Credential, match: Match, ev: OutboundEvent, http: HttpTransport, ctx?: ConnectorContext): Promise<PushResult>;
 
   /**
    * The user's "currently reading" / "in progress" books at this service.
@@ -250,7 +255,9 @@ export interface Connector {
   pullChanges?(cred: Credential, http: HttpTransport, sinceMs: number): Promise<InboundChange[]>;
 
   /** Poll a known book instead of scanning the provider library; sinceMs is its canonical timestamp. */
-  pullProgress?(cred: Credential, match: Match, http: HttpTransport, sinceMs: number): Promise<InboundChange | null>;
+  pullProgress?(
+    cred: Credential, match: Match, http: HttpTransport, sinceMs: number, ctx?: ConnectorContext
+  ): Promise<InboundChange | null>;
 
   /** Begin an interactive device-code link (OAuth device grant). Optional. */
   beginLink?(http: HttpTransport): Promise<DeviceLinkStart>;

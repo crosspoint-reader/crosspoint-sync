@@ -1,6 +1,8 @@
-import { crc32 } from 'node:zlib';
+import { crc32, gunzipSync } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { bookFusionEpub, clearBookFusionEpubCache, epubPosition, epubRangeCfi, epubXPath } from '../src/connectors/bookfusion-epub.js';
+import {
+  bookFusionEpub, clearBookFusionEpubCache, epubPosition, epubRangeCfi, epubXPath, loadEpubMap, redactEpub,
+} from '../src/connectors/bookfusion-epub.js';
 import { bookfusionConnector } from '../src/connectors/bookfusion.js';
 import { bookorbitConnector } from '../src/connectors/bookorbit.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
@@ -34,8 +36,9 @@ function archive(files: Record<string, string>): Buffer {
   return Buffer.concat([...local, ...directory, end]);
 }
 
-function epub(body = '<h1>Title</h1><p>Pre😀<em>bold</em> tail&amp;end</p>'): Buffer {
+function epub(body = '<h1>Title</h1><p>Pre😀<em>bold</em> tail&amp;end</p>', padding = 0): Buffer {
   return archive({
+    ...(padding ? { 'images/cover.bin': 'x'.repeat(padding) } : {}),
     'META-INF/container.xml': '<container><rootfiles><rootfile full-path="EPUB/package.opf" media-type="application/oebps-package+xml"/></rootfiles></container>',
     'EPUB/package.opf': '<package><metadata/><manifest><item id="a" href="../Text/ch%201.xhtml"/><item id="b" href="../Text/ch%202.xhtml"/></manifest><guide/><spine><itemref idref="a"/><itemref idref="b"/></spine></package>',
     'Text/ch 1.xhtml': '<html><head/><body><p>First</p></body></html>',
@@ -169,8 +172,8 @@ describe('BookFusion download and delivery', () => {
     expect(fake.calls.some(c => c.url.endsWith('/reading_position'))).toBe(false);
   });
 
-  it('caches archives per credential and book, and expires them', async () => {
-    vi.useFakeTimers();
+  it('caches books per credential and book, and expires them', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
     const fake = transport();
     await bookFusionEpub('a', '7', providerHeaders, fake.http);
     await bookFusionEpub('a', '7', providerHeaders, fake.http);
@@ -193,6 +196,24 @@ describe('BookFusion download and delivery', () => {
       expect(calls).toBe(1);
     }
   );
+
+  it('handles a large image-heavy book and caches only its text', async () => {
+    const fake = transport(epub(undefined, 40 * 1024 * 1024));
+    const book = await bookFusionEpub('a', '7', providerHeaders, fake.http);
+    expect((await epubPosition(book, XPATH)).cfi).toBe('epubcfi(/8/4!/6/4/3:5)');
+    expect([...book.keys()]).not.toContain('images/cover.bin');
+    expect([...book.values()].reduce((sum, b) => sum + (b?.length ?? 0), 0)).toBeLessThan(4096);
+  });
+
+  it('rejects downloads over 200 MiB', async () => {
+    const mib = new Uint8Array(1024 * 1024);
+    const http: HttpTransport = async (url) => url.endsWith('/download')
+      ? { status: 200, text: async () => '', json: async () => ({ url: 'https://books.s3.amazonaws.com/b.epub' }) }
+      : { status: 200, text: async () => '', json: async () => null, body: new ReadableStream({
+        pull(controller) { controller.enqueue(mib); },
+      }) };
+    await expect(bookFusionEpub('a', '7', providerHeaders, http)).rejects.toThrow('EPUB exceeds 200 MiB');
+  });
 
   it('keeps transient download failures retryable', async () => {
     const http: HttpTransport = async () => ({ status: 503, text: async () => '', json: async () => ({}) });
@@ -603,5 +624,90 @@ describe('bookorbit highlights', () => {
     const r = await bookorbitConnector.push(CRED, MATCH, ev('something else'), o.http);
     expect(r).toMatchObject({ ok: false, retryable: false });
     expect(o.calls.some((c) => c.url.includes('/annotations'))).toBe(false);
+  });
+});
+
+describe('BookFusion stored position maps', () => {
+  const books = [
+    epub(),
+    epub('<p>ab<!--split-->cd<![CDATA[ef]]><?pi split?>gh<em>x</em>ij</p>'),
+    epub('<h1>Title</h1><p><em>x</em>ab<!--split-->cd<![CDATA[😀f]]><b>x</b>end</p>'),
+    epub('<p id="a]!/;b" class="c">hello</p><div><p>a</p><p>b</p></div>'),
+  ];
+
+  it('resolves every position in a redacted map exactly as in the book', async () => {
+    const xpaths = ['/body/DocFragment[2]/body', '/body/DocFragment[2]/body/p[1]', XPATH,
+      '/body/DocFragment[2]/body/p/text().4', '/body/DocFragment[2]/body/p/text()[4].1',
+      '/body/DocFragment[2]/body/p/text()[3].1', '/body/DocFragment[2]/body/div/p[2]'];
+    let compared = 0;
+    for (const bytes of books) {
+      const map = redactEpub(await bookFusionEpub('a', String(books.indexOf(bytes)), providerHeaders, transport(bytes).http));
+      for (const xpath of xpaths) {
+        const real = await epubPosition(bytes, xpath).catch(() => null);
+        expect(await epubPosition(map, xpath).catch(() => null)).toEqual(real);
+        if (!real) continue;
+        compared++;
+        expect(await epubXPath(map, real.cfi)).toBe(await epubXPath(bytes, real.cfi));
+      }
+    }
+    expect(compared).toBeGreaterThan(10);
+  });
+
+  it('keeps no readable text or non-id attributes', async () => {
+    const map = redactEpub(await bookFusionEpub('a', '7', providerHeaders, transport(books[3]).http));
+    const chapter = map.get('Text/ch 2.xhtml')!.toString();
+    expect(chapter).not.toMatch(/hello|class/);
+    expect(chapter).toContain('id="a]!/;b"');
+  });
+
+  it('downloads a book once, then resolves from the stored map', async () => {
+    const { db } = await linkedReader();
+    try {
+      const match = { externalId: '36835', confidence: 1, fromSidecar: true };
+      const ev = { kind: 'progress' as const, document: DOC, percentage: 0.5, progress: XPATH, timestamp: START / 1000 + 200 };
+      const first = transport();
+      expect(await bookfusionConnector.push({ access_token: 't' }, match, ev, first.http, { db, userId: 1 })).toEqual({ ok: true });
+      expect(first.calls.filter(c => c.url.endsWith('/download'))).toHaveLength(1);
+      expect(gunzipSync(Buffer.from((db.prepare('SELECT map FROM epub_maps').get() as { map: Uint8Array }).map)).toString())
+        .not.toContain(Buffer.from('bold').toString('base64'));
+      clearBookFusionEpubCache();
+      const second = transport();
+      expect(await bookfusionConnector.push({ access_token: 't' }, match, ev, second.http, { db, userId: 1 })).toEqual({ ok: true });
+      expect(second.calls.filter(c => c.url.endsWith('/download'))).toHaveLength(0);
+      const post = second.calls.find(c => c.url.endsWith('/reading_position') && c.init.method === 'POST')!;
+      expect(JSON.parse(post.init.body!).cfi).toBe('epubcfi(/8/4!/6/4/3:5)');
+    } finally { db.close(); }
+  });
+
+  it('rebuilds a stale map when the book changed', async () => {
+    const { db } = await linkedReader();
+    try {
+      const ctx = { db, userId: 1 };
+      const match = { externalId: '36835', confidence: 1, fromSidecar: true };
+      const ev = (progress: string) => ({ kind: 'progress' as const, document: DOC, percentage: 0.5, progress, timestamp: START / 1000 + 200 });
+      await bookfusionConnector.push({ access_token: 't' }, match, ev(XPATH), transport().http, ctx);
+      clearBookFusionEpubCache();
+      const changed = transport(epub('<p>One</p><aside>Two</aside><p>Three</p>'));
+      expect(await bookfusionConnector.push({ access_token: 't' }, match, ev('/body/DocFragment[2]/body/p[2]'), changed.http, ctx))
+        .toEqual({ ok: true });
+      expect(changed.calls.filter(c => c.url.endsWith('/download'))).toHaveLength(1);
+      expect(await epubPosition(loadEpubMap(ctx, 'bookfusion', '36835')!, '/body/DocFragment[2]/body/p[2]'))
+        .toMatchObject({ cfi: 'epubcfi(/8/4!/6/6)' });
+    } finally { db.close(); }
+  });
+
+  it('prunes maps for books that are no longer matched', async () => {
+    const { db } = await linkedReader();
+    try {
+      const ctx = { db, userId: 1 };
+      const push = (id: string) => bookfusionConnector.push({ access_token: 't' },
+        { externalId: id, confidence: 1, fromSidecar: true },
+        { kind: 'progress', document: DOC, percentage: 0.5, progress: XPATH, timestamp: START / 1000 + 200 }, transport().http, ctx);
+      await push('36835');
+      db.prepare('DELETE FROM connector_matches').run();
+      saveMatch(db, 1, 'bookfusion', DOC, { externalId: '99', confidence: 1 }, 'sidecar');
+      await push('99');
+      expect(db.prepare('SELECT external_id FROM epub_maps').all()).toEqual([{ external_id: '99' }]);
+    } finally { db.close(); }
   });
 });

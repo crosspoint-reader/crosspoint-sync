@@ -15,6 +15,7 @@ function deleteKosyncUserData(db: DB, userId: number, username: string): void {
   withTransaction(db, () => {
     for (const table of [
       'connector_queue',
+      'epub_maps',
       'connector_matches',
       'connector_accounts',
       'stats_device_book',

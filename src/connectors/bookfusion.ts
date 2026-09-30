@@ -1,8 +1,11 @@
 import { decideMatch, extractTitleAuthor, type Candidate } from './matching.js';
-import { bookFusionEpub, epubPosition, epubXPath } from './bookfusion-epub.js';
+import {
+  bookFusionEpub, epubPosition, epubXPath, loadEpubMap, redactEpub, saveEpubMap, type Epub,
+} from './bookfusion-epub.js';
 import { ConnectorOperationError } from './types.js';
 import type {
   Connector,
+  ConnectorContext,
   Credential,
   DeviceLinkPoll,
   DeviceLinkStart,
@@ -143,8 +146,25 @@ async function readingPosition(token: string, bookId: string, http: HttpTranspor
   return { updatedAtMs, percentage: body.percentage / 100, cfi: body.cfi };
 }
 
+/**
+ * Run a position lookup against the book's stored redacted map, downloading the
+ * EPUB only when there is none or the lookup fails (the book may have changed).
+ */
+async function withBookMap<T>(
+  token: string, bookId: string, http: HttpTransport, ctx: ConnectorContext | undefined,
+  use: (epub: Epub) => Promise<T>
+): Promise<T> {
+  const stored = ctx && loadEpubMap(ctx, 'bookfusion', bookId);
+  if (stored) {
+    try { return await use(stored); } catch { /* rebuild from a fresh download below */ }
+  }
+  const map = redactEpub(await bookFusionEpub(token, bookId, authHeaders(token), http));
+  if (ctx) saveEpubMap(ctx, 'bookfusion', bookId, map);
+  return use(map);
+}
+
 async function pullProgress(
-  cred: Credential, match: Match, http: HttpTransport, sinceMs: number
+  cred: Credential, match: Match, http: HttpTransport, sinceMs: number, ctx?: ConnectorContext
 ): Promise<InboundChange | null> {
   if (!match.fromSidecar) return null;
   const token = tokenOf(cred);
@@ -153,8 +173,7 @@ async function pullProgress(
   if (typeof remote.cfi !== 'string' || !remote.cfi) {
     throw new ConnectorOperationError('BookFusion reading position has no CFI', false);
   }
-  const epub = await bookFusionEpub(token, match.externalId, authHeaders(token), http);
-  const progress = await epubXPath(epub, remote.cfi)
+  const progress = await withBookMap(token, match.externalId, http, ctx, epub => epubXPath(epub, remote.cfi as string))
     .catch((err) => withPosition(err, 'cfi', remote.cfi as string));
   return {
     externalId: match.externalId, percentage: remote.percentage, finished: remote.percentage === 1,
@@ -166,16 +185,17 @@ async function push(
   cred: Credential,
   m: Match,
   ev: OutboundEvent,
-  http: HttpTransport
+  http: HttpTransport,
+  ctx?: ConnectorContext
 ): Promise<PushResult> {
   const token = tokenOf(cred);
   const percentage = Math.max(0, Math.min(1, ev.percentage ?? 0)) * 100; // BookFusion uses 0..100
   const body: Record<string, number | string> = { percentage: Number(percentage.toFixed(4)) };
   if (m.fromSidecar) {
     if (!ev.progress) throw new ConnectorOperationError('BookFusion position: XPath missing', false);
-    const epub = await bookFusionEpub(token, m.externalId, authHeaders(token), http);
+    const xpath = ev.progress;
     try {
-      Object.assign(body, await epubPosition(epub, ev.progress));
+      Object.assign(body, await withBookMap(token, m.externalId, http, ctx, epub => epubPosition(epub, xpath)));
     } catch (error) {
       if (error instanceof ConnectorOperationError) withPosition(error, 'xpath', ev.progress);
       throw new ConnectorOperationError(
