@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, Share2 } from 'lucide-react'
 import ShareSheet from './ShareSheet.jsx'
-import { renderStatsCard } from './shareCard.js'
+import { renderCalendarCard, renderStatsCard } from './shareCard.js'
 import { Card, Eyebrow, duration } from './ui.jsx'
 
 const WEEKS = 52 // phones show the newest 26
@@ -130,7 +130,6 @@ function WeeklyPages({ days, weeks = 12 }) {
 
 // Calendar of reading days from the sync history: one square per day, shaded by
 // print pages read that day. Weekday rows (Monday first), weeks run left to right.
-// Light enough that one day-number color stays readable on every shade.
 const SHADES = ['bg-stone-100', 'bg-brand-100', 'bg-brand-200', 'bg-brand-300', 'bg-brand-400']
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const SCALES = [
@@ -160,8 +159,9 @@ function calendarRange(scale, back, today) {
 }
 
 function ReadingCalendar({ days }) {
-  const [scale, setScale] = useState('month')
+  const [scale, setScale] = useState('year')
   const [back, setBack] = useState(0)
+  const [sharing, setSharing] = useState(false)
   const scroller = useRef(null)
   // Any sync marks a reading day; pages read deepen the shade.
   const byDay = new Map(days.filter((d) => d.syncs > 0 || d.pages > 0).map((d) => [d.day, d.pages]))
@@ -183,11 +183,80 @@ function ReadingCalendar({ days }) {
     setScale(v)
     setBack(0)
   }
+  const cell = (d, round) => {
+    if (!shown(d)) return <div key={d.getTime()} className="aspect-square" />
+    const key = localDay(d)
+    const pages = byDay.get(key) ?? 0
+    const lv = level(key)
+    const tip = `${fmt(d, { weekday: 'short', month: 'short', day: 'numeric' })}: ${pages ? `${Math.round(pages)} pages` : lv ? 'read' : 'no reading'}`
+    return <div key={d.getTime()} title={tip} aria-label={tip} className={`aspect-square ${round} ${SHADES[lv]}`} />
+  }
+  // Share image: the period on screen, its reading days, pages and longest streak.
+  const share = () => {
+    let pages = 0, streak = 0, run = 0
+    for (let d = first; d <= last && d <= today; d = new Date(d.getTime() + DAY_MS)) {
+      const key = localDay(d)
+      pages += byDay.get(key) ?? 0
+      run = byDay.has(key) ? run + 1 : 0
+      streak = Math.max(streak, run)
+    }
+    const lv = (d) => (shown(d) ? level(localDay(d)) : null)
+    const day = (monday, r) => new Date(monday.getTime() + r * DAY_MS)
+    const strip = (ws) => ({
+      grid: WEEKDAYS.map((_, r) => ws.map((m) => lv(day(m, r)))),
+      left: WEEKDAYS.map((w, r) => (r % 2 === 0 ? w : '')),
+      bottom: ws.map((m, i) => (m.getDate() <= 7 || i === 0 ? fmt(m, { month: 'short' }) : '')),
+    })
+    // A year is two stacked half-year strips so the squares stay a readable size.
+    const blocks = month
+      ? [{ grid: weeks.map((m) => WEEKDAYS.map((_, r) => lv(day(m, r)))), top: WEEKDAYS }]
+      : year
+        ? [strip(weeks.slice(0, 26)), strip(weeks.slice(26))]
+        : [strip(weeks)]
+    const eyebrow = {
+      month: back ? `My ${fmt(first, { month: 'long' })}` : 'My month',
+      quarter: back ? 'My 3 months' : 'My last 3 months',
+      year: back ? 'My year' : 'My past year',
+    }[scale]
+    return renderCalendarCard({
+      eyebrow,
+      heading: 'Reading days',
+      subtitle: label,
+      tiles: [
+        ['reading days', count],
+        ['pages read', Math.round(pages).toLocaleString()],
+        ['day streak', streak],
+      ],
+      blocks,
+    })
+  }
   const arrow = 'grid size-9 place-items-center rounded-full text-stone-600 active:bg-stone-100 md:hover:bg-stone-100 disabled:opacity-30'
   return (
     <Card className="mt-4 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="font-display text-lg font-semibold text-stone-900">Reading days</h2>
+      {sharing && (
+        <ShareSheet
+          heading="Share your reading days"
+          meta={{
+            title: `Reading days: ${label}`,
+            postTitle: `My reading days, ${label}`,
+            fileName: `Reading days ${label}.png`,
+            text: `${count} reading ${count === 1 ? 'day' : 'days'}, ${label}. Tracked with CrossPoint Sync.`,
+          }}
+          renderKey={`${scale}-${back}-${count}`}
+          onClose={() => setSharing(false)}
+          render={share}
+        />
+      )}
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="mr-auto font-display text-lg font-semibold text-stone-900">Reading days</h2>
+        <button
+          type="button"
+          onClick={() => setSharing(true)}
+          aria-label="Share your reading days"
+          className="-my-2 -mr-2 grid size-10 place-items-center rounded-full text-brand-600 active:bg-stone-100 sm:order-last md:hover:bg-stone-100"
+        >
+          <Share2 className="size-5" strokeWidth={1.75} />
+        </button>
         <div className="grid w-full grid-cols-3 gap-1 rounded-xl bg-stone-200/60 p-1 sm:w-auto">
           {SCALES.map(([v, l]) => (
             <button
@@ -217,52 +286,45 @@ function ReadingCalendar({ days }) {
           <ChevronRight className="size-5" strokeWidth={1.75} />
         </button>
       </div>
-      <div ref={scroller} className="mt-3 overflow-x-auto">
-        <div
-          className={`grid ${year ? 'w-max min-w-full' : 'w-full'}`}
-          style={{
-            gridAutoFlow: 'column',
-            gridTemplateRows: 'repeat(7, auto) auto',
-            gridTemplateColumns: `auto repeat(${weeks.length}, minmax(${year ? '11px' : '0'}, ${month ? '2.75rem' : scale === 'quarter' ? '2.25rem' : '1fr'}))`,
-            gap: month ? 6 : 3,
-            justifyContent: year ? undefined : 'center',
-          }}
-        >
-          {WEEKDAYS.map((w, r) => (
-            <p key={w} className="sticky left-0 z-10 flex min-w-6 items-center self-stretch bg-white pr-1.5 font-mono text-[0.6rem] leading-none text-stone-400 shadow-[4px_0_0_white]">
-              {!year || r % 2 === 0 ? (month ? w : w[0]) : ''}
+      {month ? (
+        // Month: a regular calendar, weekdays across the top and one row per week.
+        <div className="mx-auto mt-3 grid max-w-sm grid-cols-7 gap-1.5">
+          {WEEKDAYS.map((w) => (
+            <p key={w} className="text-center font-mono text-[0.6rem] text-stone-400">
+              {w}
             </p>
           ))}
-          <span />
-          {weeks.map((monday) => (
-            <Fragment key={monday.getTime()}>
-              {WEEKDAYS.map((w, r) => {
-                const d = new Date(monday.getTime() + r * DAY_MS)
-                if (!shown(d)) return <div key={w} className="aspect-square" />
-                const key = localDay(d)
-                const pages = byDay.get(key) ?? 0
-                const lv = level(key)
-                const tip = `${fmt(d, { weekday: 'short', month: 'short', day: 'numeric' })}: ${pages ? `${Math.round(pages)} pages` : lv ? 'read' : 'no reading'}`
-                return (
-                  <div
-                    key={w}
-                    title={tip}
-                    aria-label={tip}
-                    className={`grid aspect-square place-items-center ${month ? 'rounded-md' : 'rounded-[2px]'} ${SHADES[lv]}`}
-                  >
-                    {month && (
-                      <span className="font-mono text-[0.65rem] text-stone-500">{d.getDate()}</span>
-                    )}
-                  </div>
-                )
-              })}
-              <p className="pt-1 font-mono text-[0.6rem] whitespace-nowrap text-stone-400">
-                {!month && (monday.getDate() <= 7 || monday.getTime() === weeks[0].getTime()) ? fmt(monday, { month: 'short' }) : ''}
-              </p>
-            </Fragment>
-          ))}
+          {weeks.map((monday) => WEEKDAYS.map((w, r) => cell(new Date(monday.getTime() + r * DAY_MS), 'rounded-md')))}
         </div>
-      </div>
+      ) : (
+        <div ref={scroller} className="mt-3 overflow-x-auto">
+          <div
+            className={`grid ${year ? 'w-max min-w-full' : 'w-full'}`}
+            style={{
+              gridAutoFlow: 'column',
+              gridTemplateRows: 'repeat(7, auto) auto',
+              gridTemplateColumns: `auto repeat(${weeks.length}, minmax(${year ? '11px' : '0'}, ${year ? '1fr' : '2.25rem'}))`,
+              gap: 3,
+              justifyContent: year ? undefined : 'center',
+            }}
+          >
+            {WEEKDAYS.map((w, r) => (
+              <p key={w} className="sticky left-0 z-10 flex min-w-6 items-center self-stretch bg-white pr-1.5 font-mono text-[0.6rem] leading-none text-stone-400 shadow-[4px_0_0_white]">
+                {!year || r % 2 === 0 ? w[0] : ''}
+              </p>
+            ))}
+            <span />
+            {weeks.map((monday) => (
+              <Fragment key={monday.getTime()}>
+                {WEEKDAYS.map((w, r) => cell(new Date(monday.getTime() + r * DAY_MS), 'rounded-[2px]'))}
+                <p className="pt-1 font-mono text-[0.6rem] whitespace-nowrap text-stone-400">
+                  {monday.getDate() <= 7 || monday.getTime() === weeks[0].getTime() ? fmt(monday, { month: 'short' }) : ''}
+                </p>
+              </Fragment>
+            ))}
+          </div>
+        </div>
+      )}
     </Card>
   )
 }

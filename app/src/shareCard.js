@@ -266,10 +266,9 @@ export async function postTo(platform, blob, meta) {
 
 // Reading stats card: headline numbers, recently finished covers, and a 12-week
 // pages chart. `tiles` are [label, value] pairs (value already formatted).
-export async function renderStatsCard({ heading, tiles, covers, weeks }) {
+// Shared by the stats cards: paper background, "My reading" eyebrow, heading, headline numbers.
+async function statsBase(heading, tiles, cols = 2, tilesTop = 400, eyebrow = 'My reading') {
   await Promise.all(['600 48px Lora', '500 34px "Inter Variable"', '500 40px Caveat', '400 24px "Geist Mono"'].map((f) => document.fonts.load(f)))
-  const [logo, ...images] = await Promise.all([loadImage('/logo.png', false), ...covers.slice(0, 5).map((u) => loadImage(u, isApp))])
-
   const canvas = document.createElement('canvas')
   canvas.width = W
   canvas.height = H
@@ -284,17 +283,17 @@ export async function renderStatsCard({ heading, tiles, covers, weeks }) {
   ctx.save()
   ctx.translate(PAD, 150)
   ctx.rotate(-0.02)
-  ctx.fillText('My reading', 0, 0)
+  ctx.fillText(eyebrow, 0, 0)
   ctx.restore()
   ctx.fillStyle = C.ink
   ctx.font = '600 84px Lora'
   ctx.fillText(heading, PAD, 250)
 
-  // Headline numbers, two per row.
-  const colW = (W - PAD * 2) / 2
+  // Headline numbers, `cols` per row.
+  const colW = (W - PAD * 2) / cols
   tiles.slice(0, 4).forEach(([label, value], i) => {
-    const x = PAD + (i % 2) * colW
-    const y = 400 + Math.floor(i / 2) * 170
+    const x = PAD + (i % cols) * colW
+    const y = tilesTop + Math.floor(i / cols) * 170
     ctx.fillStyle = C.ink
     ctx.font = '600 76px Lora'
     ctx.fillText(String(value), x, y)
@@ -302,6 +301,30 @@ export async function renderStatsCard({ heading, tiles, covers, weeks }) {
     ctx.font = '500 30px "Inter Variable"'
     ctx.fillText(label, x, y + 48)
   })
+  return { canvas, ctx, bottom: tilesTop + 48 + (Math.ceil(Math.min(tiles.length, 4) / cols) - 1) * 170 }
+}
+
+// "CrossPoint Sync" signature with the app logo, bottom right.
+function signature(ctx, logo) {
+  ctx.fillStyle = C.faint
+  ctx.font = '500 26px "Inter Variable"'
+  ctx.textAlign = 'right'
+  ctx.fillText('CrossPoint Sync', W - PAD, H - 58)
+  ctx.textAlign = 'left'
+  if (logo) {
+    const lw = ctx.measureText('CrossPoint Sync').width
+    ctx.save()
+    ctx.beginPath()
+    ctx.roundRect(W - PAD - lw - 50, H - 90, 38, 38, 9)
+    ctx.clip()
+    ctx.drawImage(logo, W - PAD - lw - 50, H - 90, 38, 38)
+    ctx.restore()
+  }
+}
+
+export async function renderStatsCard({ heading, tiles, covers, weeks }) {
+  const [logo, ...images] = await Promise.all([loadImage('/logo.png', false), ...covers.slice(0, 5).map((u) => loadImage(u, isApp))])
+  const { canvas, ctx } = await statsBase(heading, tiles)
 
   // Recently finished covers.
   const shown = images.filter(Boolean)
@@ -351,19 +374,61 @@ export async function renderStatsCard({ heading, tiles, covers, weeks }) {
     ctx.fillRect(PAD, chartTop + chartH + 2, W - PAD * 2, 2)
   }
 
-  ctx.fillStyle = C.faint
-  ctx.font = '500 26px "Inter Variable"'
-  ctx.textAlign = 'right'
-  ctx.fillText('CrossPoint Sync', W - PAD, H - 58)
-  ctx.textAlign = 'left'
-  if (logo) {
-    const lw = ctx.measureText('CrossPoint Sync').width
-    ctx.save()
-    ctx.beginPath()
-    ctx.roundRect(W - PAD - lw - 50, H - 90, 38, 38, 9)
-    ctx.clip()
-    ctx.drawImage(logo, W - PAD - lw - 50, H - 90, 38, 38)
-    ctx.restore()
+  signature(ctx, logo)
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
+}
+
+// Reading-days calendar card. `blocks` are stacked calendars, each with `grid`
+// rows of shade levels (0-4, null = outside the period) and optional `top`
+// (column), `left` (row) and `bottom` (column) labels.
+const DAY_SHADES = ['#e7e5df', '#d6e5de', '#b3cfc2', '#8fb9a6', '#69917d']
+export async function renderCalendarCard({ eyebrow, heading, subtitle, tiles, blocks }) {
+  const logo = await loadImage('/logo.png', false)
+  const { canvas, ctx, bottom: tilesBottom } = await statsBase(heading, tiles, 3, 440, eyebrow)
+  ctx.fillStyle = C.soft
+  ctx.font = '400 28px "Geist Mono"'
+  ctx.fillText(subtitle, PAD, 310)
+
+  const has = (k) => blocks.some((b) => (b[k] ?? []).some(Boolean))
+  const labelW = has('left') ? 72 : 0
+  const topH = has('top') ? 46 : 0
+  const bottomH = has('bottom') ? 46 : 0
+  const blockGap = 40
+  const cols = Math.max(...blocks.map((b) => b.grid[0]?.length ?? 0))
+  const rows = blocks.reduce((n, b) => n + b.grid.length, 0)
+  const areaTop = tilesBottom + 90
+  const areaW = W - PAD * 2 - labelW
+  const areaH = H - 140 - areaTop - blocks.length * (topH + bottomH) - (blocks.length - 1) * blockGap
+  const gapRatio = 0.14
+  const step = Math.min(areaW / (cols - gapRatio), areaH / (rows - blocks.length * gapRatio))
+  const size = step * (1 - gapRatio)
+  const radius = Math.max(3, size * 0.16)
+  const x0 = PAD + labelW + (areaW - (step * cols - step * gapRatio)) / 2
+
+  let y = areaTop
+  for (const { grid, top = [], left = [], bottom = [] } of blocks) {
+    const y0 = y + topH
+    const gridH = step * grid.length - step * gapRatio
+    ctx.fillStyle = C.faint
+    ctx.font = '400 24px "Geist Mono"'
+    ctx.textAlign = 'center'
+    top.forEach((t, c) => t && ctx.fillText(t, x0 + c * step + size / 2, y0 - 18))
+    ctx.textAlign = 'left'
+    bottom.forEach((t, c) => t && ctx.fillText(t, x0 + c * step, y0 + gridH + 36))
+    ctx.textAlign = 'right'
+    left.forEach((t, r) => t && ctx.fillText(t, x0 - 18, y0 + r * step + size / 2 + 8))
+    ctx.textAlign = 'left'
+    grid.forEach((row, r) =>
+      row.forEach((lv, c) => {
+        if (lv == null) return
+        ctx.fillStyle = DAY_SHADES[lv]
+        ctx.beginPath()
+        ctx.roundRect(x0 + c * step, y0 + r * step, size, size, radius)
+        ctx.fill()
+      })
+    )
+    y = y0 + gridH + bottomH + blockGap
   }
+  signature(ctx, logo)
   return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
 }

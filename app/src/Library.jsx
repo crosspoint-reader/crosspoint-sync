@@ -4,8 +4,13 @@ import { looksLikeSame } from './Book.jsx'
 import { STATUS, Card, Cover, Eyebrow, ProgressBar, ago, duration, pct } from './ui.jsx'
 
 function greeting() {
-  const h = new Date().getHours()
-  return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'
+  const now = new Date()
+  const h = now.getHours() + now.getMinutes() / 60
+  // 5am-noon morning, noon-4:30pm afternoon, 4:30-10pm evening; the small hours get their own.
+  if (h >= 5 && h < 12) return 'Good morning'
+  if (h >= 12 && h < 16.5) return 'Good afternoon'
+  if (h >= 16.5 && h < 22) return 'Good evening'
+  return 'Hello, night owl'
 }
 
 function Hero({ session, book }) {
