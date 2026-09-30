@@ -25,12 +25,56 @@
   --color-brand-900: #1a2c24;
   --color-brand-950: #101c16;
 
+  /* Card and control surfaces (white in light mode). */
+  --color-surface: #ffffff;
+  /* Selected segment in a stone track: lighter than its track in both modes. */
+  --color-raised: #ffffff;
+  /* Placeholder cover paper for books without artwork. */
+  --color-cover: #f5f4ef;
+
   /* Royalty.dev funding gold */
   --color-royalty: #b8953a;
   --color-royalty-dark: #9a7a2e;
 }
 
 html { color-scheme: light; }
+
+/* Dark mode: the same utilities, remapped. Stone flips so text-stone-900 stays the
+   strongest text and bg-stone-50 the page; brand keeps its mid tones for buttons
+   and lightens where it is used as text. Set by theme.js (and index.html, pre-paint). */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-surface: #1b1917;
+  --color-raised: #3a3531;
+  --color-cover: #26231f;
+  --color-stone-50: #121110;
+  --color-stone-100: #221f1d;
+  --color-stone-200: #2e2a27;
+  --color-stone-300: #423d39;
+  --color-stone-400: #6f6963;
+  --color-stone-500: #a09993;
+  --color-stone-600: #bcb6b0;
+  --color-stone-700: #d3cec9;
+  --color-stone-800: #e5e1dd;
+  --color-stone-900: #f3f0ed;
+  --color-stone-950: #fbf9f7;
+  --color-brand-50: #16211c;
+  --color-brand-100: #1c2f26;
+  --color-brand-200: #284738;
+  --color-brand-300: #3a6451;
+  --color-brand-400: #558a70;
+  --color-brand-500: #4f8268;
+  --color-brand-600: #8fb9a6;
+  --color-brand-700: #b3cfc2;
+  --color-brand-800: #d6e5de;
+  --color-brand-900: #eef5f1;
+  --color-red-50: #2a1515;
+  --color-red-500: #f87171;
+  --color-red-600: #f87171;
+  --color-red-700: #fca5a5;
+}
+/* No drop shadows in dark mode; rings (also box-shadow) stay for definition. */
+:root[data-theme="dark"] [class*="shadow"] { --tw-shadow: 0 0 #0000 !important; }
 
 /* Paper grain — subtle fractal-noise texture, the recurring Free-Ink surface.
    Apply with a low opacity utility (e.g. opacity-[0.05]). */

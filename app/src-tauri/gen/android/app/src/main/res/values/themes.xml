@@ -1,7 +1,7 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
+    <!-- Light: the app's paper background. The in-app Appearance setting picks
+         light/dark per app (UiModeManager), which also selects values-night. -->
     <style name="Theme.crosspoint_sync_app" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Match the app's paper background; the app is light-only. -->
         <item name="android:windowBackground">@color/paper</item>
         <item name="android:statusBarColor">@color/paper</item>
         <item name="android:navigationBarColor">@color/paper</item>

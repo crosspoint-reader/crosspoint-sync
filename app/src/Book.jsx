@@ -29,7 +29,7 @@ function StatusPicker({ session, book, onChange }) {
           className={`flex items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-semibold whitespace-nowrap transition disabled:opacity-60 ${
             book.status === s.id
               ? 'bg-brand-500 text-white shadow-sm'
-              : 'bg-white text-stone-700 shadow-sm ring-1 ring-stone-950/10 active:bg-stone-50'
+              : 'bg-surface text-stone-700 shadow-sm ring-1 ring-stone-950/10 active:bg-stone-50'
           }`}
         >
           <s.icon className="size-4" strokeWidth={2} />
@@ -66,7 +66,7 @@ function Stats({ session, doc, activity: a }) {
   return (
     <Card className="mt-4 grid grid-cols-2 gap-px overflow-hidden bg-stone-100">
       {cells.map(([l, v]) => (
-        <div key={l} className="bg-white px-4 py-3">
+        <div key={l} className="bg-surface px-4 py-3">
           <p className="text-xs text-stone-500">{l}</p>
           <p className="mt-0.5 font-display text-lg font-semibold text-stone-900">{v}</p>
         </div>
@@ -152,7 +152,7 @@ function Sheet({ title, onClose, children }) {
 }
 
 const field =
-  'h-11 w-full rounded-xl bg-white px-3 text-base text-stone-900 ring-1 ring-stone-950/10 outline-none placeholder:text-stone-400 focus:ring-2 focus:ring-brand-500/60'
+  'h-11 w-full rounded-xl bg-surface px-3 text-base text-stone-900 ring-1 ring-stone-950/10 outline-none placeholder:text-stone-400 focus:ring-2 focus:ring-brand-500/60'
 
 function CoverPicker({ session, book, onDone, onClose }) {
   const [q, setQ] = useState('')

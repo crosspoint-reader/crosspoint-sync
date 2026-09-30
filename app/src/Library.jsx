@@ -69,7 +69,7 @@ export default function Library({ session, books, summary, activity }) {
       </div>
 
       {(summary?.devices?.length > 0 || activity) && (
-        <div className="mt-4 grid grid-cols-3 divide-x divide-stone-200 rounded-xl bg-white py-3 text-center ring-1 ring-stone-950/5 md:mt-0 md:w-96 md:shrink-0">
+        <div className="mt-4 grid grid-cols-3 divide-x divide-stone-200 rounded-xl bg-surface py-3 text-center ring-1 ring-stone-950/5 md:mt-0 md:w-96 md:shrink-0">
           {(summary?.devices?.length > 0
             ? [
                 [summary.current_streak, 'day streak'],
@@ -107,7 +107,7 @@ export default function Library({ session, books, summary, activity }) {
             key={s.id}
             onClick={() => setTab(s.id)}
             className={`flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition ${
-              tab === s.id ? 'bg-brand-500 text-white shadow-sm' : 'bg-white text-stone-600 ring-1 ring-stone-950/10'
+              tab === s.id ? 'bg-brand-500 text-white shadow-sm' : 'bg-surface text-stone-600 ring-1 ring-stone-950/10'
             }`}
           >
             <s.icon className="size-4" strokeWidth={2} />

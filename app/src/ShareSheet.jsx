@@ -47,7 +47,7 @@ export default function ShareSheet({ heading, meta, render, renderKey, onClose }
         </button>
         <h2 className="font-display text-xl font-semibold text-stone-900">{heading}</h2>
         <div className="mx-auto mt-4 aspect-[4/5] w-full max-w-72 overflow-hidden rounded-xl shadow-lg ring-1 ring-stone-950/10">
-          {card ? <img src={card.url} alt="Share card preview" className="size-full" /> : <div className="grid size-full place-items-center bg-[#f5f4ef]"><Spinner /></div>}
+          {card ? <img src={card.url} alt="Share card preview" className="size-full" /> : <div className="grid size-full place-items-center bg-cover"><Spinner /></div>}
         </div>
 
         {native && (
@@ -64,14 +64,14 @@ export default function ShareSheet({ heading, meta, render, renderKey, onClose }
           <button
             disabled={!card || status?.busy}
             onClick={() => act(() => copyImage(card.blob, meta).then((ok) => (ok ? 'copied' : 'nocopy')), (r) => (r === 'copied' ? 'Image copied to the clipboard.' : "This device can't copy images; use Save instead."))}
-            className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-white text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100 disabled:opacity-50"
+            className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-surface text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100 disabled:opacity-50"
           >
             <Copy className="size-4" /> Copy image
           </button>
           <button
             disabled={!card || status?.busy}
             onClick={() => act(() => saveImage(card.blob, meta).then(() => 'saved'), () => (desktop ? 'Saved to your Downloads folder.' : 'Image saved.'))}
-            className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-white text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100 disabled:opacity-50"
+            className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-surface text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100 disabled:opacity-50"
           >
             <Download className="size-4" /> Save image
           </button>
@@ -91,7 +91,7 @@ export default function ShareSheet({ heading, meta, render, renderKey, onClose }
                       (r) => (r === 'posted' ? `Image copied. Paste it into your ${p.name} post.` : `Opened ${p.name}. Save the image to attach it.`)
                     )
                   }
-                  className="h-11 rounded-xl bg-white text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100 disabled:opacity-50 md:hover:bg-stone-100"
+                  className="h-11 rounded-xl bg-surface text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100 disabled:opacity-50 md:hover:bg-stone-100"
                 >
                   {p.name}
                 </button>

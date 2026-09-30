@@ -19,7 +19,7 @@ export function Eyebrow({ children, className = '' }) {
 }
 
 export function Card({ className = '', children }) {
-  return <div className={`rounded-xl bg-white ring-1 ring-stone-950/5 ${className}`}>{children}</div>
+  return <div className={`rounded-xl bg-surface ring-1 ring-stone-950/5 ${className}`}>{children}</div>
 }
 
 export function ProgressBar({ value, className = '' }) {
@@ -48,7 +48,7 @@ export function Cover({ session, book, small = false, className = '' }) {
     return <img src={url} alt="" loading="lazy" onError={() => setBroken(true)} className={`${frame} object-cover`} />
   }
   return (
-    <div className={`${frame} flex flex-col justify-between bg-[#f5f4ef] ${small ? 'p-1 md:p-2.5' : 'p-2.5'}`}>
+    <div className={`${frame} flex flex-col justify-between bg-cover ${small ? 'p-1 md:p-2.5' : 'p-2.5'}`}>
       <div className="paper-grain absolute inset-0 opacity-[0.06]" />
       <p className={`relative line-clamp-5 font-display font-semibold break-words hyphens-auto text-stone-800 ${small ? 'text-[0.45rem]/tight md:text-sm/tight' : 'text-sm/tight'}`}>
         {book.title || book.filename || 'Untitled'}

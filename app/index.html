@@ -6,6 +6,18 @@
     <meta name="theme-color" content="#fafaf9" />
     <title>CrossPoint Sync</title>
     <link rel="icon" type="image/png" href="/favicon.png" />
+    <script>
+      // Apply the saved appearance before first paint (theme.js takes over after).
+      try {
+        var pref = localStorage.getItem('crosspoint-theme') || 'system'
+        var dark = pref === 'dark' || (pref === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
+        if (dark) {
+          document.documentElement.dataset.theme = 'dark'
+          document.documentElement.style.background = '#121110'
+          document.querySelector('meta[name=theme-color]').setAttribute('content', '#121110')
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body class="bg-stone-50">
     <div id="root"></div>

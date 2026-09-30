@@ -73,7 +73,7 @@ function Tiles({ tiles, action }) {
     <Card className="relative mt-4 grid grid-cols-2 gap-px overflow-hidden bg-stone-100 md:grid-cols-3">
       {action}
       {tiles.map(([l, v]) => (
-        <div key={l} className="bg-white px-4 py-3">
+        <div key={l} className="bg-surface px-4 py-3">
           <p className="text-xs text-stone-500">{l}</p>
           <p className="mt-0.5 font-display text-xl font-semibold text-stone-900 md:text-2xl">{v}</p>
         </div>
@@ -264,7 +264,7 @@ function ReadingCalendar({ days }) {
               type="button"
               onClick={() => pick(v)}
               className={`h-8 rounded-lg px-3 text-xs font-semibold whitespace-nowrap transition ${
-                scale === v ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 active:bg-stone-200'
+                scale === v ? 'bg-raised text-stone-900 shadow-sm' : 'text-stone-500 active:bg-stone-200'
               }`}
             >
               {l}
@@ -309,7 +309,7 @@ function ReadingCalendar({ days }) {
             }}
           >
             {WEEKDAYS.map((w, r) => (
-              <p key={w} className="sticky left-0 z-10 flex min-w-6 items-center self-stretch bg-white pr-1.5 font-mono text-[0.6rem] leading-none text-stone-400 shadow-[4px_0_0_white]">
+              <p key={w} className="sticky left-0 z-10 flex min-w-6 items-center self-stretch bg-surface pr-1.5 font-mono text-[0.6rem] leading-none text-stone-400 shadow-[4px_0_0_white]">
                 {!year || r % 2 === 0 ? w[0] : ''}
               </p>
             ))}

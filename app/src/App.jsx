@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChartColumn, CloudOff, Compass, Quote, Eye, EyeOff, LibraryBig, Loader2, Lock, LogOut, Send as SendIcon, Server, Settings, User } from 'lucide-react'
+import { ChartColumn, CloudOff, Compass, Quote, Eye, EyeOff, LibraryBig, Loader2, Lock, LogOut, Monitor, Moon, Send as SendIcon, Server, Settings, Sun, User } from 'lucide-react'
+import { useTheme } from './theme.js'
 import { DEFAULT_SERVER, api, lastServer, loadSession, login, logout, offline } from './api.js'
 import { ErrorNote, Spinner, useLoad } from './ui.jsx'
 import Library from './Library.jsx'
@@ -14,7 +15,7 @@ import { updateWidget } from './widget.js'
 // A filled, full-width field with a leading icon: the native mobile idiom.
 function Field({ icon: Icon, trailing, inputRef, ...props }) {
   return (
-    <label className="flex h-14 items-center gap-3 rounded-2xl bg-white px-4 ring-1 ring-stone-950/10 transition focus-within:ring-2 focus-within:ring-brand-500/60">
+    <label className="flex h-14 items-center gap-3 rounded-2xl bg-surface px-4 ring-1 ring-stone-950/10 transition focus-within:ring-2 focus-within:ring-brand-500/60">
       <Icon className="size-5 shrink-0 text-stone-400" strokeWidth={1.75} />
       <input
         ref={inputRef}
@@ -90,7 +91,7 @@ function Login({ onLogin }) {
               type="button"
               onClick={() => setForm({ ...form, selfHosted: v })}
               className={`h-10 rounded-xl text-sm font-semibold transition ${
-                form.selfHosted === v ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 active:bg-stone-200'
+                form.selfHosted === v ? 'bg-raised text-stone-900 shadow-sm' : 'text-stone-500 active:bg-stone-200'
               }`}
             >
               {label}
@@ -196,7 +197,7 @@ function TabBar({ route }) {
   const cls = (active) =>
     `flex flex-1 flex-col items-center gap-0.5 pt-2 pb-1.5 text-[0.7rem] font-semibold ${active ? 'text-brand-600' : 'text-stone-500'}`
   return (
-    <nav className="fixed inset-x-0 bottom-0 border-t border-stone-200 bg-white/90 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
+    <nav className="fixed inset-x-0 bottom-0 border-t border-stone-200 bg-surface/90 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
       <div className="mx-auto flex max-w-xl">
         {NAV.map((n) => (
           <a key={n.href} href={n.href} className={cls(n.active(route))}>
@@ -209,8 +210,36 @@ function TabBar({ route }) {
   )
 }
 
+// Appearance: follow the system, or force light or dark.
+const THEMES = [
+  ['system', 'System', Monitor],
+  ['light', 'Light', Sun],
+  ['dark', 'Dark', Moon],
+]
+function Appearance({ theme: [pref, setPref], className = '' }) {
+  return (
+    <div className={`grid grid-cols-3 gap-1 rounded-xl bg-stone-200/60 p-1 ${className}`} role="radiogroup" aria-label="Appearance">
+      {THEMES.map(([v, label, Icon]) => (
+        <button
+          key={v}
+          type="button"
+          role="radio"
+          aria-checked={pref === v}
+          onClick={() => setPref(v)}
+          className={`flex h-9 flex-col items-center justify-center rounded-lg text-[0.7rem] font-semibold transition ${
+            pref === v ? 'bg-raised text-stone-900 shadow-sm' : 'text-stone-500 active:bg-stone-200'
+          }`}
+        >
+          <Icon className="size-3.5" strokeWidth={2} />
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // Phone: account icon top right; tapping opens a small menu so sign out is one deliberate step away.
-function AccountMenu({ session, onLogout }) {
+function AccountMenu({ session, onLogout, theme }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="absolute top-4 right-3 z-20 md:hidden">
@@ -225,10 +254,13 @@ function AccountMenu({ session, onLogout }) {
       {open && (
         <>
           <div className="fixed inset-0" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 mt-1 w-64 overflow-hidden rounded-2xl bg-white shadow-lg ring-1 ring-stone-950/10">
+          <div className="absolute right-0 mt-1 w-64 overflow-hidden rounded-2xl bg-surface shadow-lg ring-1 ring-stone-950/10">
             <div className="px-4 py-3">
               <p className="truncate text-sm font-semibold text-stone-900">{session.username}</p>
               <p className="truncate font-mono text-xs text-stone-500">{new URL(session.server).host}</p>
+            </div>
+            <div className="border-t border-stone-100 px-3 py-3">
+              <Appearance theme={theme} />
             </div>
             <a
               href="#/browse/manage"
@@ -253,9 +285,9 @@ function AccountMenu({ session, onLogout }) {
 }
 
 // iPad / desktop: sidebar.
-function Sidebar({ route, session, onLogout }) {
+function Sidebar({ route, session, onLogout, theme }) {
   return (
-    <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r border-stone-200 bg-white/60 px-4 py-6 md:flex lg:w-64">
+    <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r border-stone-200 bg-surface/60 px-4 py-6 md:flex lg:w-64">
       {/* 44px band at the top, matching each page's first row (back button / title). */}
       <div className="flex h-11 items-center gap-2.5 px-2">
         <img src="/logo.png" alt="" className="size-8 rounded-lg" />
@@ -278,6 +310,7 @@ function Sidebar({ route, session, onLogout }) {
       <div className="mt-auto border-t border-stone-200 px-2 pt-4">
         <p className="truncate text-sm font-medium text-stone-900">{session.username}</p>
         <p className="truncate font-mono text-xs text-stone-500">{new URL(session.server).host}</p>
+        <Appearance theme={theme} className="mt-3" />
         <a href="#/browse/manage" className="mt-3 flex items-center gap-2 text-sm font-medium text-stone-500 hover:text-stone-900">
           <Server className="size-4" strokeWidth={1.75} />
           Catalogs
@@ -294,7 +327,7 @@ function Sidebar({ route, session, onLogout }) {
   )
 }
 
-function Home({ session, onLogout }) {
+function Home({ session, onLogout, theme }) {
   const parts = useHash()
   // Offline: api.js serves the last saved copy and says so; show a slim notice until the network is back.
   const [isOffline, setOffline] = useState(false)
@@ -354,14 +387,14 @@ function Home({ session, onLogout }) {
 
   return (
     <div className="min-h-dvh md:flex">
-      <Sidebar route={route} session={session} onLogout={onLogout} />
+      <Sidebar route={route} session={session} onLogout={onLogout} theme={theme} />
       <main className="relative mx-auto w-full max-w-xl pb-24 md:max-w-6xl md:pb-10">
         {isOffline && (
           <div className="sticky top-0 z-30 flex items-center justify-center gap-2 bg-stone-800 px-4 py-2 text-xs font-medium text-stone-100">
             <CloudOff className="size-3.5" /> Offline. Showing what was saved on this device.
           </div>
         )}
-        <AccountMenu key={parts.join('/')} session={session} onLogout={onLogout} />
+        <AccountMenu key={parts.join('/')} session={session} onLogout={onLogout} theme={theme} />
         {page}
       </main>
       <TabBar route={route} />
@@ -370,11 +403,13 @@ function Home({ session, onLogout }) {
 }
 
 export default function App() {
+  const theme = useTheme()
   const [session, setSession] = useState(loadSession)
   if (!session) return <Login onLogin={setSession} />
   return (
     <Home
       session={session}
+      theme={theme}
       onLogout={() => {
         logout()
         setSession(null)

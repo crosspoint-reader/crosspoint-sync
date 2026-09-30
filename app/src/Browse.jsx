@@ -43,7 +43,7 @@ function describe(raw) {
   return { about, details }
 }
 const input =
-  'h-12 w-full rounded-xl bg-white px-4 text-base text-stone-900 ring-1 ring-stone-950/10 outline-none placeholder:text-stone-400 focus:ring-2 focus:ring-brand-500/60'
+  'h-12 w-full rounded-xl bg-surface px-4 text-base text-stone-900 ring-1 ring-stone-950/10 outline-none placeholder:text-stone-400 focus:ring-2 focus:ring-brand-500/60'
 const MAX_RAILS = 6
 
 // Entries opened from a list, by id, so the book page can render without refetching.
@@ -81,7 +81,7 @@ function Cover({ entry, large = false, className = '' }) {
   const frame = `aspect-[2/3] overflow-hidden rounded-md shadow-sm ring-1 ring-stone-950/10 ${className}`
   if (src && !broken) return <img src={src} alt="" loading="lazy" onError={() => setBroken(true)} className={`${frame} block h-auto max-w-full object-cover`} />
   return (
-    <div className={`${frame} flex flex-col justify-between bg-[#f5f4ef] p-2`}>
+    <div className={`${frame} flex flex-col justify-between bg-cover p-2`}>
       <p className="line-clamp-4 font-display text-xs/tight font-semibold text-stone-800">{entry.title}</p>
       <p className="line-clamp-2 text-[0.6rem]/tight text-stone-500">{entry.authors.map(person)[0]}</p>
     </div>
@@ -262,7 +262,7 @@ function BookPage({ cat, entryKey }) {
                     <button
                       key={f.href}
                       onClick={() => setFormat(f)}
-                      className={`rounded-full px-3 py-1.5 text-xs font-semibold ${f.href === chosen?.href ? 'bg-brand-500 text-white' : 'bg-white text-stone-600 ring-1 ring-stone-950/10'}`}
+                      className={`rounded-full px-3 py-1.5 text-xs font-semibold ${f.href === chosen?.href ? 'bg-brand-500 text-white' : 'bg-surface text-stone-600 ring-1 ring-stone-950/10'}`}
                     >
                       {f.label}
                     </button>
@@ -281,7 +281,7 @@ function BookPage({ cat, entryKey }) {
                 <button
                   disabled={job?.state === 'working'}
                   onClick={() => run(false)}
-                  className="flex h-14 min-w-0 items-center justify-center gap-2 rounded-2xl bg-white px-4 text-base font-semibold whitespace-nowrap text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100 disabled:opacity-60"
+                  className="flex h-14 min-w-0 items-center justify-center gap-2 rounded-2xl bg-surface px-4 text-base font-semibold whitespace-nowrap text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100 disabled:opacity-60"
                 >
                   <Download className="size-5" /> Download
                 </button>
@@ -384,7 +384,7 @@ function SectionRail({ cat, link }) {
         <a
           key={`${l.href}-${i}`}
           href={href(cat, 'f', l.href)}
-          className="flex h-20 w-40 shrink-0 snap-start items-end rounded-xl bg-white p-3 ring-1 ring-stone-950/5 active:bg-stone-50"
+          className="flex h-20 w-40 shrink-0 snap-start items-end rounded-xl bg-surface p-3 ring-1 ring-stone-950/5 active:bg-stone-50"
         >
           <span className="line-clamp-2 text-sm/5 font-semibold text-stone-800">{l.title}</span>
         </a>
@@ -567,7 +567,7 @@ function FeedView({ cat, url, query }) {
                 <a
                   key={f.href}
                   href={href(cat, 'f', f.href)}
-                  className={`shrink-0 rounded-full px-3 py-1.5 text-sm font-medium ${f.active ? 'bg-brand-500 text-white' : 'bg-white text-stone-600 ring-1 ring-stone-950/10'}`}
+                  className={`shrink-0 rounded-full px-3 py-1.5 text-sm font-medium ${f.active ? 'bg-brand-500 text-white' : 'bg-surface text-stone-600 ring-1 ring-stone-950/10'}`}
                 >
                   {f.title}
                   {f.count != null && <span className="ml-1 font-mono text-xs opacity-70">{f.count}</span>}
@@ -604,7 +604,7 @@ function FeedView({ cat, url, query }) {
             <button
               onClick={loadMore}
               disabled={more}
-              className="mx-auto mt-6 flex h-12 items-center gap-2 rounded-full bg-white px-6 text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100"
+              className="mx-auto mt-6 flex h-12 items-center gap-2 rounded-full bg-surface px-6 text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100"
             >
               {more ? <Loader2 className="size-4 animate-spin" /> : 'Load more'}
             </button>
@@ -649,7 +649,7 @@ function CatalogForm({ initial, onSave, onCancel }) {
             type="button"
             key={kind}
             onClick={() => setC({ ...c, auth: { kind } })}
-            className={`h-10 rounded-xl text-sm font-semibold ${c.auth.kind === kind ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500'}`}
+            className={`h-10 rounded-xl text-sm font-semibold ${c.auth.kind === kind ? 'bg-raised text-stone-900 shadow-sm' : 'text-stone-500'}`}
           >
             {label}
           </button>

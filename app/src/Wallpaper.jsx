@@ -28,7 +28,7 @@ function Segmented({ value, options, onChange }) {
           type="button"
           onClick={() => onChange(v)}
           className={`h-9 rounded-lg px-2 text-sm font-semibold whitespace-nowrap transition ${
-            value === v ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 active:bg-stone-200'
+            value === v ? 'bg-raised text-stone-900 shadow-sm' : 'text-stone-500 active:bg-stone-200'
           }`}
         >
           {label}
@@ -214,7 +214,7 @@ export default function Wallpaper() {
       {!img ? (
         <button
           onClick={() => input.current?.click()}
-          className="mt-6 flex w-full max-w-xl flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-stone-300 bg-white/60 px-4 py-10 text-center transition active:scale-[0.99]"
+          className="mt-6 flex w-full max-w-xl flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-stone-300 bg-surface/60 px-4 py-10 text-center transition active:scale-[0.99]"
         >
           <ImagePlus className="size-8 text-brand-500" strokeWidth={1.5} />
           <span className="font-semibold text-stone-900">Choose a photo</span>
@@ -234,7 +234,7 @@ export default function Wallpaper() {
               onPointerUp={endDrag}
               onPointerCancel={endDrag}
               style={{ imageRendering: 'pixelated' }}
-              className={`mx-auto block h-auto max-h-[60vh] w-auto max-w-full rounded-xl bg-white shadow-sm ring-1 ring-stone-950/10 ${
+              className={`mx-auto block h-auto max-h-[60vh] w-auto max-w-full rounded-xl bg-surface shadow-sm ring-1 ring-stone-950/10 ${
                 s.mode === 'fill' ? 'cursor-grab touch-none active:cursor-grabbing' : ''
               }`}
             />
@@ -336,10 +336,10 @@ export default function Wallpaper() {
                   {status?.busy ? <Loader2 className="size-5 animate-spin" /> : <SendIcon className="size-5" />} Send to reader
                 </button>
               )}
-              <button onClick={save} disabled={status?.busy} className={`${actionBase} bg-white text-stone-800 ring-1 ring-stone-950/10`}>
+              <button onClick={save} disabled={status?.busy} className={`${actionBase} bg-surface text-stone-800 ring-1 ring-stone-950/10`}>
                 <Download className="size-4" /> Save image
               </button>
-              <button onClick={() => input.current?.click()} className={`${actionBase} bg-white text-stone-800 ring-1 ring-stone-950/10`}>
+              <button onClick={() => input.current?.click()} className={`${actionBase} bg-surface text-stone-800 ring-1 ring-stone-950/10`}>
                 <ImagePlus className="size-4" /> New photo
               </button>
             </div>

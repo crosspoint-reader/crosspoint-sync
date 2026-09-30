@@ -24,3 +24,6 @@ createRoot(document.getElementById('root')).render(
     <App />
   </StrictMode>
 )
+
+// Android keeps the system splash up until the app has painted its first frame.
+requestAnimationFrame(() => requestAnimationFrame(() => window.CrossPointTheme?.ready?.()))

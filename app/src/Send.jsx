@@ -46,7 +46,7 @@ function Toggle({ checked, onChange, label }) {
       onClick={() => onChange(!checked)}
       className={`relative h-7 w-12 shrink-0 rounded-full transition ${checked ? 'bg-brand-500' : 'bg-stone-300'}`}
     >
-      <span className={`absolute top-0.5 size-6 rounded-full bg-white shadow transition-all ${checked ? 'left-[1.4rem]' : 'left-0.5'}`} />
+      <span className={`absolute top-0.5 size-6 rounded-full bg-surface shadow transition-all ${checked ? 'left-[1.4rem]' : 'left-0.5'}`} />
     </button>
   )
 }
@@ -117,7 +117,7 @@ function Device({ prefs, setPrefs, device, onRetry }) {
                 autoCapitalize="none"
                 autoCorrect="off"
                 spellCheck={false}
-                className="h-11 min-w-0 flex-1 rounded-xl bg-white px-3 text-sm text-stone-900 ring-1 ring-stone-950/10 outline-none focus:ring-2 focus:ring-brand-500/60"
+                className="h-11 min-w-0 flex-1 rounded-xl bg-surface px-3 text-sm text-stone-900 ring-1 ring-stone-950/10 outline-none focus:ring-2 focus:ring-brand-500/60"
               />
               <button className="h-11 rounded-xl bg-brand-500 px-4 text-sm font-semibold text-white">Save</button>
             </form>
@@ -301,7 +301,7 @@ function ReaderFiles({ base, onFoldersChanged }) {
             const name = prompt('New folder name')?.trim()
             if (name) run(() => makeFolder(base, path, name), true)
           }}
-          className="flex h-9 items-center gap-1.5 rounded-full bg-white px-3 text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100"
+          className="flex h-9 items-center gap-1.5 rounded-full bg-surface px-3 text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100"
         >
           <FolderPlus className="size-4" /> New folder
         </button>
@@ -441,7 +441,7 @@ export default function Send() {
 
       <a
         href="#/send/wallpaper"
-        className="mt-5 flex max-w-xl items-center gap-3 rounded-2xl bg-white px-4 py-3 shadow-sm ring-1 ring-stone-950/5 transition active:scale-[0.99] md:hover:bg-stone-50"
+        className="mt-5 flex max-w-xl items-center gap-3 rounded-2xl bg-surface px-4 py-3 shadow-sm ring-1 ring-stone-950/5 transition active:scale-[0.99] md:hover:bg-stone-50"
       >
         <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600">
           <ImagePlus className="size-5" strokeWidth={1.75} />
@@ -486,7 +486,7 @@ export default function Send() {
                 add(e.dataTransfer.files)
               }}
               className={`mt-6 flex w-full flex-col items-center gap-2 rounded-2xl border-2 border-dashed px-4 py-8 text-center transition active:scale-[0.99] ${
-                dragging ? 'border-brand-400 bg-brand-50' : 'border-stone-300 bg-white/60'
+                dragging ? 'border-brand-400 bg-brand-50' : 'border-stone-300 bg-surface/60'
               }`}
             >
               <BookUp className="size-8 text-brand-500" strokeWidth={1.5} />

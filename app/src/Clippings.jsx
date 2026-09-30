@@ -111,15 +111,15 @@ export default function Clippings({ session, books }) {
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search clippings"
                 enterKeyHint="search"
-                className="h-12 w-full rounded-xl bg-white pr-4 pl-12 text-base text-stone-900 ring-1 ring-stone-950/10 outline-none placeholder:text-stone-400 focus:ring-2 focus:ring-brand-500/60"
+                className="h-12 w-full rounded-xl bg-surface pr-4 pl-12 text-base text-stone-900 ring-1 ring-stone-950/10 outline-none placeholder:text-stone-400 focus:ring-2 focus:ring-brand-500/60"
               />
             </div>
             <div className="flex gap-2">
-              <button onClick={() => exportMd(false)} className="flex h-11 items-center gap-2 rounded-xl bg-white px-4 text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100">
+              <button onClick={() => exportMd(false)} className="flex h-11 items-center gap-2 rounded-xl bg-surface px-4 text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100">
                 <Copy className="size-4" /> Copy Markdown
               </button>
               {isApp && (
-                <button onClick={() => exportMd(true)} className="flex h-11 items-center gap-2 rounded-xl bg-white px-4 text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100">
+                <button onClick={() => exportMd(true)} className="flex h-11 items-center gap-2 rounded-xl bg-surface px-4 text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100">
                   <FileDown className="size-4" /> Save .md
                 </button>
               )}
@@ -130,7 +130,7 @@ export default function Clippings({ session, books }) {
           <div className="-mx-4 mt-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] md:mx-0 md:flex-wrap md:px-0">
             <button
               onClick={() => setOnly(null)}
-              className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium ${!only ? 'bg-brand-500 text-white' : 'bg-white text-stone-600 ring-1 ring-stone-950/10'}`}
+              className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium ${!only ? 'bg-brand-500 text-white' : 'bg-surface text-stone-600 ring-1 ring-stone-950/10'}`}
             >
               All <span className="ml-0.5 font-mono text-xs opacity-70">{all.length}</span>
             </button>
@@ -138,7 +138,7 @@ export default function Clippings({ session, books }) {
               <button
                 key={doc}
                 onClick={() => setOnly(only === doc ? null : doc)}
-                className={`max-w-56 shrink-0 truncate rounded-full px-3.5 py-1.5 text-sm font-medium ${only === doc ? 'bg-brand-500 text-white' : 'bg-white text-stone-600 ring-1 ring-stone-950/10'}`}
+                className={`max-w-56 shrink-0 truncate rounded-full px-3.5 py-1.5 text-sm font-medium ${only === doc ? 'bg-brand-500 text-white' : 'bg-surface text-stone-600 ring-1 ring-stone-950/10'}`}
               >
                 {byDoc.get(doc).title || byDoc.get(doc).filename} <span className="ml-0.5 font-mono text-xs opacity-70">{n}</span>
               </button>

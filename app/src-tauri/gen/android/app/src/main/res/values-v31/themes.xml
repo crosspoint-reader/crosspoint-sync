@@ -1,11 +1,14 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Android 12+ system splash: the adaptive launcher icon on the app's paper background. -->
+    <!-- Light: the app's paper background. The in-app Appearance setting picks
+         light/dark per app (UiModeManager), which also selects values-night. -->
     <style name="Theme.crosspoint_sync_app" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="android:windowBackground">@color/paper</item>
         <item name="android:statusBarColor">@color/paper</item>
         <item name="android:navigationBarColor">@color/paper</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar">true</item>
+        <!-- Android 12+ system splash: launcher icon on the page colour. -->
         <item name="android:windowSplashScreenBackground">@color/paper</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
     </style>
 </resources>
