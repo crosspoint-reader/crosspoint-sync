@@ -6,6 +6,7 @@ import Library from './Library.jsx'
 import Book from './Book.jsx'
 import Stats from './Stats.jsx'
 import Send from './Send.jsx'
+import Wallpaper from './Wallpaper.jsx'
 import Browse from './Browse.jsx'
 import Clippings from './Clippings.jsx'
 import { updateWidget } from './widget.js'
@@ -331,7 +332,7 @@ function Home({ session, onLogout }) {
   })
 
   let page
-  if (route === 'send') page = <Send />
+  if (route === 'send') page = id === 'wallpaper' ? <Wallpaper /> : <Send />
   else if (route === 'browse') page = <Browse parts={parts} />
   else if (error) page = <ErrorNote error={error} />
   else if (!books) page = <Spinner />

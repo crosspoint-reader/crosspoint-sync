@@ -10,6 +10,7 @@ import {
   FileText,
   Folder,
   ImageDown,
+  ImagePlus,
   Loader2,
   RefreshCw,
   Send as SendIcon,
@@ -437,6 +438,20 @@ export default function Send() {
       <p className="mt-2 max-w-xl text-sm/6 text-stone-500">
         Copy EPUB, Markdown and text files to your CrossPoint over Wi-Fi, from this device or from catalogs in Browse.
       </p>
+
+      <a
+        href="#/send/wallpaper"
+        className="mt-5 flex max-w-xl items-center gap-3 rounded-2xl bg-white px-4 py-3 shadow-sm ring-1 ring-stone-950/5 transition active:scale-[0.99] md:hover:bg-stone-50"
+      >
+        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600">
+          <ImagePlus className="size-5" strokeWidth={1.75} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-semibold text-stone-900">Make a sleep screen</span>
+          <span className="block truncate text-xs text-stone-500">Turn a photo into a wallpaper for your reader</span>
+        </span>
+        <ChevronRight className="size-5 text-stone-400" />
+      </a>
 
       {!isApp ? (
         <Card className="mt-6 p-4 text-sm/6 text-stone-600">
