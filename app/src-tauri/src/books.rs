@@ -161,17 +161,18 @@ pub async fn send_download(
   base: String,
   folder: String,
   quality: Option<u8>,
+  rename: Option<bool>,
   on_progress: Channel<Progress>,
-) -> Res<()> {
+) -> Res<String> {
   let name = safe_name(&name)?;
   let bytes = fs::read(books_dir(&app)?.join(&name)).map_err(err)?;
-  send(&base, &folder, &name, bytes, quality, Some(on_progress)).await
+  send(&base, &folder, &name, bytes, quality, rename.unwrap_or(false), Some(on_progress)).await
 }
 
 /// Send a file picked in the webview. Body = raw bytes; x-name / x-base /
-/// x-folder / x-quality headers carry the rest (raw IPC avoids JSON-encoding MBs).
+/// x-folder / x-quality / x-rename headers carry the rest (raw IPC avoids JSON-encoding MBs).
 #[tauri::command]
-pub async fn send_bytes(request: Request<'_>) -> Res<()> {
+pub async fn send_bytes(request: Request<'_>) -> Res<String> {
   let header = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok()).map(String::from);
   let decode = |v: Option<String>| v.and_then(|s| urlencoding_decode(&s)).ok_or("missing header");
   let name = decode(header("x-name"))?;
@@ -181,7 +182,8 @@ pub async fn send_bytes(request: Request<'_>) -> Res<()> {
   let InvokeBody::Raw(bytes) = request.body() else {
     return Err("expected raw file bytes".into());
   };
-  send(&base, &folder, &name, bytes.clone(), quality, None).await
+  let rename = header("x-rename").is_some_and(|v| v == "1");
+  send(&base, &folder, &name, bytes.clone(), quality, rename, None).await
 }
 
 /// Save a generated file (share card PNG, clippings Markdown) to Downloads.
@@ -211,14 +213,22 @@ async fn send(
   name: &str,
   bytes: Vec<u8>,
   quality: Option<u8>,
+  rename: bool,
   progress: Option<Channel<Progress>>,
-) -> Res<()> {
+) -> Res<String> {
   let emit = |p: Progress| {
     if let Some(ch) = &progress {
       let _ = ch.send(p);
     }
   };
   let is_epub = name.to_ascii_lowercase().ends_with(".epub");
+  // "Rename from Book Metadata", like the reader's own upload page. Read from the
+  // original bytes, before the optimizer rewrites the archive.
+  let name = match rename && is_epub {
+    true => crate::epub_name::metadata_filename(&bytes).unwrap_or_else(|| name.to_string()),
+    false => name.to_string(),
+  };
+  let name = name.as_str();
   let bytes = match quality {
     Some(q) if is_epub => {
       let ch = progress.clone();
@@ -257,7 +267,7 @@ async fn send(
       text.trim().to_string()
     });
   }
-  Ok(())
+  Ok(name.to_string())
 }
 
 fn now_ms() -> u64 {
@@ -345,4 +355,5 @@ mod tests {
     assert_eq!(urlencoding_decode(&urlencoding_encode("/Books/Été 1.epub")).unwrap(), "/Books/Été 1.epub");
   }
 }
+
 

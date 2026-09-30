@@ -1,4 +1,5 @@
 mod books;
+mod epub_name;
 mod mdns;
 mod opds;
 mod optimizer;

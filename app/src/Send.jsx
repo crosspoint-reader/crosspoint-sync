@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   BookUp,
+  FilePen,
   ChevronRight,
   FolderPlus,
   Pencil,
@@ -155,14 +156,26 @@ function Device({ prefs, setPrefs, device, onRetry }) {
             <span className="w-8 text-right font-mono text-stone-700">{prefs.quality}</span>
           </label>
         )}
+        <div className="mt-4 flex items-center gap-3">
+          <FilePen className="size-5 shrink-0 text-stone-400" strokeWidth={1.75} />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-stone-900">Rename from book metadata</p>
+            <p className="text-xs/5 text-stone-500">Use Title - Author.epub when available.</p>
+          </div>
+          <Toggle
+            label="Rename from book metadata"
+            checked={prefs.renameFromMetadata}
+            onChange={(renameFromMetadata) => setPrefs({ ...prefs, renameFromMetadata })}
+          />
+        </div>
       </div>
     </Card>
   )
 }
 
-function Status({ state, error, progress }) {
+function Status({ state, error, progress, sentAs }) {
   if (state === 'sending') return <span className="text-stone-500">{progressLabel(progress)}</span>
-  if (state === 'done') return <span className="text-brand-600">Sent</span>
+  if (state === 'done') return <span className="text-brand-600">{sentAs ? `Sent as ${sentAs}` : 'Sent'}</span>
   if (state === 'error') return <span className="text-red-600">{error}</span>
   return null
 }
@@ -188,8 +201,8 @@ function Shelf({ prefs, ready }) {
     const set = (patch) => setJobs((j) => ({ ...j, [name]: { ...j[name], ...patch } }))
     set({ state: 'sending', error: null, progress: null })
     try {
-      await sendDownload(name, prefs, (progress) => set({ progress }))
-      set({ state: 'done' })
+      const used = await sendDownload(name, prefs, (progress) => set({ progress }))
+      set({ state: 'done', sentAs: used !== name ? used : null })
     } catch (e) {
       set({ state: 'error', error: String(e) })
     }
@@ -406,8 +419,8 @@ export default function Send() {
       const update = (patch) => setFiles((cur) => cur.map((f) => (f.file === item.file ? { ...f, ...patch } : f)))
       update({ state: 'sending', error: null })
       try {
-        await sendFile(item.file, prefs)
-        update({ state: 'done' })
+        const used = await sendFile(item.file, prefs)
+        update({ state: 'done', sentAs: used !== item.file.name ? used : null })
       } catch (e) {
         update({ state: 'error', error: String(e) })
       }
@@ -475,13 +488,13 @@ export default function Send() {
 
             {files.length > 0 && (
               <Card className="mt-4 divide-y divide-stone-100">
-                {files.map(({ file, state, error }) => (
+                {files.map(({ file, state, error, sentAs }) => (
                   <div key={file.name} className="flex items-center gap-3 px-4 py-3">
                     <FileText className="size-5 shrink-0 text-stone-400" strokeWidth={1.75} />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-stone-900">{file.name}</p>
                       <p className="truncate text-xs text-stone-500">
-                        {state === 'queued' ? size(file.size) : <Status state={state} error={error} />}
+                        {state === 'queued' ? size(file.size) : <Status state={state} error={error} sentAs={sentAs} />}
                       </p>
                     </div>
                     {state === 'queued' ? (

@@ -90,13 +90,15 @@ const quality = (prefs) => (prefs.optimize ? prefs.quality : null)
 
 export async function sendDownload(name, prefs, progress = () => {}) {
   const base = await reader(prefs)
-  return invoke('send_download', { name, base, folder: prefs.folder, quality: quality(prefs), onProgress: onProgress(progress) })
+  return invoke('send_download', { name, base, folder: prefs.folder, quality: quality(prefs), rename: prefs.renameFromMetadata, onProgress: onProgress(progress) })
 }
 
-// Files picked in the webview go to Rust as raw bytes (optimizer + multipart upload live there).
+// Files picked in the webview go to Rust as raw bytes (optimizer, metadata rename and upload live there).
+// Both sends resolve to the file name used on the reader.
 export async function sendFile(file, prefs) {
   const base = await reader(prefs)
   const headers = { 'x-name': encodeURIComponent(file.name), 'x-base': encodeURIComponent(base), 'x-folder': encodeURIComponent(prefs.folder) }
   if (prefs.optimize) headers['x-quality'] = String(prefs.quality)
+  if (prefs.renameFromMetadata) headers['x-rename'] = '1'
   return invoke('send_bytes', new Uint8Array(await file.arrayBuffer()), { headers })
 }
