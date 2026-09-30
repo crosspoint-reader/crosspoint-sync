@@ -226,6 +226,19 @@ describe('BookFusion CFI conversion', () => {
     expect((await epubPosition(bytes, xpath)).cfi).toBe(cfi);
   });
 
+  it.each([
+    // BookFusion production shape: /1 on an element whose first child is an element.
+    ['epubcfi(/8/4!/6/2/1)', '/body/DocFragment[2]/body/div[1]/p[1]'],
+    ['epubcfi(/8/4!/6/2/3)', '/body/DocFragment[2]/body/div[1]/p[2]'],
+    ['epubcfi(/8/4!/6/2/5:0)', '/body/DocFragment[2]/body/div[1]'],
+  ])('resolves an empty text slot %s to the adjacent element', async (cfi, xpath) => {
+    expect(await epubXPath(epub('<div><p>a</p><p>b</p></div>'), cfi)).toBe(xpath);
+  });
+
+  it.each(['epubcfi(/8/4!/6/2/1:1)', 'epubcfi(/8/4!/6/2/7)'])('rejects offsets past an empty slot: %s', async cfi => {
+    await expect(epubXPath(epub('<div><p>a</p><p>b</p></div>'), cfi)).rejects.toThrow('out of range');
+  });
+
   it('validates escaped IDs and accepts text assertions and side bias', async () => {
     const bytes = epub('<p id="a]!/;b">hello</p>');
     expect(await epubXPath(bytes, 'epubcfi(/8/4!/6/2[a^]!/^;b]/1:2[he,llo;s=b])'))

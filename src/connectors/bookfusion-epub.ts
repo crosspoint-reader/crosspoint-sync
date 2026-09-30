@@ -321,6 +321,15 @@ export async function epubXPath(bytes: Buffer, cfi: string): Promise<string> {
           found = true;
           break;
         }
+        // An empty slot (e.g. /1 before a leading child element) is still a valid point:
+        // it sits just before the next element, or at the parent if it's the last slot.
+        if (!found && !step.offset) {
+          const kids = elements(target);
+          if (step.number > 2 * kids.length + 1) invalid('CFI text offset out of range');
+          const next = kids[(step.number - 1) / 2];
+          if (next) path.push(`${next.localName}[${kids.filter(e => e.localName === next.localName).indexOf(next) + 1}]`);
+          found = true;
+        }
         if (!found) invalid('CFI text offset out of range');
       }
     }
