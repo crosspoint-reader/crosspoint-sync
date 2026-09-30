@@ -219,14 +219,18 @@ export default function Stats({ summary, activity, books }) {
   return (
     <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
       <Eyebrow className="md:hidden">Reading stats</Eyebrow>
-      <div className="flex items-center justify-between gap-4 pr-12 md:pr-0">
+      {/* Share sits flush right, under the settings gear on phones. */}
+      <div className="flex items-end justify-between gap-4 md:items-center">
         <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">How you read</h1>
         {activity && (
           <button
             onClick={() => setSharing(true)}
-            className="flex h-10 shrink-0 items-center gap-1.5 rounded-full bg-white px-4 text-sm font-semibold text-brand-700 ring-1 ring-stone-950/10 active:bg-stone-100"
+            aria-label="Share stats"
+            className="-mr-1 grid size-11 shrink-0 translate-y-3 place-items-center rounded-full text-brand-600 active:bg-stone-200/70 md:mr-0 md:flex md:h-10 md:w-auto md:translate-y-0 md:gap-1.5 md:bg-white md:px-4 md:text-sm md:font-semibold md:text-brand-700 md:ring-1 md:ring-stone-950/10"
           >
-            <Share2 className="size-4" /> Share
+            {/* Phones: an icon stacked under the settings gear. Wider screens: a labelled pill. */}
+            <Share2 className="size-6 md:size-4" strokeWidth={1.75} />
+            <span className="hidden md:inline">Share</span>
           </button>
         )}
       </div>
