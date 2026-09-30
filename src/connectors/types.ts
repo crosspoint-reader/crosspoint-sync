@@ -97,6 +97,11 @@ export interface OutboundEvent {
     author?: string | null;
     location?: number | null;
     highlightedAt?: number | null;
+    /** CrossPoint position: spine index plus chapter codepoint offsets (when the firmware sent them). */
+    spine?: number | null;
+    startOffset?: number | null;
+    endOffset?: number | null;
+    chapter?: string | null;
   };
 }
 

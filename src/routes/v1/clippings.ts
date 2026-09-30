@@ -3,7 +3,7 @@ import { withTransaction, type DB } from '../../db/db.js';
 import { kosyncError, type AppEnv } from '../../auth/middleware.js';
 import { isValidDocument } from '../kosync.js';
 import { isItemId, nowSeconds, parseListParams } from '../../models/sync.js';
-import { fanOutHighlight } from '../../connectors/fanout.js';
+import { fanOutHighlight, highlightFromRow, type ClippingHighlightRow } from '../../connectors/fanout.js';
 import { documentMeta } from '../../connectors/store.js';
 
 const MAX_BATCH = 50;
@@ -249,24 +249,18 @@ export function clippingRoutes(db: DB): Hono<AppEnv> {
     if (highlightIds.size > 0) {
       const meta = documentMeta(db, user.id, document);
       const readHighlight = db.prepare(
-        'SELECT text, note, created_at FROM clippings WHERE user_id = ? AND document = ? AND id = ? AND deleted = 0'
+        `SELECT text, note, created_at, spine_index, start_offset, end_offset, chapter_title
+         FROM clippings WHERE user_id = ? AND document = ? AND id = ? AND deleted = 0`
       );
       for (const id of highlightIds) {
-        const h = readHighlight.get(user.id, document, id) as
-          { text: string; note: string | null; created_at: number } | undefined;
+        const h = readHighlight.get(user.id, document, id) as ClippingHighlightRow | undefined;
         if (!h) continue;
         fanOutHighlight(
           db,
           user.id,
           document,
           id,
-          {
-            text: h.text,
-            note: h.note,
-            title: meta.title,
-            author: meta.author,
-            highlightedAt: h.created_at > 0 ? h.created_at : null,
-          },
+          highlightFromRow(h, meta),
           now
         );
       }

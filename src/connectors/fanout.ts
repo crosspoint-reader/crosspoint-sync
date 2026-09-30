@@ -88,6 +88,34 @@ export function fanOutProgress(
   );
 }
 
+/** Clipping columns a highlight event is built from. */
+export interface ClippingHighlightRow {
+  text: string;
+  note: string | null;
+  created_at: number;
+  spine_index: number;
+  start_offset: number | null;
+  end_offset: number | null;
+  chapter_title: string;
+}
+
+export function highlightFromRow(
+  r: ClippingHighlightRow,
+  meta: { title: string | null; author: string | null }
+): NonNullable<OutboundEvent['highlight']> {
+  return {
+    text: r.text,
+    note: r.note,
+    title: meta.title,
+    author: meta.author,
+    highlightedAt: r.created_at > 0 ? r.created_at : null,
+    spine: r.spine_index,
+    startOffset: r.start_offset,
+    endOffset: r.end_offset,
+    chapter: r.chapter_title || null,
+  };
+}
+
 export function fanOutHighlight(
   db: DB,
   userId: number,
@@ -164,20 +192,13 @@ export function backfillConnector(db: DB, userId: number, connectorId: string): 
   if (conn.carries.includes('highlight')) {
     const rows = db
       .prepare(
-        `SELECT c.id, c.document, c.text, c.note, c.created_at, d.title, d.author
+        `SELECT c.id, c.document, c.text, c.note, c.created_at, c.spine_index, c.start_offset, c.end_offset,
+                c.chapter_title, d.title, d.author
          FROM clippings c
          LEFT JOIN documents d ON d.user_id = c.user_id AND d.document = c.document
          WHERE c.user_id = ? AND c.deleted = 0`
       )
-      .all(userId) as {
-      id: string;
-      document: string;
-      text: string;
-      note: string | null;
-      created_at: number;
-      title: string | null;
-      author: string | null;
-    }[];
+      .all(userId) as unknown as (ClippingHighlightRow & { id: string; document: string; title: string | null; author: string | null })[];
     for (const r of rows) {
       enqueue(
         db,
@@ -187,13 +208,7 @@ export function backfillConnector(db: DB, userId: number, connectorId: string): 
           kind: 'highlight',
           document: r.document,
           timestamp: r.created_at || nowSeconds(),
-          highlight: {
-            text: r.text,
-            note: r.note,
-            title: r.title,
-            author: r.author,
-            highlightedAt: r.created_at > 0 ? r.created_at : null,
-          },
+          highlight: highlightFromRow(r, r),
         },
         `highlight:${r.id}`
       );

@@ -1,7 +1,8 @@
 import { crc32 } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { bookFusionEpub, clearBookFusionEpubCache, epubPosition, epubXPath } from '../src/connectors/bookfusion-epub.js';
+import { bookFusionEpub, clearBookFusionEpubCache, epubPosition, epubRangeCfi, epubXPath } from '../src/connectors/bookfusion-epub.js';
 import { bookfusionConnector } from '../src/connectors/bookfusion.js';
+import { bookorbitConnector } from '../src/connectors/bookorbit.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
 import { saveMatch, upsertAccount } from '../src/connectors/store.js';
 import { pollAll, pollConnector } from '../src/connectors/fanin.js';
@@ -524,5 +525,70 @@ describe('BookFusion refresh on progress GET', () => {
       expect(db.prepare("SELECT COUNT(*) n FROM progress WHERE device_id='bookfusion'").get()).toEqual({ n: 0 });
       expect(fake.calls).toHaveLength(0); // No download may start after expiration.
     } finally { release(); log.mockRestore(); db.close(); }
+  });
+});
+
+describe('epubRangeCfi (CrossPoint clipping offsets)', () => {
+  // Visible chapter text: "Title" 0-4, "Pre😀" 5-8, "bold" 9-12, " tail&end" 13-21.
+  it('builds a range CFI across elements', async () => {
+    expect(await epubRangeCfi(epub(), 1, 9, 18)).toEqual({ cfi: 'epubcfi(/8/4!/6/4,/2/1:0,/3:5)', text: 'bold tail' });
+  });
+
+  it('counts codepoints but emits UTF-16 offsets', async () => {
+    expect(await epubRangeCfi(epub(), 1, 5, 9)).toEqual({ cfi: 'epubcfi(/8/4!/6/4,/1:0,/1:5)', text: 'Pre😀' });
+  });
+
+  it('skips non-visible text like the firmware', async () => {
+    const book = epub('<p>ab<script>xyz</script>cd</p>');
+    expect(await epubRangeCfi(book, 1, 1, 3)).toEqual({ cfi: 'epubcfi(/8/4!/6/2,/1:1,/3:1)', text: 'bc' });
+    await expect(epubRangeCfi(book, 1, 2, 9)).rejects.toThrow('out of range');
+  });
+});
+
+describe('bookorbit highlights', () => {
+  const CRED = { server: 'orbit.test', username: 'hl', password: 'pw' };
+  const MATCH = { externalId: '12', externalEdition: '71', confidence: 1 };
+  const LOGIN = { accessToken: 'at', accessTokenExpiresAt: new Date(Date.now() + 900_000).toISOString() };
+  function orbit(existing: unknown[] = []) {
+    const calls: { url: string; method: string; body?: string }[] = [];
+    const json = (body: unknown) => ({ status: 200, text: async () => '', json: async () => body });
+    const http: HttpTransport = async (url, init) => {
+      calls.push({ url, method: init.method, body: init.body });
+      if (url.endsWith('/auth/login')) return json(LOGIN);
+      if (url.endsWith('/books/files/71/serve')) return {
+        status: 200, text: async () => '', json: async () => null,
+        body: new ReadableStream({ start(controller) { controller.enqueue(epub()); controller.close(); } }),
+      };
+      if (url.endsWith('/books/12/annotations') && init.method === 'GET') return json(existing);
+      return json({});
+    };
+    return { http, calls };
+  }
+  const ev = (text: string, note: string | null = null) => ({
+    kind: 'highlight' as const, document: 'd', timestamp: 1,
+    highlight: { text, note, spine: 1, startOffset: 9, endOffset: 18, chapter: 'Two' },
+  });
+
+  it('creates an annotation at the clipping\'s exact range', async () => {
+    const o = orbit();
+    expect(await bookorbitConnector.push(CRED, MATCH, ev('bold tail', 'nice'), o.http)).toEqual({ ok: true });
+    const post = o.calls.find((c) => c.method === 'POST' && c.url.endsWith('/books/12/annotations'))!;
+    expect(JSON.parse(post.body!)).toEqual({ cfi: 'epubcfi(/8/4!/6/4,/2/1:0,/3:5)', bookFileId: 71, text: 'bold tail', note: 'nice', chapterTitle: 'Two' });
+  });
+
+  it('updates the note instead of duplicating a re-sent clipping', async () => {
+    const o = orbit([{ id: 5, cfi: 'epubcfi(/8/4!/6/4,/2/1:0,/3:5)', note: null }]);
+    expect((await bookorbitConnector.push(CRED, MATCH, ev('bold tail', 'later'), o.http)).ok).toBe(true);
+    expect(o.calls.some((c) => c.method === 'POST' && c.url.includes('/annotations'))).toBe(false);
+    const patch = o.calls.find((c) => c.method === 'PATCH')!;
+    expect(patch.url).toMatch(/\/books\/12\/annotations\/5$/);
+    expect(JSON.parse(patch.body!)).toEqual({ note: 'later' });
+  });
+
+  it('refuses a position that does not hold the clipping text', async () => {
+    const o = orbit();
+    const r = await bookorbitConnector.push(CRED, MATCH, ev('something else'), o.http);
+    expect(r).toMatchObject({ ok: false, retryable: false });
+    expect(o.calls.some((c) => c.url.includes('/annotations'))).toBe(false);
   });
 });

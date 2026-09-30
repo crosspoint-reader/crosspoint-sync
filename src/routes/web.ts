@@ -22,7 +22,7 @@ const FAVICON = fs.readFileSync(path.join(ASSETS_DIR, 'favicon.png'));
 // Service app icons, served at /icons/:id.png. Loaded once at boot; a missing
 // file just means no icon for that service (the UI falls back gracefully).
 const SERVICE_ICONS = new Map<string, Buffer>();
-for (const id of ['kosync', 'hardcover', 'audiobookshelf', 'bookfusion', 'readwise', 'microblog']) {
+for (const id of ['kosync', 'hardcover', 'audiobookshelf', 'bookfusion', 'readwise', 'microblog', 'bookorbit']) {
   try {
     SERVICE_ICONS.set(id, fs.readFileSync(path.join(ASSETS_DIR, 'icons', `${id}.png`)));
   } catch {
@@ -241,6 +241,9 @@ const LANDING = shell(
      <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/audiobookshelf.png" alt="" width="34" height="34"><div><div class="name">Audiobookshelf</div>
        <div class="desc">Keep your place between the ebook and the audiobook, both ways. Read some, then pick up listening right where you left off.</div></div></div>
        <span class="pill">ready</span></div>
+     <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/bookorbit.png" alt="" width="34" height="34"><div><div class="name">BookOrbit</div>
+       <div class="desc">Keep your place in sync, both ways, with your own BookOrbit library. Clippings show up as highlights, and finished books are marked Read.</div></div></div>
+       <span class="pill warn">beta</span></div>
      <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/bookfusion.png" alt="" width="34" height="34"><div><div class="name">BookFusion</div>
        <div class="desc">Sync reading positions both ways for books downloaded from BookFusion.</div></div></div>
        <span class="pill warn">experimental</span></div>
@@ -560,7 +563,8 @@ const HINTS = {
   readwise: 'Paste your Readwise access token from readwise.io/access_token. Syncs your highlights.',
   kosync: 'Mirror your reading progress to another KOReader-compatible (KOSync) server, so your other devices see it too.',
   bookfusion: 'Connect your BookFusion account to sync reading progress. You will approve the request on bookfusion.com.',
-  audiobookshelf: 'Sync your reading position to the matching audiobook on your Audiobookshelf server. Create an API key in Audiobookshelf under Settings, Users, API Keys.'
+  audiobookshelf: 'Sync your reading position to the matching audiobook on your Audiobookshelf server. Create an API key in Audiobookshelf under Settings, Users, API Keys.',
+  bookorbit: 'Sync reading progress both ways with your BookOrbit server. Books are matched by title and author, finishing a book marks it Read, and your clippings appear as highlights in the right spot. Sign in with your BookOrbit account.'
 };
 
 const TOKEN_HELP = {
@@ -611,7 +615,7 @@ function render(conn) {
       if (r.ok) done(); else $('e').textContent = r.data.message || 'Could not link';
     };
   } else if (conn.credential_kind === 'kosync') {
-    f.innerHTML = '<label>Server URL</label><input id="srv" class="mono" placeholder="https://sync.koreader.rocks:443">'
+    f.innerHTML = '<label>Server URL</label><input id="srv" class="mono" placeholder="' + (ID === 'bookorbit' ? 'https://books.example.com' : 'https://sync.koreader.rocks:443') + '">'
       + '<div style="margin-top:10px"><label>Username</label><input id="u" autocomplete="off"></div>'
       + '<div style="margin-top:10px"><label>Password</label><input id="p" type="password" autocomplete="off"></div>'
       + '<button class="primary full mt" id="go">Connect server</button><div class="err" id="e"></div>';

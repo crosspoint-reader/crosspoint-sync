@@ -8,6 +8,7 @@ import { kosyncConnector, baseUrl } from '../src/connectors/kosync.js';
 import { bookfusionConnector, extractBooks } from '../src/connectors/bookfusion.js';
 import { hardcoverConnector } from '../src/connectors/hardcover.js';
 import { audiobookshelfConnector, baseUrl as absBaseUrl } from '../src/connectors/audiobookshelf.js';
+import { bookorbitConnector } from '../src/connectors/bookorbit.js';
 import { pollConnector } from '../src/connectors/fanin.js';
 import { saveMatch } from '../src/connectors/store.js';
 
@@ -750,5 +751,91 @@ describe('hardcover connector (unit)', () => {
     );
     expect(r.ok).toBe(false);
     expect(r.error).toBe('invalid token format');
+  });
+});
+
+describe('bookorbit connector', () => {
+  // Sessions are cached per server+user, so each test uses its own username.
+  const cred = (username: string) => ({ server: 'orbit.test', username, password: 'pw' });
+  const LOGIN = { accessToken: 'at', refreshToken: 'rt', accessTokenExpiresAt: new Date(Date.now() + 900_000).toISOString() };
+
+  it('validates with a native password login', async () => {
+    const fake = fakeTransport();
+    fake.on('/auth/login', 200, LOGIN);
+    fake.on('/auth/me', 200, { username: 'julia' });
+    const v = await bookorbitConnector.validate(cred('v'), fake.transport);
+    expect(v).toEqual({ ok: true, accountLabel: 'julia @ orbit.test' });
+    const login = fake.calls.find((c) => c.url === 'https://orbit.test/api/v1/auth/login')!;
+    expect(JSON.parse(login.body!)).toMatchObject({ username: 'v', password: 'pw', clientKind: 'native' });
+  });
+
+  it('rejects bad passwords', async () => {
+    const fake = fakeTransport();
+    fake.on('/auth/login', 401, {});
+    const v = await bookorbitConnector.validate(cred('bad'), fake.transport);
+    expect(v.ok).toBe(false);
+  });
+
+  it('matches by title/author and caches the EPUB file id', async () => {
+    const fake = fakeTransport();
+    fake.on('/auth/login', 200, LOGIN);
+    fake.on('/books/search', 200, [
+      { id: 12, title: 'Foundryside', authors: ['Robert Jackson Bennett'], formats: ['epub'] },
+      { id: 13, title: 'Shorefall', authors: ['Robert Jackson Bennett'], formats: ['epub'] },
+    ]);
+    fake.on('/books/12', 200, { id: 12, files: [{ id: 70, format: 'pdf', role: 'alternate' }, { id: 71, format: 'epub', role: 'primary' }] });
+    const m = await bookorbitConnector.match(cred('m'), { document: 'd', title: 'Foundryside', author: 'Robert Jackson Bennett', filename: null }, fake.transport);
+    expect(m?.externalId).toBe('12');
+    expect(m?.externalEdition).toBe('71');
+  });
+
+  it('pushes percentage and XPointer, and marks finished books read', async () => {
+    const fake = fakeTransport();
+    fake.on('/auth/login', 200, LOGIN);
+    const m = { externalId: '12', externalEdition: '71', confidence: 1 };
+    const r1 = await bookorbitConnector.push(cred('p'), m,
+      { kind: 'progress', document: 'd', percentage: 0.4237, progress: '/body/DocFragment[3]/body/p[2]', timestamp: 1 }, fake.transport);
+    expect(r1.ok).toBe(true);
+    const save = fake.calls.find((c) => c.url.endsWith('/api/v1/books/files/71/progress'))!;
+    expect(JSON.parse(save.body!)).toEqual({ percentage: 42.37, koreaderProgress: '/body/DocFragment[3]/body/p[2]' });
+    expect(fake.calls.some((c) => c.url.endsWith('/status'))).toBe(false);
+
+    const r2 = await bookorbitConnector.push(cred('p'), m, { kind: 'finished', document: 'd', percentage: 1, timestamp: 2 }, fake.transport);
+    expect(r2.ok).toBe(true);
+    const status = fake.calls.find((c) => c.url.endsWith('/api/v1/books/12/status'))!;
+    expect(status.method).toBe('PATCH');
+    expect(JSON.parse(status.body!)).toEqual({ status: 'read' });
+    // One login served both pushes.
+    expect(fake.calls.filter((c) => c.url.endsWith('/auth/login'))).toHaveLength(1);
+  });
+
+  it('logs in again when the cached token is rejected', async () => {
+    const fake = fakeTransport();
+    fake.on('/auth/login', 200, LOGIN);
+    const m = { externalId: '12', externalEdition: '71', confidence: 1 };
+    const ev = { kind: 'progress' as const, document: 'd', percentage: 0.1, timestamp: 1 };
+    await bookorbitConnector.push(cred('r'), m, ev, fake.transport);
+    let rejected = false;
+    const t: HttpTransport = async (url, init) => {
+      if (url.includes('/progress') && !rejected) { rejected = true; return { status: 401, text: async () => '', json: async () => ({}) }; }
+      return fake.transport(url, init);
+    };
+    const r = await bookorbitConnector.push(cred('r'), m, ev, t);
+    expect(r.ok).toBe(true);
+    expect(fake.calls.filter((c) => c.url.endsWith('/auth/login'))).toHaveLength(2);
+  });
+
+  it('pulls newer progress for a matched book', async () => {
+    const fake = fakeTransport();
+    fake.on('/auth/login', 200, LOGIN);
+    fake.on('/books/12/progress', 200, [
+      { fileId: 70, percentage: 90, updatedAt: '2026-09-02T00:00:00Z' },
+      { fileId: 71, percentage: 55, updatedAt: '2026-09-01T00:00:00Z' },
+    ]);
+    const m = { externalId: '12', externalEdition: '71', confidence: 1 };
+    const since = Date.parse('2026-08-31T00:00:00Z');
+    const ch = await bookorbitConnector.pullProgress!(cred('pull'), m, fake.transport, since);
+    expect(ch).toMatchObject({ externalId: '12', percentage: 0.55, finished: false });
+    expect(await bookorbitConnector.pullProgress!(cred('pull'), m, fake.transport, Date.parse('2026-09-01T00:00:00Z'))).toBeNull();
   });
 });

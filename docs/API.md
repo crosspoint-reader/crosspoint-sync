@@ -561,7 +561,7 @@ Body `{"external_id": "…"}`. `{"found": true, "book": {"externalId", "title",
 so connectors need "Send Metadata" on). **Fan-out** is automatic: a progress PUT enqueues a
 progress/finished event to write-connectors that carry it; a clippings PUT enqueues highlight events
 to highlight-connectors (Readwise). A background worker delivers them with retry/backoff.
-**Fan-in** (read connectors: Audiobookshelf, Readwise Reader, BookFusion) is pulled on a
+**Fan-in** (read connectors: Audiobookshelf, BookOrbit, Readwise Reader, BookFusion) is pulled on a
 background interval for library-wide providers, and on-demand — when a device asks for progress on a
 matched book — for per-book providers.
 

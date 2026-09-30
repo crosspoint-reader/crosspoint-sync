@@ -13,7 +13,7 @@ const cache = new Map<string, { bytes: Buffer; expires: number }>();
 export function clearBookFusionEpubCache(): void { cache.clear(); }
 
 function invalid(reason: string): never {
-  throw new ConnectorOperationError(`BookFusion position: ${reason}`, false);
+  throw new ConnectorOperationError(`EPUB position: ${reason}`, false);
 }
 
 function checkStatus(status: number, authenticated = true): void {
@@ -28,7 +28,34 @@ function checkStatus(status: number, authenticated = true): void {
 export async function bookFusionEpub(
   token: string, bookId: string, headers: Record<string, string>, http: HttpTransport
 ): Promise<Buffer> {
-  const key = createHash('sha256').update(JSON.stringify([token, bookId])).digest('hex');
+  return cachedEpub([token, bookId], async (signal) => {
+    const link = await http(`https://www.bookfusion.com/api/user/books/${encodeURIComponent(bookId)}/download`, {
+      method: 'POST', headers, body: '{}', signal,
+    });
+    checkStatus(link.status);
+    const data = await link.json() as { url?: unknown };
+    if (typeof data?.url !== 'string') invalid('download URL missing');
+    const url = new URL(data.url);
+    // Download URLs come from BookFusion; never forward its bearer token to storage.
+    if (url.protocol !== 'https:' || url.username || url.password || (url.port && url.port !== '443') ||
+        !['bookfusion.com', 'amazonaws.com', 'cloudfront.net'].some(
+          host => url.hostname === host || url.hostname.endsWith(`.${host}`)
+        )) invalid('unsupported EPUB download host');
+    const res = await http(url.href, { method: 'GET', signal, redirect: 'error' });
+    checkStatus(res.status, false);
+    return res;
+  });
+}
+
+/**
+ * Download an EPUB once per key (hashed, so tokens never sit in cache keys),
+ * capped at 32 MiB and cached briefly across all accounts. `load` returns the
+ * checked response whose body is the archive.
+ */
+export async function cachedEpub(
+  keyParts: unknown[], load: (signal: AbortSignal) => Promise<Awaited<ReturnType<HttpTransport>>>
+): Promise<Buffer> {
+  const key = createHash('sha256').update(JSON.stringify(keyParts)).digest('hex');
   for (const [id, entry] of cache) if (entry.expires <= Date.now()) cache.delete(id);
   const cached = cache.get(key);
   if (cached) {
@@ -37,20 +64,7 @@ export async function bookFusionEpub(
     return cached.bytes;
   }
   const signal = AbortSignal.timeout(30_000);
-  const link = await http(`https://www.bookfusion.com/api/user/books/${encodeURIComponent(bookId)}/download`, {
-    method: 'POST', headers, body: '{}', signal,
-  });
-  checkStatus(link.status);
-  const data = await link.json() as { url?: unknown };
-  if (typeof data?.url !== 'string') invalid('download URL missing');
-  const url = new URL(data.url);
-  // Download URLs come from BookFusion; never forward its bearer token to storage.
-  if (url.protocol !== 'https:' || url.username || url.password || (url.port && url.port !== '443') ||
-      !['bookfusion.com', 'amazonaws.com', 'cloudfront.net'].some(
-        host => url.hostname === host || url.hostname.endsWith(`.${host}`)
-      )) invalid('unsupported EPUB download host');
-  const res = await http(url.href, { method: 'GET', signal, redirect: 'error' });
-  checkStatus(res.status, false);
+  const res = await load(signal);
   if (!res.body) invalid('EPUB response has no body');
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -311,5 +325,71 @@ export async function epubXPath(bytes: Buffer, cfi: string): Promise<string> {
       }
     }
     return path.join('/');
+  });
+}
+
+// Text the firmware never counts: CrossPoint's VisibleTextUtils::isNonVisibleElement.
+const NON_VISIBLE = new Set(['head', 'style', 'script', 'title', 'rp']);
+
+/** CFI steps from the chapter's <html> down to a text node, plus the UTF-16 offset within its CFI text slot. */
+function textPoint(html: Element, node: Node, offset: number): string {
+  const parent = node.parentNode!;
+  let slot = 1, slotOffset = offset;
+  // Adjacent text nodes (split by comments/CDATA) share one CFI slot.
+  for (const sibling of children(parent)) {
+    if (sibling === node) break;
+    if (sibling.nodeType === 1) { slot += 2; slotOffset = offset; }
+    else if (text(sibling)) slotOffset += sibling.nodeValue?.length ?? 0;
+  }
+  const steps: number[] = [];
+  for (let el: Node = parent; el !== html; el = el.parentNode!) steps.unshift(2 * (elements(el.parentNode!).indexOf(el as Element) + 1));
+  return `/${steps.join('/')}/${slot}:${slotOffset}`;
+}
+
+/**
+ * Range CFI for a CrossPoint clipping: `start`/`end` are the firmware's chapter
+ * codepoint offsets (every decoded text codepoint inside <body>, skipping
+ * NON_VISIBLE elements). Returns the CFI and the text it covers so callers can
+ * check it against the clipping before trusting it.
+ */
+export async function epubRangeCfi(
+  bytes: Buffer, spineIndex: number, start: number, end: number
+): Promise<{ cfi: string; text: string }> {
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end <= start) invalid('bad clipping offsets');
+  return withChapter(bytes, () => spineIndex, ({ opf, spine, spineItems, index, html, body }) => {
+    let count = 0;
+    let from: [Node, number] | undefined, to: [Node, number] | undefined;
+    let covered = '';
+    const visit = (node: Node) => {
+      for (const c of children(node)) {
+        if (to) return;
+        if (c.nodeType === 1) {
+          if (!NON_VISIBLE.has(((c as Element).localName ?? '').toLowerCase())) visit(c);
+        } else if (text(c)) {
+          let utf16 = 0;
+          for (const ch of c.nodeValue ?? '') {
+            if (count === start) from = [c, utf16];
+            if (count === end) { to = [c, utf16]; return; }
+            if (from) covered += ch;
+            count++;
+            utf16 += ch.length;
+          }
+          if (count === end && from) { to = [c, utf16]; return; }
+        }
+      }
+    };
+    visit(body);
+    if (!from || !to) invalid('clipping offsets out of range');
+    const a = textPoint(html, from[0], from[1]).split('/');
+    const b = textPoint(html, to[0], to[1]).split('/');
+    // Shared parent path, then the two diverging tails (parent,start,end).
+    let shared = 0;
+    while (shared < Math.min(a.length, b.length) - 1 && a[shared] === b[shared] && !a[shared].includes(':')) shared++;
+    const packageStep = 2 * (elements(opf).indexOf(spine) + 1);
+    const itemStep = 2 * (elements(spine).indexOf(spineItems[index]) + 1);
+    return {
+      cfi: `epubcfi(/${packageStep}/${itemStep}!${a.slice(0, shared).join('/')},/${a.slice(shared).join('/')},/${b.slice(shared).join('/')})`,
+      text: covered,
+    };
   });
 }

@@ -7,6 +7,7 @@ import { bookfusionConnector } from './bookfusion.js';
 import { audiobookshelfConnector } from './audiobookshelf.js';
 import { microblogConnector } from './microblog.js';
 import { kindleConnector } from './kindle.js';
+import { bookorbitConnector } from './bookorbit.js';
 
 /** All connectors known to this build. */
 const CONNECTORS: Connector[] = [
@@ -16,6 +17,7 @@ const CONNECTORS: Connector[] = [
   readwiseReaderConnector,
   bookfusionConnector,
   audiobookshelfConnector,
+  bookorbitConnector,
   microblogConnector,
   kindleConnector,
 ];
