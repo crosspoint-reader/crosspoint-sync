@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Share2 } from 'lucide-react'
+import { Fragment, useEffect, useRef, useState } from 'react'
+import { ChevronLeft, ChevronRight, Share2 } from 'lucide-react'
 import ShareSheet from './ShareSheet.jsx'
 import { renderStatsCard } from './shareCard.js'
 import { Card, Eyebrow, duration } from './ui.jsx'
@@ -128,6 +128,145 @@ function WeeklyPages({ days, weeks = 12 }) {
   )
 }
 
+// Calendar of reading days from the sync history: one square per day, shaded by
+// print pages read that day. Weekday rows (Monday first), weeks run left to right.
+// Light enough that one day-number color stays readable on every shade.
+const SHADES = ['bg-stone-100', 'bg-brand-100', 'bg-brand-200', 'bg-brand-300', 'bg-brand-400']
+const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const SCALES = [
+  ['month', 'Month'],
+  ['quarter', '3 months'],
+  ['year', 'Year'],
+]
+const mondayOf = (d) => new Date(d.getTime() - ((d.getDay() + 6) % 7) * DAY_MS)
+const fmt = (d, o) => d.toLocaleDateString(undefined, o)
+
+// Weeks (Monday dates) shown for a scale, `back` periods before now, plus the visible day range.
+function calendarRange(scale, back, today) {
+  if (scale === 'month') {
+    const first = new Date(today.getFullYear(), today.getMonth() - back, 1, 12)
+    const last = new Date(first.getFullYear(), first.getMonth() + 1, 0, 12)
+    const weeks = []
+    for (let m = mondayOf(first); m <= last; m = new Date(m.getTime() + 7 * DAY_MS)) weeks.push(m)
+    return { weeks, first, last, label: fmt(first, { month: 'long', year: 'numeric' }) }
+  }
+  const count = scale === 'quarter' ? 13 : 52
+  const end = new Date(mondayOf(today).getTime() - back * count * 7 * DAY_MS)
+  const weeks = Array.from({ length: count }, (_, i) => new Date(end.getTime() - (count - 1 - i) * 7 * DAY_MS))
+  const first = weeks[0]
+  const last = new Date(end.getTime() + 6 * DAY_MS)
+  const opts = { month: 'short', year: first.getFullYear() === last.getFullYear() ? undefined : 'numeric' }
+  return { weeks, first, last, label: `${fmt(first, opts)} to ${fmt(last > today ? today : last, { month: 'short', year: 'numeric' })}` }
+}
+
+function ReadingCalendar({ days }) {
+  const [scale, setScale] = useState('month')
+  const [back, setBack] = useState(0)
+  const scroller = useRef(null)
+  // Any sync marks a reading day; pages read deepen the shade.
+  const byDay = new Map(days.filter((d) => d.syncs > 0 || d.pages > 0).map((d) => [d.day, d.pages]))
+  const max = Math.max(...byDay.values(), 1)
+  const level = (day) => (!byDay.has(day) ? 0 : Math.max(1, Math.min(4, Math.ceil((byDay.get(day) / max) * 4))))
+  const today = new Date()
+  today.setHours(12, 0, 0, 0)
+  const { weeks, first, last, label } = calendarRange(scale, back, today)
+  const shown = (d) => d >= first && d <= last && d <= today
+  let count = 0
+  for (let d = first; d <= last && d <= today; d = new Date(d.getTime() + DAY_MS)) if (byDay.has(localDay(d))) count++
+  const month = scale === 'month'
+  const year = scale === 'year'
+  // The newest weeks sit on the right; start the (phone-scrollable) year there.
+  useEffect(() => {
+    if (scroller.current) scroller.current.scrollLeft = scroller.current.scrollWidth
+  }, [scale, back])
+  const pick = (v) => {
+    setScale(v)
+    setBack(0)
+  }
+  const arrow = 'grid size-9 place-items-center rounded-full text-stone-600 active:bg-stone-100 md:hover:bg-stone-100 disabled:opacity-30'
+  return (
+    <Card className="mt-4 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-display text-lg font-semibold text-stone-900">Reading days</h2>
+        <div className="grid w-full grid-cols-3 gap-1 rounded-xl bg-stone-200/60 p-1 sm:w-auto">
+          {SCALES.map(([v, l]) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => pick(v)}
+              className={`h-8 rounded-lg px-3 text-xs font-semibold whitespace-nowrap transition ${
+                scale === v ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 active:bg-stone-200'
+              }`}
+            >
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="mt-3 flex items-center justify-between">
+        <button type="button" className={arrow} onClick={() => setBack(back + 1)} aria-label="Earlier">
+          <ChevronLeft className="size-5" strokeWidth={1.75} />
+        </button>
+        <div className="text-center">
+          <p className="text-sm font-semibold text-stone-800">{label}</p>
+          <p className="font-mono text-xs text-stone-500">
+            {count} reading {count === 1 ? 'day' : 'days'}
+          </p>
+        </div>
+        <button type="button" className={arrow} onClick={() => setBack(back - 1)} disabled={back === 0} aria-label="Later">
+          <ChevronRight className="size-5" strokeWidth={1.75} />
+        </button>
+      </div>
+      <div ref={scroller} className="mt-3 overflow-x-auto">
+        <div
+          className={`grid ${year ? 'w-max min-w-full' : 'w-full'}`}
+          style={{
+            gridAutoFlow: 'column',
+            gridTemplateRows: 'repeat(7, auto) auto',
+            gridTemplateColumns: `auto repeat(${weeks.length}, minmax(${year ? '11px' : '0'}, ${month ? '2.75rem' : scale === 'quarter' ? '2.25rem' : '1fr'}))`,
+            gap: month ? 6 : 3,
+            justifyContent: year ? undefined : 'center',
+          }}
+        >
+          {WEEKDAYS.map((w, r) => (
+            <p key={w} className="sticky left-0 z-10 flex min-w-6 items-center self-stretch bg-white pr-1.5 font-mono text-[0.6rem] leading-none text-stone-400 shadow-[4px_0_0_white]">
+              {!year || r % 2 === 0 ? (month ? w : w[0]) : ''}
+            </p>
+          ))}
+          <span />
+          {weeks.map((monday) => (
+            <Fragment key={monday.getTime()}>
+              {WEEKDAYS.map((w, r) => {
+                const d = new Date(monday.getTime() + r * DAY_MS)
+                if (!shown(d)) return <div key={w} className="aspect-square" />
+                const key = localDay(d)
+                const pages = byDay.get(key) ?? 0
+                const lv = level(key)
+                const tip = `${fmt(d, { weekday: 'short', month: 'short', day: 'numeric' })}: ${pages ? `${Math.round(pages)} pages` : lv ? 'read' : 'no reading'}`
+                return (
+                  <div
+                    key={w}
+                    title={tip}
+                    aria-label={tip}
+                    className={`grid aspect-square place-items-center ${month ? 'rounded-md' : 'rounded-[2px]'} ${SHADES[lv]}`}
+                  >
+                    {month && (
+                      <span className="font-mono text-[0.65rem] text-stone-500">{d.getDate()}</span>
+                    )}
+                  </div>
+                )
+              })}
+              <p className="pt-1 font-mono text-[0.6rem] whitespace-nowrap text-stone-400">
+                {!month && (monday.getDate() <= 7 || monday.getTime() === weeks[0].getTime()) ? fmt(monday, { month: 'short' }) : ''}
+              </p>
+            </Fragment>
+          ))}
+        </div>
+      </div>
+    </Card>
+  )
+}
+
 function Finished({ list, titles }) {
   if (!list.length) return null
   return (
@@ -237,9 +376,9 @@ export default function Stats({ summary, activity, books }) {
       <h2 className="mt-8 font-display text-xl font-semibold text-stone-900">Pages &amp; books</h2>
       {activity ? <PagesAndBooks activity={activity} books={books} onShare={() => setSharing(true)} /> : <p className="py-6 text-sm text-stone-500">Loading…</p>}
 
-      <h2 className="mt-10 font-display text-xl font-semibold text-stone-900">Reading time</h2>
       {hasTime ? (
         <>
+          <h2 className="mt-10 font-display text-xl font-semibold text-stone-900">Reading time</h2>
           <Tiles
             tiles={[
               ['Current streak', `${summary.current_streak} days`],
@@ -260,10 +399,7 @@ export default function Stats({ summary, activity, books }) {
           </p>
         </>
       ) : (
-        <Card className="mt-4 p-4 text-sm/6 text-stone-600">
-          None of your readers send reading time yet. CrossInk tracks it on the device (time per page, ignoring idle
-          pages) and syncs it here; stock CrossPoint and KOReader only sync your position.
-        </Card>
+        activity && <ReadingCalendar days={activity.days} />
       )}
     </div>
   )
