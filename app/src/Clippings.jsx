@@ -50,17 +50,15 @@ function Clip({ session, clip, book, onShare, showBook }) {
 }
 
 export default function Clippings({ session, books }) {
-  const [items, error] = useLoad(() => api.allClippings(session, books), [session])
+  const [items, error] = useLoad(() => api.allClippings(session, books), [session], `clippings:${session.username}`)
   const [query, setQuery] = useState('')
   const [only, setOnly] = useState(null) // document
   const [sharing, setSharing] = useState(null)
   const [note, setNote] = useState(null)
   const byDoc = useMemo(() => new Map(books.map((b) => [b.document, b])), [books])
 
-  if (error) return <ErrorNote error={error} />
-  if (!items) return <Spinner />
   // Only clippings of books the library shows (metadata-less ones are hidden everywhere).
-  const all = items.filter((c) => byDoc.has(c.document))
+  const all = (items ?? []).filter((c) => byDoc.has(c.document))
   const q = query.trim().toLowerCase()
   const matches = all.filter((c) => {
     if (only && c.document !== only) return false
@@ -88,7 +86,11 @@ export default function Clippings({ session, books }) {
       <Eyebrow className="md:hidden">Passages worth keeping</Eyebrow>
       <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">Clippings</h1>
 
-      {all.length === 0 ? (
+      {error && !items ? (
+        <ErrorNote error={error} />
+      ) : !items ? (
+        <Spinner />
+      ) : all.length === 0 ? (
         <p className="py-16 text-center text-sm text-stone-500">No clippings yet. Highlight passages on your reader and turn on clipping sync.</p>
       ) : (
         <>

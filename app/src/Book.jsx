@@ -42,7 +42,7 @@ function StatusPicker({ session, book, onChange }) {
 
 // Device stats (CrossInk) when present, else what the sync history shows.
 function Stats({ session, doc, activity: a }) {
-  const [data] = useLoad(() => api.bookStats(session, doc), [session, doc])
+  const [data] = useLoad(() => api.bookStats(session, doc), [session, doc], `bookstats:${doc}`)
   const c = data?.combined
   let cells
   if (c?.sessions) {
@@ -93,7 +93,7 @@ export function ClipShare({ session, book, clip, onClose }) {
 }
 
 function Clippings({ session, book }) {
-  const [items, error] = useLoad(() => api.clippings(session, book.document), [session, book.document])
+  const [items, error] = useLoad(() => api.clippings(session, book.document), [session, book.document], `clips:${book.document}`)
   const [sharing, setSharing] = useState(null)
   if (error) return <ErrorNote error={error} />
   if (!items) return <Spinner />

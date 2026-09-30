@@ -68,9 +68,10 @@ function Bars({ title, labels, values }) {
   )
 }
 
-function Tiles({ tiles }) {
+function Tiles({ tiles, action }) {
   return (
-    <Card className="mt-4 grid grid-cols-2 gap-px overflow-hidden bg-stone-100 md:grid-cols-3">
+    <Card className="relative mt-4 grid grid-cols-2 gap-px overflow-hidden bg-stone-100 md:grid-cols-3">
+      {action}
       {tiles.map(([l, v]) => (
         <div key={l} className="bg-white px-4 py-3">
           <p className="text-xs text-stone-500">{l}</p>
@@ -144,7 +145,7 @@ function Finished({ list, titles }) {
   )
 }
 
-function PagesAndBooks({ activity: all, books }) {
+function PagesAndBooks({ activity: all, books, onShare }) {
   const titles = new Map(books.map((b) => [b.document, b.title || b.filename]))
   // Only books the library shows (metadata-less ones are hidden everywhere).
   const shown = all.books.filter((b) => titles.has(b.document))
@@ -162,7 +163,18 @@ function PagesAndBooks({ activity: all, books }) {
   ]
   return (
     <section>
-      <Tiles tiles={tiles} />
+      <Tiles
+        tiles={tiles}
+        action={
+          <button
+            onClick={onShare}
+            aria-label="Share your stats"
+            className="absolute top-1.5 right-1.5 z-10 grid size-10 place-items-center rounded-full text-brand-600 active:bg-stone-100 md:hover:bg-stone-100"
+          >
+            <Share2 className="size-5" strokeWidth={1.75} />
+          </button>
+        }
+      />
       <WeeklyPages days={activity.days} />
       <Finished list={finished} titles={titles} />
       <p className="mt-3 text-xs/5 text-stone-500">
@@ -219,25 +231,11 @@ export default function Stats({ summary, activity, books }) {
   return (
     <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
       <Eyebrow className="md:hidden">Reading stats</Eyebrow>
-      {/* Share sits flush right, under the settings gear on phones. */}
-      <div className="flex items-end justify-between gap-4 md:items-center">
-        <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">How you read</h1>
-        {activity && (
-          <button
-            onClick={() => setSharing(true)}
-            aria-label="Share stats"
-            className="-mr-1 grid size-11 shrink-0 translate-y-3 place-items-center rounded-full text-brand-600 active:bg-stone-200/70 md:mr-0 md:flex md:h-10 md:w-auto md:translate-y-0 md:gap-1.5 md:bg-white md:px-4 md:text-sm md:font-semibold md:text-brand-700 md:ring-1 md:ring-stone-950/10"
-          >
-            {/* Phones: an icon stacked under the settings gear. Wider screens: a labelled pill. */}
-            <Share2 className="size-6 md:size-4" strokeWidth={1.75} />
-            <span className="hidden md:inline">Share</span>
-          </button>
-        )}
-      </div>
+      <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">How you read</h1>
       {sharing && <StatsShare summary={summary} activity={activity} books={books} onClose={() => setSharing(false)} />}
 
       <h2 className="mt-8 font-display text-xl font-semibold text-stone-900">Pages &amp; books</h2>
-      {activity ? <PagesAndBooks activity={activity} books={books} /> : <p className="py-6 text-sm text-stone-500">Loading…</p>}
+      {activity ? <PagesAndBooks activity={activity} books={books} onShare={() => setSharing(true)} /> : <p className="py-6 text-sm text-stone-500">Loading…</p>}
 
       <h2 className="mt-10 font-display text-xl font-semibold text-stone-900">Reading time</h2>
       {hasTime ? (

@@ -67,14 +67,21 @@ export function ErrorNote({ error }) {
 }
 
 // Tiny fetch hook: [data, error, reload].
-export function useLoad(fn, deps) {
-  const [state, setState] = useState({ data: null, error: null })
+// Last result per `memo` key: revisiting a screen shows it instantly while it refreshes.
+const remembered = new Map()
+
+export function useLoad(fn, deps, memo) {
+  const [state, setState] = useState(() => ({ data: memo ? (remembered.get(memo) ?? null) : null, error: null }))
   const [tick, setTick] = useState(0)
   useEffect(() => {
     let live = true
     fn().then(
-      (data) => live && setState({ data, error: null }),
-      (error) => live && setState({ data: null, error })
+      (data) => {
+        if (memo) remembered.set(memo, data)
+        if (live) setState({ data, error: null })
+      },
+      // A failed refresh keeps whatever is already on screen.
+      (error) => live && setState((s) => (s.data ? s : { data: null, error }))
     )
     return () => {
       live = false
