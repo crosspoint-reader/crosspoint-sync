@@ -232,7 +232,7 @@ async function push(
 
 export const readwiseReaderConnector: Connector = {
   id: 'readwise-reader',
-  displayName: 'Readwise Reader (archive on finish)',
+  displayName: 'Readwise Reader',
   tier: 1,
   capabilities: { read: true, write: true },
   carries: ['finished'],

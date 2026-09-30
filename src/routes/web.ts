@@ -29,6 +29,8 @@ for (const id of ['kosync', 'hardcover', 'audiobookshelf', 'bookfusion', 'readwi
     /* icon optional */
   }
 }
+// Readwise Reader shares the Readwise icon.
+if (SERVICE_ICONS.has('readwise')) SERVICE_ICONS.set('readwise-reader', SERVICE_ICONS.get('readwise')!);
 
 const STYLE = `
   :root {
@@ -561,6 +563,7 @@ const HINTS = {
   hardcover: 'Paste your Hardcover API token from hardcover.app/account/api. Syncs your reading progress and shelf status.',
   microblog: 'Connect an app token to keep your Currently reading and Finished reading bookshelves in sync.',
   readwise: 'Paste your Readwise access token from readwise.io/access_token. Syncs your highlights.',
+  'readwise-reader': 'Paste your Readwise access token from readwise.io/access_token. Archives books in Reader when you finish them, and brings your Reader progress back to your device.',
   kosync: 'Mirror your reading progress to another KOReader-compatible (KOSync) server, so your other devices see it too.',
   bookfusion: 'Connect your BookFusion account to sync reading progress. You will approve the request on bookfusion.com.',
   audiobookshelf: 'Sync your reading position to the matching audiobook on your Audiobookshelf server. Create an API key in Audiobookshelf under Settings, Users, API Keys.',
