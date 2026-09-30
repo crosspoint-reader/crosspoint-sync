@@ -21,9 +21,11 @@ describe('computeActivity', () => {
       new Map([['a', doc(200)]])
     );
     expect(a.days).toEqual([
-      { day: '2026-09-01', pages: 0, syncs: 1 }, // the baseline sync still marks a reading day
-      { day: '2026-09-02', pages: 20, syncs: 2 },
-      { day: '2026-09-03', pages: 98, syncs: 1 },
+      // the baseline sync still marks a reading day
+      { day: '2026-09-01', pages: 0, syncs: 1, books: [{ document: 'a', pages: 0, syncs: 1, from: 0.4, to: 0.4 }] },
+      // the behind device syncs that day but moves nothing
+      { day: '2026-09-02', pages: 20, syncs: 2, books: [{ document: 'a', pages: 20, syncs: 2, from: 0.4, to: 0.5 }] },
+      { day: '2026-09-03', pages: 98, syncs: 1, books: [{ document: 'a', pages: 98, syncs: 1, from: 0.5, to: 0.99 }] },
     ]);
     expect(a.books[0]).toMatchObject({ pages_read: 198, finished_at: T + 2 * DAY, started_at: T });
     expect(a.pages_total).toBe(198);
@@ -44,7 +46,8 @@ describe('computeActivity', () => {
     expect(by.dnf).toMatchObject({ finished_at: null, pages_read: null });
     expect(by.done).toMatchObject({ finished_at: T + 9, pages_read: 60 });
     // Single syncs with no page count still count as reading days.
-    expect(a.days).toEqual([{ day: '2026-09-01', pages: 0, syncs: 2 }]);
+    expect(a.days.map(({ books, ...d }) => d)).toEqual([{ day: '2026-09-01', pages: 0, syncs: 2 }]);
+    expect(a.days[0].books.map((b) => b.document).sort()).toEqual(['dnf', 'done']);
   });
 
   it('buckets days in the client timezone', () => {
@@ -56,7 +59,7 @@ describe('computeActivity', () => {
       new Map([['a', doc(100)]]),
       240
     );
-    expect(a.days).toEqual([{ day: '2026-08-31', pages: 10, syncs: 2 }]);
+    expect(a.days.map(({ books, ...d }) => d)).toEqual([{ day: '2026-08-31', pages: 10, syncs: 2 }]);
   });
 });
 

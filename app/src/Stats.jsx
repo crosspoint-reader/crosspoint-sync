@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, Share2 } from 'lucide-react'
+import { BookOpen, ChevronLeft, ChevronRight, CircleCheck, Share2 } from 'lucide-react'
 import ShareSheet from './ShareSheet.jsx'
 import { renderCalendarCard, renderStatsCard } from './shareCard.js'
-import { Card, Eyebrow, duration } from './ui.jsx'
+import { Card, Cover, Eyebrow, ProgressBar, duration, pct } from './ui.jsx'
 
 const WEEKS = 52 // phones show the newest 26
 const EPOCH = Date.UTC(2000, 0, 1)
@@ -426,13 +426,156 @@ function StatsShare({ summary, activity, books, onClose }) {
   )
 }
 
-export default function Stats({ summary, activity, books }) {
+// Overview / Timeline tabs, kept in the URL (#/stats, #/stats/timeline) so back returns to the same tab.
+const TABS = [
+  ['', 'Overview'],
+  ['timeline', 'Timeline'],
+]
+function StatsTabs({ tab }) {
+  return (
+    <nav className="mt-5 flex gap-6 border-b border-stone-200">
+      {TABS.map(([id, label]) => (
+        <a
+          key={id}
+          href={id ? `#/stats/${id}` : '#/stats'}
+          aria-current={tab === id ? 'page' : undefined}
+          className={`-mb-px border-b-2 pb-2.5 text-sm font-semibold transition ${
+            tab === id ? 'border-brand-500 text-stone-900' : 'border-transparent text-stone-500 hover:text-stone-800'
+          }`}
+        >
+          {label}
+        </a>
+      ))}
+    </nav>
+  )
+}
+
+const dayDate = (day) => new Date(`${day}T12:00`)
+const shortDate = (d) =>
+  d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(d.getFullYear() !== new Date().getFullYear() && { year: 'numeric' }) })
+
+// What happened to one book on one day, in words.
+function dayEvent(entry, act, day) {
+  const on = (unix) => unix && localDay(new Date(unix * 1000)) === day
+  if (on(act?.finished_at)) return { icon: CircleCheck, text: 'Finished' }
+  if (on(act?.started_at) && entry.from <= 0.02) return { icon: BookOpen, text: 'Started reading' }
+  const span = entry.to > entry.from ? `${pct(entry.from)} to ${pct(entry.to)}` : `at ${pct(entry.to)}`
+  if (entry.pages > 0) return { icon: BookOpen, text: `Read ${entry.pages} page${entry.pages === 1 ? '' : 's'} · ${span}` }
+  return { icon: BookOpen, text: entry.to > entry.from ? `Read ${span}` : `Opened ${span}` }
+}
+
+const DAYS_PER_PAGE = 21
+
+function Timeline({ session, activity, books }) {
+  const [shown, setShown] = useState(DAYS_PER_PAGE)
+  const byDoc = new Map(books.map((b) => [b.document, b]))
+  const acts = new Map(activity.books.map((b) => [b.document, b]))
+  const reading = books.filter((b) => b.status === 'reading').sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
+  const days = activity.days
+    .map((d) => ({ ...d, books: (d.books ?? []).filter((b) => byDoc.has(b.document)) }))
+    .filter((d) => d.books.length)
+    .reverse()
+
+  return (
+    <div className="max-w-2xl">
+      {reading.length > 0 && (
+        <Card className="mt-6 divide-y divide-stone-100 px-4">
+          <h2 className="flex items-center gap-2 py-3 font-display text-lg font-semibold text-stone-900">
+            <BookOpen className="size-5 text-brand-600" strokeWidth={1.75} />
+            {reading.length} reading
+          </h2>
+          {reading.map((b) => (
+            <a key={b.document} href={`#/book/${b.document}`} className="flex items-center gap-4 py-3">
+              <Cover session={session} book={b} tiny className="w-14" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-display text-base font-semibold text-stone-900">{b.title || b.filename}</p>
+                {b.timestamp && <p className="mt-0.5 text-xs text-stone-500">Last read {shortDate(new Date(b.timestamp * 1000))}</p>}
+                <div className="mt-2 flex items-center gap-3">
+                  <ProgressBar value={b.percentage} className="flex-1" />
+                  <span className="w-9 text-right font-mono text-xs text-brand-600">{pct(b.percentage)}</span>
+                </div>
+              </div>
+              <ChevronRight className="size-5 shrink-0 text-stone-400" />
+            </a>
+          ))}
+        </Card>
+      )}
+
+      {!days.length ? (
+        <p className="py-10 text-center text-sm text-stone-500">Your reading shows up here as your reader syncs.</p>
+      ) : (
+        <ol className="mt-8">
+          {days.slice(0, shown).map((d) => {
+            const date = dayDate(d.day)
+            return (
+              <li key={d.day} className="relative pb-6 pl-7">
+                {/* Dot and connecting line */}
+                <span className="absolute top-1.5 left-0 size-3 rounded-full bg-brand-500 ring-4 ring-stone-50" />
+                <span className="absolute top-6 bottom-0 left-[5px] border-l-2 border-dashed border-stone-200" />
+                <p className="flex items-baseline gap-2">
+                  <span className="font-display text-base font-semibold text-stone-900">
+                    {date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+                  </span>
+                  {date.getFullYear() !== new Date().getFullYear() && <span className="font-mono text-xs text-stone-500">{date.getFullYear()}</span>}
+                </p>
+                <div className="mt-3 space-y-2">
+                  {d.books.map((entry) => {
+                    const b = byDoc.get(entry.document)
+                    const ev = dayEvent(entry, acts.get(entry.document), d.day)
+                    return (
+                      <a key={entry.document} href={`#/book/${entry.document}`} className="flex items-center gap-3 rounded-2xl bg-surface p-3 ring-1 ring-stone-950/5 transition active:scale-[0.99] md:hover:bg-stone-50">
+                        <Cover session={session} book={b} tiny className="w-11" />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-stone-900">{b.title || b.filename}</p>
+                          <p className={`mt-1 flex items-center gap-1.5 text-xs ${ev.text === 'Finished' ? 'font-medium text-brand-600' : 'text-stone-500'}`}>
+                            <ev.icon className="size-3.5 shrink-0" strokeWidth={2} />
+                            <span className="truncate">{ev.text}</span>
+                          </p>
+                        </div>
+                        <ChevronRight className="size-4 shrink-0 text-stone-400" />
+                      </a>
+                    )
+                  })}
+                </div>
+              </li>
+            )
+          })}
+        </ol>
+      )}
+      {days.length > shown && (
+        <button
+          type="button"
+          onClick={() => setShown(shown + DAYS_PER_PAGE)}
+          className="mx-auto mb-4 flex h-11 w-full max-w-xs items-center justify-center rounded-xl bg-surface px-6 text-sm font-semibold text-stone-800 ring-1 ring-stone-950/10 active:bg-stone-50 md:hover:bg-stone-50"
+        >
+          Show earlier days
+        </button>
+      )}
+    </div>
+  )
+}
+
+export default function Stats({ session, tab = '', summary, activity, books }) {
   const hasTime = summary?.devices?.length > 0
   const [sharing, setSharing] = useState(false)
-  return (
-    <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
+  const header = (
+    <>
       <Eyebrow className="md:hidden">Reading stats</Eyebrow>
       <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">How you read</h1>
+      <StatsTabs tab={tab} />
+    </>
+  )
+  if (tab === 'timeline') {
+    return (
+      <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
+        {header}
+        {activity ? <Timeline session={session} activity={activity} books={books} /> : <p className="py-6 text-sm text-stone-500">Loading…</p>}
+      </div>
+    )
+  }
+  return (
+    <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
+      {header}
       {sharing && <StatsShare summary={summary} activity={activity} books={books} onClose={() => setSharing(false)} />}
 
       <h2 className="mt-8 font-display text-xl font-semibold text-stone-900">Pages &amp; books</h2>

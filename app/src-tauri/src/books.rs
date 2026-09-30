@@ -214,10 +214,34 @@ pub async fn save_file(app: AppHandle, request: Request<'_>) -> Res<String> {
     .filter(|n| !n.is_empty())
     .unwrap_or_else(|| "crosspoint-sync".into());
   let bytes = body_bytes(&request)?;
+  // iOS: images go to Photos; other files to the app's Documents, which the
+  // Files app shows (UIFileSharingEnabled). Android saves via MediaStore in JS.
+  #[cfg(target_os = "ios")]
+  {
+    let lower = name.to_ascii_lowercase();
+    if [".png", ".jpg", ".jpeg", ".bmp"].iter().any(|e| lower.ends_with(e)) {
+      save_to_photos(&bytes)?;
+      return Ok("Photos".into());
+    }
+  }
+  #[cfg(target_os = "ios")]
+  let dir = app.path().document_dir().map_err(err)?;
+  #[cfg(not(target_os = "ios"))]
   let dir = app.path().download_dir().map_err(err)?;
   let name = unique_name(&dir, &name);
   fs::write(dir.join(&name), bytes).map_err(err)?;
   Ok(dir.join(name).to_string_lossy().to_string())
+}
+
+#[cfg(target_os = "ios")]
+fn save_to_photos(bytes: &[u8]) -> Res<()> {
+  use objc2_foundation::NSData;
+  use objc2_ui_kit::UIImage;
+  let data = NSData::with_bytes(bytes);
+  let image = UIImage::imageWithData(&data).ok_or("That image couldn't be read")?;
+  // Needs NSPhotoLibraryAddUsageDescription; iOS asks the user once.
+  unsafe { image.write_to_saved_photos_album(None, None, std::ptr::null_mut()) };
+  Ok(())
 }
 
 async fn send(

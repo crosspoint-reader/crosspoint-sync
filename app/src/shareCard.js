@@ -232,13 +232,30 @@ export async function copyImage(blob, meta) {
 }
 
 /** Save the card: Downloads in the app, a file download in a browser. */
-export async function saveImage(blob, meta) {
-  const name = meta.fileName ?? `${meta.title} clipping.png`
-  if (isApp) return invoke('save_file', await ipcBytes(blob), { headers: { 'x-name': encodeURIComponent(name) } })
+export function saveImage(blob, meta) {
+  return saveFile(blob, meta.fileName ?? `${meta.title} clipping.png`)
+}
+
+// Save a generated file on this device; resolves to { where, photos }.
+// Android: MediaStore (images land in the gallery). iOS: images go to Photos,
+// other files to the app's Documents (shown in Files). Desktop app: Downloads.
+// Browser: a normal download.
+export async function saveFile(blob, name) {
+  const image = (blob.type || '').startsWith('image/')
+  if (window.CrossPointFiles) {
+    const result = window.CrossPointFiles.save(await ipcBytes(blob), name, blob.type || 'application/octet-stream')
+    if (result.startsWith('error:')) throw new Error(result.slice(6))
+    if (result !== 'unsupported') return { where: result, photos: image }
+  }
+  if (isApp) {
+    const where = await invoke('save_file', await ipcBytes(blob), { headers: { 'x-name': encodeURIComponent(name) } })
+    return { where, photos: where === 'Photos' }
+  }
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
   a.download = name
   a.click()
+  return { where: name, photos: false }
 }
 
 // Compose pages that accept prefilled text. Images can't ride along in a URL, so

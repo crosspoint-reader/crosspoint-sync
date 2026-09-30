@@ -31,7 +31,7 @@ export function ProgressBar({ value, className = '' }) {
 }
 
 // Server-resolved cover (cached server-side). Falls back to an e-ink "title page".
-export function Cover({ session, book, small = false, className = '' }) {
+export function Cover({ session, book, small = false, tiny = false, className = '' }) {
   const [url, setUrl] = useState(book.cover_url)
   const [broken, setBroken] = useState(false)
   useEffect(() => {
@@ -48,12 +48,12 @@ export function Cover({ session, book, small = false, className = '' }) {
     return <img src={url} alt="" loading="lazy" onError={() => setBroken(true)} className={`${frame} object-cover`} />
   }
   return (
-    <div className={`${frame} flex flex-col justify-between bg-cover ${small ? 'p-1 md:p-2.5' : 'p-2.5'}`}>
+    <div className={`${frame} flex flex-col justify-between bg-cover ${tiny ? 'p-1' : small ? 'p-1 md:p-2.5' : 'p-2.5'}`}>
       <div className="paper-grain absolute inset-0 opacity-[0.06]" />
-      <p className={`relative line-clamp-5 font-display font-semibold break-words hyphens-auto text-stone-800 ${small ? 'text-[0.45rem]/tight md:text-sm/tight' : 'text-sm/tight'}`}>
+      <p className={`relative line-clamp-5 font-display font-semibold break-words hyphens-auto text-stone-800 ${tiny ? 'text-[0.45rem]/tight' : small ? 'text-[0.45rem]/tight md:text-sm/tight' : 'text-sm/tight'}`}>
         {book.title || book.filename || 'Untitled'}
       </p>
-      <p className={`relative line-clamp-2 text-stone-500 ${small ? 'text-[0.35rem]/tight md:text-[0.65rem]/tight' : 'text-[0.65rem]/tight'}`}>{book.author}</p>
+      <p className={`relative line-clamp-2 text-stone-500 ${tiny ? 'text-[0.35rem]/tight' : small ? 'text-[0.35rem]/tight md:text-[0.65rem]/tight' : 'text-[0.65rem]/tight'}`}>{book.author}</p>
     </div>
   )
 }

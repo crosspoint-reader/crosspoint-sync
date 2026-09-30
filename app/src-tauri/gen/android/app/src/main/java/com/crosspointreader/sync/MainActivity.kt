@@ -2,12 +2,14 @@ package com.crosspointreader.sync
 
 import android.app.UiModeManager
 import android.content.ClipData
+import android.content.ContentValues
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Build
 import android.net.wifi.WifiManager
 import android.os.Bundle
 import android.os.SystemClock
+import android.provider.MediaStore
 import android.util.Base64
 import android.view.View
 import android.view.ViewTreeObserver
@@ -70,6 +72,38 @@ class MainActivity : TauriActivity() {
     webView.addJavascriptInterface(ShareBridge(), "CrossPointShare")
     webView.addJavascriptInterface(WidgetBridge(), "CrossPointWidget")
     webView.addJavascriptInterface(ThemeBridge(), "CrossPointTheme")
+    webView.addJavascriptInterface(FilesBridge(), "CrossPointFiles")
+  }
+
+  // Saves through MediaStore so images land in the gallery (Pictures/CrossPoint Sync)
+  // and other files in Download/CrossPoint Sync. window.CrossPointFiles.save(base64,
+  // name, mime) returns the saved path, "unsupported" before Android 10 (the app falls
+  // back to its own save), or "error:<reason>".
+  inner class FilesBridge {
+    @JavascriptInterface
+    fun save(base64: String, name: String, mime: String): String {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return "unsupported"
+      return try {
+        val image = mime.startsWith("image/")
+        val folder = if (image) "Pictures/CrossPoint Sync" else "Download/CrossPoint Sync"
+        val collection =
+          if (image) MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+          else MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val values = ContentValues().apply {
+          put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+          put(MediaStore.MediaColumns.MIME_TYPE, mime)
+          put(MediaStore.MediaColumns.RELATIVE_PATH, folder)
+          put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val uri = contentResolver.insert(collection, values) ?: return "error:couldn't create the file"
+        contentResolver.openOutputStream(uri)?.use { it.write(Base64.decode(base64, Base64.DEFAULT)) }
+          ?: return "error:couldn't write the file"
+        contentResolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+        "$folder/$name"
+      } catch (e: Exception) {
+        "error:${e.message ?: "save failed"}"
+      }
+    }
   }
 
   private var webView: WebView? = null

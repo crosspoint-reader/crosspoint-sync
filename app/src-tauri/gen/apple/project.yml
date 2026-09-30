@@ -30,7 +30,10 @@ targets:
     sources:
       - path: Sources
       - path: Assets.xcassets
+      # Static libs here are linked below, never bundled: App Store rejects a
+      # stray libapp.a resource (ITMS-90171).
       - path: Externals
+        excludes: ["**/*.a"]
       - path: crosspoint-sync-app_iOS
       - path: assets
         buildPhase: resources
@@ -53,6 +56,19 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         CFBundleShortVersionString: 0.1.0
         CFBundleVersion: 0.1.0
+        # iOS 27 refuses to launch SDK-27 apps on the legacy app-delegate
+        # lifecycle; tao (>= 0.37) switches to its scene delegate when this is set.
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        # Save image: share cards and wallpapers go to Photos (add-only access).
+        NSPhotoLibraryAddUsageDescription: CrossPoint Sync saves the images you create, like wallpapers and share cards, to your photo library.
+        # Other saved files (clippings Markdown) show in the Files app.
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        ITSAppUsesNonExemptEncryption: false
+        # Sending to the reader over Wi-Fi (crosspoint.local).
+        NSLocalNetworkUsageDescription: CrossPoint Sync sends books to your CrossPoint reader over your Wi-Fi.
+        NSBonjourServices: [_http._tcp]
     entitlements:
       path: crosspoint-sync-app_iOS/crosspoint-sync-app_iOS.entitlements
       properties:

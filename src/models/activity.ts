@@ -41,7 +41,17 @@ export interface Activity {
   pages_total: number;
   books: BookActivity[];
   /** Local-day buckets (YYYY-MM-DD) with syncs, and print pages read that day, oldest first. */
-  days: { day: string; pages: number; syncs: number }[];
+  days: { day: string; pages: number; syncs: number; books: DayBook[] }[];
+}
+
+/** One book's activity on one day, for the timeline. `from`/`to` are the furthest
+ *  position before and after that day's syncs (0..1). */
+export interface DayBook {
+  document: string;
+  pages: number;
+  syncs: number;
+  from: number;
+  to: number;
 }
 
 export function computeActivity(rows: LogRow[], docs: Map<string, DocInfo>, tzOffsetMinutes = 0): Activity {
@@ -53,12 +63,17 @@ export function computeActivity(rows: LogRow[], docs: Map<string, DocInfo>, tzOf
   }
 
   const books: BookActivity[] = [];
-  const days = new Map<string, { pages: number; syncs: number }>();
-  const dayOf = (at: number) => {
+  const days = new Map<string, { pages: number; syncs: number; books: Map<string, DayBook> }>();
+  // The day bucket for a sync, and this book's entry in it (opened at position `from`).
+  const dayOf = (at: number, document: string, from: number) => {
     const key = new Date((at - tzOffsetMinutes * 60) * 1000).toISOString().slice(0, 10);
     let d = days.get(key);
-    if (!d) days.set(key, (d = { pages: 0, syncs: 0 }));
-    return d;
+    if (!d) days.set(key, (d = { pages: 0, syncs: 0, books: new Map() }));
+    let b = d.books.get(document);
+    if (!b) d.books.set(document, (b = { document, pages: 0, syncs: 0, from, to: from }));
+    d.syncs++;
+    b.syncs++;
+    return { d, b };
   };
   let pagesTotal = 0;
   for (const [document, list] of byDoc) {
@@ -67,13 +82,16 @@ export function computeActivity(rows: LogRow[], docs: Map<string, DocInfo>, tzOf
     const pageCount = info?.page_count ?? null;
     let max = list[0].percentage;
     let logFinish = max >= FINISHED_AT ? list[0].at : null;
-    dayOf(list[0].at).syncs++;
+    dayOf(list[0].at, document, max);
     for (const r of list.slice(1)) {
-      const day = dayOf(r.at);
-      day.syncs++;
+      const { d, b } = dayOf(r.at, document, max);
       if (r.percentage <= max) continue;
-      if (pageCount) day.pages += (r.percentage - max) * pageCount;
+      if (pageCount) {
+        d.pages += (r.percentage - max) * pageCount;
+        b.pages += (r.percentage - max) * pageCount;
+      }
       max = r.percentage;
+      b.to = max;
       if (logFinish === null && max >= FINISHED_AT) logFinish = r.at;
     }
     const finished =
@@ -96,6 +114,11 @@ export function computeActivity(rows: LogRow[], docs: Map<string, DocInfo>, tzOf
     books: books.sort((a, b) => b.last_at - a.last_at),
     days: [...days]
       .sort(([a], [b]) => (a < b ? -1 : 1))
-      .map(([day, d]) => ({ day, pages: Math.round(d.pages), syncs: d.syncs })),
+      .map(([day, d]) => ({
+        day,
+        pages: Math.round(d.pages),
+        syncs: d.syncs,
+        books: [...d.books.values()].map((b) => ({ ...b, pages: Math.round(b.pages) })),
+      })),
   };
 }

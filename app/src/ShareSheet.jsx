@@ -70,7 +70,7 @@ export default function ShareSheet({ heading, meta, render, renderKey, onClose }
           </button>
           <button
             disabled={!card || status?.busy}
-            onClick={() => act(() => saveImage(card.blob, meta).then(() => 'saved'), () => (desktop ? 'Saved to your Downloads folder.' : 'Image saved.'))}
+            onClick={() => act(() => saveImage(card.blob, meta).then((r) => (r.photos ? 'photos' : 'saved')), (n) => (n === 'photos' ? 'Saved to your photos.' : desktop ? 'Saved to your Downloads folder.' : 'Image saved.'))}
             className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-surface text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100 disabled:opacity-50"
           >
             <Download className="size-4" /> Save image

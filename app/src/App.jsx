@@ -370,7 +370,7 @@ function Home({ session, onLogout, theme }) {
   else if (error) page = <ErrorNote error={error} />
   else if (!books) page = <Spinner />
   else if (route === 'clippings') page = <Clippings session={session} books={books} />
-  else if (route === 'stats') page = <Stats summary={summary} activity={activity} books={books} />
+  else if (route === 'stats') page = <Stats session={session} tab={id} summary={summary} activity={activity} books={books} />
   else if (route === 'book') page = (
       <Book
         session={session}

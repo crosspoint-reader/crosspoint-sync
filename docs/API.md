@@ -489,12 +489,14 @@ CrossPoint, KOReader). Every progress change is logged server-side. `tz` is the 
 {"pages_total": 1923,
  "books": [{"document": "...", "started_at": 1790000000, "last_at": 1790600000, "percentage": 0.997,
             "finished_at": 1790600000, "page_count": 400, "pages_read": 399}],
- "days": [{"day": "2026-09-28", "pages": 56, "syncs": 4}]}
+ "days": [{"day": "2026-09-28", "pages": 56, "syncs": 4,
+           "books": [{"document": "...", "pages": 56, "syncs": 4, "from": 0.41, "to": 0.55}]}]}
 ```
 
 Pages are print pages (furthest percent x page count), not screen pages. A day's `pages` counts only
 forward progress after a book's first logged sync, as a running max across devices; `syncs` counts
-every logged sync that day, so any day with a sync is a reading day. History from before the log
+every logged sync that day, so any day with a sync is a reading day. `books` breaks the day down per
+book for a reading timeline; `from`/`to` are the furthest position before and after that day. History from before the log
 existed is backfilled from progress samples (migration 0013). `finished_at` is the
 first sync at >= 98%, overridden by a manual status. This never estimates reading time.
 

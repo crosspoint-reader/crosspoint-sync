@@ -314,9 +314,9 @@ export default function Wallpaper() {
     setStatus({ busy: true, text: 'Saving…' })
     try {
       const name = fileName()
-      await saveImage(toBmp(result.current), { fileName: name })
+      const saved = await saveImage(toBmp(result.current), { fileName: name })
       setStatus(null)
-      notify({ title: isApp ? 'Saved to Downloads' : 'Downloaded', detail: name })
+      notify({ title: saved.photos ? 'Saved to your photos' : isApp ? 'Saved to Downloads' : 'Downloaded', detail: name })
     } catch (e) {
       setStatus(null)
       notify({ error: true, title: "Couldn't save the wallpaper", detail: String(e?.message ?? e) })

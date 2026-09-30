@@ -12,7 +12,6 @@
 		184305EE28170BE91A0DA0D7 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = FEFB9FFA8A213DFAD642AEFC /* LaunchScreen.storyboard */; };
 		2D845AD7D500CAD58A0C283F /* CrossPointWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1922371C0F5CFC459D6C1332 /* CrossPointWidget.swift */; };
 		38A781FCEAE687FC1641C387 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 06400398C81B2BCE0778BAED /* MetalKit.framework */; };
-		3F9535DF05BDF46D9BC11471 /* libapp.a in Resources */ = {isa = PBXBuildFile; fileRef = 6AE671D9FC4A04AB987BA657 /* libapp.a */; };
 		48D2AF32130B5363BE06202A /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AC24C231669D97CA7F96CC3C /* QuartzCore.framework */; };
 		50F60BB35B74F58955FA1F82 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1602AFD916563BCBF295CAFA /* CoreGraphics.framework */; };
 		646FF206604B0703C0D25282 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FE54F751F09F6D338C764211 /* WidgetKit.framework */; };
@@ -61,7 +60,7 @@
 		4AE2C3E46EF866376181162A /* main.rs */ = {isa = PBXFileReference; path = main.rs; sourceTree = "<group>"; };
 		4D9B295417CA01F08FBEAF53 /* feed.rs */ = {isa = PBXFileReference; path = feed.rs; sourceTree = "<group>"; };
 		5B97ABE31780B7A6C5CAD74D /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
-		6AE671D9FC4A04AB987BA657 /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
+		6A1455ECBA39E1ACC7E634A5 /* widget.rs */ = {isa = PBXFileReference; path = widget.rs; sourceTree = "<group>"; };
 		72ED45BA68D8C2F5A99C542D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		75F208D74C3164B18C8AFAE5 /* mdns.rs */ = {isa = PBXFileReference; path = mdns.rs; sourceTree = "<group>"; };
 		7CC754790240CD99815BE1B6 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
@@ -71,6 +70,7 @@
 		A4B09C10DA0C22B267D90C67 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		AC24C231669D97CA7F96CC3C /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
 		BB2A4F2B0B619285749721A7 /* CrossPointWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = CrossPointWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		BB81AE49F7635205B588A75A /* epub_name.rs */ = {isa = PBXFileReference; path = epub_name.rs; sourceTree = "<group>"; };
 		BDA631634A4254C1AABE933C /* parse_v1.rs */ = {isa = PBXFileReference; path = parse_v1.rs; sourceTree = "<group>"; };
 		BECC0ABE484B2047607C4F0A /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		BEF7345547BE54CBD0CAA946 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
@@ -116,7 +116,6 @@
 		1D1EE26C8E6DDBCBB6DD847A /* Externals */ = {
 			isa = PBXGroup;
 			children = (
-				9E828E942BA7377EE4745F42 /* arm64 */,
 			);
 			path = Externals;
 			sourceTree = "<group>";
@@ -125,10 +124,12 @@
 			isa = PBXGroup;
 			children = (
 				DB9EA204EB38B3A7B57FFDE6 /* books.rs */,
+				BB81AE49F7635205B588A75A /* epub_name.rs */,
 				8C6F962704EE8ACE50636956 /* lib.rs */,
 				4AE2C3E46EF866376181162A /* main.rs */,
 				75F208D74C3164B18C8AFAE5 /* mdns.rs */,
 				ED7B9C55E7A2791B84DE7114 /* optimizer.rs */,
+				6A1455ECBA39E1ACC7E634A5 /* widget.rs */,
 				C1BB4D8BDB160ADDCC937AC4 /* opds */,
 			);
 			name = src;
@@ -196,14 +197,6 @@
 			path = Sources;
 			sourceTree = "<group>";
 		};
-		9E828E942BA7377EE4745F42 /* arm64 */ = {
-			isa = PBXGroup;
-			children = (
-				C9CC3FC9B91AE3965D05929A /* debug */,
-			);
-			path = arm64;
-			sourceTree = "<group>";
-		};
 		C1BB4D8BDB160ADDCC937AC4 /* opds */ = {
 			isa = PBXGroup;
 			children = (
@@ -231,14 +224,6 @@
 			);
 			sourceTree = "<group>";
 		};
-		C9CC3FC9B91AE3965D05929A /* debug */ = {
-			isa = PBXGroup;
-			children = (
-				6AE671D9FC4A04AB987BA657 /* libapp.a */,
-			);
-			path = debug;
-			sourceTree = "<group>";
-		};
 		E6507374E28A1DF91D95ECBA /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -248,11 +233,18 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		"TEMP_A0F4D795-C0AD-47C8-AB28-20D7213700E1" /* x86_64 */ = {
+		"TEMP_0BF1C982-F44A-4BEA-B698-966E45BE2B97" /* x86_64 */ = {
 			isa = PBXGroup;
 			children = (
 			);
 			path = x86_64;
+			sourceTree = "<group>";
+		};
+		"TEMP_8A207812-13EC-45C6-BDD2-37FA145E419D" /* arm64 */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = arm64;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -337,7 +329,6 @@
 				ACF9F68415059FC751B85E40 /* Assets.xcassets in Resources */,
 				184305EE28170BE91A0DA0D7 /* LaunchScreen.storyboard in Resources */,
 				F5379C59BD1403E2BDA6098F /* assets in Resources */,
-				3F9535DF05BDF46D9BC11471 /* libapp.a in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
