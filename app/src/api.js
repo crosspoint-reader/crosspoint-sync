@@ -4,6 +4,20 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 // In the app, requests go through Rust (plain-http LAN servers, any CORS_ORIGINS);
 // in a plain browser, the webview fetch.
 export const isApp = '__TAURI_INTERNALS__' in window
+
+// File bytes for raw-body commands (send_bytes, save_file). Android's WebView can't
+// pass request bodies to Tauri's IPC protocol, so there the message is JSON-encoded
+// and a Uint8Array would become a huge number array; send base64 text instead.
+export async function ipcBytes(blob) {
+  if (!/Android/i.test(navigator.userAgent)) return new Uint8Array(await blob.arrayBuffer())
+  const url = await new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(blob)
+  })
+  return url.slice(url.indexOf(',') + 1)
+}
 export const http = isApp ? tauriFetch : fetch
 
 // kosync auth: x-auth-user + MD5(password), same credential the reader uses.

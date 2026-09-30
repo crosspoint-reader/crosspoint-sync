@@ -1,5 +1,6 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
 import { connect } from './device.js'
+import { ipcBytes } from './api.js'
 
 // OPDS catalogs the user added. Stored per device.
 // ponytail: credentials sit in localStorage like the sync login; move both to the OS keychain together.
@@ -100,5 +101,5 @@ export async function sendFile(file, prefs) {
   const headers = { 'x-name': encodeURIComponent(file.name), 'x-base': encodeURIComponent(base), 'x-folder': encodeURIComponent(prefs.folder) }
   if (prefs.optimize) headers['x-quality'] = String(prefs.quality)
   if (prefs.renameFromMetadata) headers['x-rename'] = '1'
-  return invoke('send_bytes', new Uint8Array(await file.arrayBuffer()), { headers })
+  return invoke('send_bytes', await ipcBytes(file), { headers })
 }

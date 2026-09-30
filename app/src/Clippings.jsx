@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { Copy, FileDown, Search, Share2 } from 'lucide-react'
-import { api, isApp } from './api.js'
+import { api, ipcBytes, isApp } from './api.js'
 import { ClipShare } from './Book.jsx'
 import { Card, Cover, ErrorNote, Eyebrow, Spinner, useLoad } from './ui.jsx'
 
@@ -73,7 +73,7 @@ export default function Clippings({ session, books }) {
   async function exportMd(save) {
     const md = `# Clippings\n\n${markdown(groups)}\n`
     if (save) {
-      await invoke('save_file', new TextEncoder().encode(md), { headers: { 'x-name': encodeURIComponent('CrossPoint clippings.md') } })
+      await invoke('save_file', await ipcBytes(new Blob([md], { type: 'text/markdown' })), { headers: { 'x-name': encodeURIComponent('CrossPoint clippings.md') } })
       setNote('Saved to your Downloads folder.')
     } else {
       await navigator.clipboard.writeText(md)

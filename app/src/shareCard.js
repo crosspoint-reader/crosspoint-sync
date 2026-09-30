@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { openUrl } from '@tauri-apps/plugin-opener'
-import { http, isApp } from './api.js'
+import { http, ipcBytes, isApp } from './api.js'
 
 // Clipping share cards: a 1080x1350 image (the portrait size feeds prefer) drawn
 // on a canvas with the app's own fonts and colours, then handed to the native
@@ -234,7 +234,7 @@ export async function copyImage(blob, meta) {
 /** Save the card: Downloads in the app, a file download in a browser. */
 export async function saveImage(blob, meta) {
   const name = meta.fileName ?? `${meta.title} clipping.png`
-  if (isApp) return invoke('save_file', new Uint8Array(await blob.arrayBuffer()), { headers: { 'x-name': encodeURIComponent(name) } })
+  if (isApp) return invoke('save_file', await ipcBytes(blob), { headers: { 'x-name': encodeURIComponent(name) } })
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
   a.download = name

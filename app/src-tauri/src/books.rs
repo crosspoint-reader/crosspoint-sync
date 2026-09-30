@@ -169,6 +169,23 @@ pub async fn send_download(
   send(&base, &folder, &name, bytes, quality, rename.unwrap_or(false), Some(on_progress)).await
 }
 
+/// Raw IPC body bytes. Android's WebView can't expose request bodies to the IPC
+/// protocol, so Tauri JSON-encodes the message there; the app sends base64 text
+/// (ipcBytes in api.js), and a plain byte array still works as a fallback.
+fn body_bytes(request: &Request<'_>) -> Res<Vec<u8>> {
+  use base64::{engine::general_purpose::STANDARD, Engine};
+  match request.body() {
+    InvokeBody::Raw(bytes) => Ok(bytes.clone()),
+    InvokeBody::Json(serde_json::Value::String(b64)) => STANDARD.decode(b64).map_err(err),
+    InvokeBody::Json(serde_json::Value::Array(items)) => items
+      .iter()
+      .map(|v| v.as_u64().and_then(|n| u8::try_from(n).ok()))
+      .collect::<Option<Vec<u8>>>()
+      .ok_or_else(|| "file bytes were not a byte array".into()),
+    _ => Err("expected file bytes".into()),
+  }
+}
+
 /// Send a file picked in the webview. Body = raw bytes; x-name / x-base /
 /// x-folder / x-quality / x-rename headers carry the rest (raw IPC avoids JSON-encoding MBs).
 #[tauri::command]
@@ -179,11 +196,9 @@ pub async fn send_bytes(request: Request<'_>) -> Res<String> {
   let base = decode(header("x-base"))?;
   let folder = decode(header("x-folder"))?;
   let quality = header("x-quality").and_then(|q| q.parse().ok());
-  let InvokeBody::Raw(bytes) = request.body() else {
-    return Err("expected raw file bytes".into());
-  };
+  let bytes = body_bytes(&request)?;
   let rename = header("x-rename").is_some_and(|v| v == "1");
-  send(&base, &folder, &name, bytes.clone(), quality, rename, None).await
+  send(&base, &folder, &name, bytes, quality, rename, None).await
 }
 
 /// Save a generated file (share card PNG, clippings Markdown) to Downloads.
@@ -198,9 +213,7 @@ pub async fn save_file(app: AppHandle, request: Request<'_>) -> Res<String> {
     .map(|n| sanitize_filename::sanitize(n))
     .filter(|n| !n.is_empty())
     .unwrap_or_else(|| "crosspoint-sync".into());
-  let InvokeBody::Raw(bytes) = request.body() else {
-    return Err("expected raw file bytes".into());
-  };
+  let bytes = body_bytes(&request)?;
   let dir = app.path().download_dir().map_err(err)?;
   let name = unique_name(&dir, &name);
   fs::write(dir.join(&name), bytes).map_err(err)?;
