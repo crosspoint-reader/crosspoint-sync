@@ -4,6 +4,7 @@ import { fetchTransport } from '../connectors/registry.js';
 import { documentMeta } from '../connectors/store.js';
 import { extractTitleAuthor, scoreCandidate, type Candidate } from '../connectors/matching.js';
 import { nowSeconds } from './sync.js';
+import { hardcoverBook, type HardcoverBook } from './hardcover-catalog.js';
 
 /**
  * Cover art and print page count from title/author. Covers use the same
@@ -139,11 +140,13 @@ export async function findBookInfo(
   http: HttpTransport,
   title: string,
   author: string,
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  known: { cover?: string | null; pages?: number | null } = {}
 ): Promise<BookInfo> {
   const [apple, ol] = await Promise.all([safe(itunes(http, title, author)), safe(openLibrary(http, title, author))]);
-  const cover = best(title, author, apple, (c) => c.url)?.url ?? best(title, author, ol, (c) => c.url)?.url ?? null;
-  let pages = best(title, author, ol, (c) => c.pages)?.pages ?? null;
+  // `known` (Hardcover's) fills in after the free sources, before the keyed/paid ones.
+  const cover = best(title, author, apple, (c) => c.url)?.url ?? best(title, author, ol, (c) => c.url)?.url ?? known.cover ?? null;
+  let pages = best(title, author, ol, (c) => c.pages)?.pages ?? known.pages ?? null;
   if (!pages && env.GOOGLE_BOOKS_API_KEY) {
     pages = best(title, author, await safe(googleBooks(http, title, author, env.GOOGLE_BOOKS_API_KEY)), (c) => c.pages)?.pages ?? null;
   }
@@ -175,26 +178,72 @@ export async function coverCandidates(http: HttpTransport, title: string, author
     .map(({ c }) => ({ url: c.url!, title: c.title, author: c.author ?? null, source: c.source, pages: c.pages ?? null }));
 }
 
-/** Cached cover URL + print page count for a document, resolving on first ask. */
+/** Store Hardcover's details on a document (a miss just records the check). */
+function saveHardcover(db: DB, userId: number, document: string, hc: HardcoverBook | null): void {
+  const json = (v: string[] | undefined) => (v?.length ? JSON.stringify(v) : null);
+  db.prepare(
+    `UPDATE documents SET hc_id = ?, hc_slug = ?, moods = ?, genres = ?, content_warnings = ?, rating = ?,
+       series = ?, hc_series_id = ?, series_position = ?, release_year = ?, hc_checked_at = ? WHERE user_id = ? AND document = ?`
+  ).run(
+    hc?.id ?? null, hc?.slug ?? null, json(hc?.moods), json(hc?.genres), json(hc?.content_warnings), hc?.rating ?? null,
+    hc?.series ?? null, hc?.series_id ?? null, hc?.series_position ?? null, hc?.release_year ?? null, nowSeconds(), userId, document
+  );
+}
+
+/** Cached cover URL + print page count for a document, resolving on first ask.
+ *  With HARDCOVER_API_KEY set, also fills the document's Hardcover details once. */
 export async function documentInfo(
   db: DB,
   userId: number,
   document: string,
-  http: HttpTransport = fetchTransport
+  http: HttpTransport = fetchTransport,
+  env: NodeJS.ProcessEnv = process.env,
+  // Hardcover lookups are throttled to ~1/s, so only the background enricher asks for them.
+  { hardcover = false }: { hardcover?: boolean } = {}
 ): Promise<BookInfo> {
   const row = db
-    .prepare('SELECT cover_url, page_count, cover_checked_at FROM documents WHERE user_id = ? AND document = ?')
-    .get(userId, document) as { cover_url: string | null; page_count: number | null; cover_checked_at: number | null } | undefined;
+    .prepare('SELECT cover_url, page_count, cover_checked_at, hc_checked_at FROM documents WHERE user_id = ? AND document = ?')
+    .get(userId, document) as
+    | { cover_url: string | null; page_count: number | null; cover_checked_at: number | null; hc_checked_at: number | null }
+    | undefined;
   if (!row) return { cover: null, pages: null }; // no metadata, nothing to search on
+  const want = extractTitleAuthor(documentMeta(db, userId, document));
+  let hc: HardcoverBook | null = null;
+  if (hardcover && want && env.HARDCOVER_API_KEY && row.hc_checked_at == null) {
+    const found = await hardcoverBook(db, http, want.title, want.author, env.HARDCOVER_API_KEY);
+    if (found !== 'later') {
+      saveHardcover(db, userId, document, found);
+      hc = found;
+    }
+  }
   const cached = { cover: row.cover_url, pages: row.page_count };
   if ((row.cover_url && row.page_count) || (row.cover_checked_at && nowSeconds() - row.cover_checked_at < RETRY_AFTER)) {
     return cached;
   }
-  const want = extractTitleAuthor(documentMeta(db, userId, document));
-  const found = want ? await findBookInfo(http, want.title, want.author) : { cover: null, pages: null };
+  const found = want
+    ? await findBookInfo(http, want.title, want.author, env, { cover: hc?.cover, pages: hc?.pages })
+    : { cover: null, pages: null };
   const info = { cover: row.cover_url ?? found.cover, pages: row.page_count ?? found.pages };
   db.prepare(
     'UPDATE documents SET cover_url = ?, page_count = ?, cover_checked_at = ? WHERE user_id = ? AND document = ?'
   ).run(info.cover, info.pages, nowSeconds(), userId, document);
   return info;
+}
+
+// Books still waiting on Hardcover details, filled in the background a few at a
+// time (lookups are throttled, so this never holds up a request).
+const enriching = new Set<number>();
+export function enrichSoon(db: DB, userId: number, http: HttpTransport = fetchTransport, env: NodeJS.ProcessEnv = process.env, limit = 10): void {
+  if (!env.HARDCOVER_API_KEY || enriching.has(userId)) return;
+  const docs = db
+    .prepare(
+      `SELECT document FROM documents WHERE user_id = ? AND hc_checked_at IS NULL
+         AND (title IS NOT NULL OR filename IS NOT NULL) ORDER BY updated_at DESC LIMIT ?`
+    )
+    .all(userId, limit) as { document: string }[];
+  if (!docs.length) return;
+  enriching.add(userId);
+  (async () => {
+    for (const d of docs) await documentInfo(db, userId, d.document, http, env, { hardcover: true }).catch(() => null);
+  })().finally(() => enriching.delete(userId));
 }

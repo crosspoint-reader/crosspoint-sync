@@ -6,6 +6,7 @@ import { isValidDocument, parseProgressBody, upsertProgress } from '../kosync.js
 import { deleteDocumentData, hasDocumentData } from '../../models/document.js';
 import { fanOutProgress } from '../../connectors/fanout.js';
 import { aliasesByDocument, resolveDocument } from '../../models/merge.js';
+import { enrichSoon } from '../../models/cover.js';
 
 export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async () => {}): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -33,6 +34,7 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
   // metadata) - lets clients and UIs discover documents without knowing hashes.
   app.get('/progress', (c) => {
     const user = c.get('user');
+    enrichSoon(db, user.id); // Hardcover details for new books, in the background
     const limitRaw = Number(c.req.query('limit') ?? 100);
     const limit =
       Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 500) : 100;
@@ -40,6 +42,7 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
       .prepare(
         `SELECT p.document, p.device_id, p.device, p.percentage, p.progress, p.position, p.updated_at,
                 d.title, d.author, d.filename, d.cover_url, d.page_count,
+                d.hc_slug, d.moods, d.genres, d.content_warnings, d.rating, d.series, d.series_position, d.release_year,
                 COALESCE(d.status, CASE WHEN p.percentage >= 0.98 THEN 'finished' ELSE 'reading' END) AS status
          FROM progress p
          LEFT JOIN documents d ON d.user_id = p.user_id AND d.document = p.document
@@ -69,8 +72,23 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
       filename: string | null;
       cover_url: string | null;
       page_count: number | null;
+      hc_slug: string | null;
+      moods: string | null;
+      genres: string | null;
+      content_warnings: string | null;
+      rating: number | null;
+      series: string | null;
+      series_position: number | null;
+      release_year: number | null;
       status: string;
     }[];
+    const list = (v: string | null): string[] => {
+      try {
+        return v ? (JSON.parse(v) as string[]) : [];
+      } catch {
+        return [];
+      }
+    };
     const aliases = aliasesByDocument(db, user.id);
     return c.json({
       items: rows.map((r) => {
@@ -90,6 +108,15 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
           status: r.status,
           cover_url: r.cover_url,
           page_count: r.page_count,
+          // From Hardcover's catalog (empty until looked up, or without HARDCOVER_API_KEY).
+          hardcover_slug: r.hc_slug,
+          moods: list(r.moods),
+          genres: list(r.genres),
+          content_warnings: list(r.content_warnings),
+          rating: r.rating,
+          series: r.series,
+          series_position: r.series_position,
+          release_year: r.release_year,
           percentage: r.percentage,
           progress: r.progress,
           page: position?.page ?? null,

@@ -68,6 +68,64 @@ function Bars({ title, labels, values }) {
   )
 }
 
+// Moods and genres across your books (from Hardcover's catalog, via the server).
+// Counts each book once per tag; DNF books are left out of your taste profile.
+function tagCounts(books, field) {
+  const counts = new Map()
+  for (const b of books) for (const t of b[field] ?? []) counts.set(t, (counts.get(t) ?? 0) + 1)
+  return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 8)
+}
+
+// Top moods across the given documents (most common first), for share cards.
+function topMoods(books, documents, n = 3) {
+  const byDoc = new Map(books.map((b) => [b.document, b]))
+  const picked = [...new Set(documents)].map((d) => byDoc.get(d)).filter((b) => b && b.status !== 'dnf')
+  return tagCounts(picked, 'moods').slice(0, n).map(([m]) => m)
+}
+
+function TagBars({ title, rows, total }) {
+  const max = Math.max(...rows.map(([, n]) => n), 1)
+  return (
+    <Card className="mt-4 p-4">
+      <div className="flex items-baseline justify-between">
+        <h3 className="font-display text-lg font-semibold text-stone-900">{title}</h3>
+        <p className="font-mono text-xs text-stone-500">{total} books</p>
+      </div>
+      <div className="mt-3 space-y-2">
+        {rows.map(([label, n]) => (
+          <div key={label} className="flex items-center gap-3 text-xs">
+            <span className="w-28 shrink-0 truncate text-stone-600" title={label}>
+              {label}
+            </span>
+            <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-stone-100">
+              <div className="h-full rounded-full bg-brand-500" style={{ width: `${(n / max) * 100}%` }} />
+            </div>
+            <span className="w-8 shrink-0 text-right font-mono text-stone-500">{n}</span>
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
+function WhatYouRead({ books }) {
+  const read = books.filter((b) => b.status !== 'dnf')
+  const moods = tagCounts(read, 'moods')
+  const genres = tagCounts(read, 'genres')
+  if (!moods.length && !genres.length) return null
+  const tagged = (field) => read.filter((b) => b[field]?.length).length
+  return (
+    <section>
+      <h2 className="mt-10 font-display text-xl font-semibold text-stone-900">What you read</h2>
+      <div className="md:grid md:grid-cols-2 md:gap-4">
+        {moods.length > 0 && <TagBars title="Moods" rows={moods} total={tagged('moods')} />}
+        {genres.length > 0 && <TagBars title="Genres" rows={genres} total={tagged('genres')} />}
+      </div>
+      <p className="mt-3 text-xs/5 text-stone-500">From Hardcover readers&apos; tags for each book. Books you didn&apos;t finish are left out.</p>
+    </section>
+  )
+}
+
 function Tiles({ tiles, action }) {
   return (
     <Card className="relative mt-4 grid grid-cols-2 gap-px overflow-hidden bg-stone-100 md:grid-cols-3">
@@ -158,7 +216,7 @@ function calendarRange(scale, back, today) {
   return { weeks, first, last, label: `${fmt(first, opts)} to ${fmt(last > today ? today : last, { month: 'short', year: 'numeric' })}` }
 }
 
-function ReadingCalendar({ days }) {
+function ReadingCalendar({ days, books = [] }) {
   const [scale, setScale] = useState('year')
   const [back, setBack] = useState(0)
   const [sharing, setSharing] = useState(false)
@@ -218,8 +276,15 @@ function ReadingCalendar({ days }) {
       quarter: back ? 'My 3 months' : 'My last 3 months',
       year: back ? 'My year' : 'My past year',
     }[scale]
+    // Moods of the books read in this period.
+    const inPeriod = days.filter((d) => {
+      const at = dayDate(d.day)
+      return at >= first && at <= last
+    })
+    const moods = topMoods(books, inPeriod.flatMap((d) => (d.books ?? []).map((b) => b.document)))
     return renderCalendarCard({
       eyebrow,
+      moods,
       heading: 'Reading days',
       subtitle: label,
       tiles: [
@@ -409,6 +474,9 @@ function StatsShare({ summary, activity, books, onClose }) {
       : [['reading now', books.filter((b) => b.status === 'reading').length]]),
   ]
   const covers = finished.map((b) => shown.get(b.document).cover_url).filter(Boolean)
+  // This year's moods: books finished this year, else anything read this year.
+  const readThisYear = activity.books.filter((b) => new Date(b.last_at * 1000).getFullYear() === year)
+  const moods = topMoods(books, (thisYear.length ? thisYear : readThisYear).map((b) => b.document))
   const meta = {
     title: `${year} in books`,
     postTitle: `My ${year} in books`,
@@ -419,9 +487,9 @@ function StatsShare({ summary, activity, books, onClose }) {
     <ShareSheet
       heading="Share your stats"
       meta={meta}
-      renderKey={`${year}-${pages}-${thisYear.length}`}
+      renderKey={`${year}-${pages}-${thisYear.length}-${moods.join()}`}
       onClose={onClose}
-      render={() => renderStatsCard({ heading: `${year} in books`, tiles, covers, weeks: weeklyPages(activity.days) })}
+      render={() => renderStatsCard({ heading: `${year} in books`, tiles, covers, weeks: weeklyPages(activity.days), moods })}
     />
   )
 }
@@ -580,6 +648,7 @@ export default function Stats({ session, tab = '', summary, activity, books }) {
 
       <h2 className="mt-8 font-display text-xl font-semibold text-stone-900">Pages &amp; books</h2>
       {activity ? <PagesAndBooks activity={activity} books={books} onShare={() => setSharing(true)} /> : <p className="py-6 text-sm text-stone-500">Loading…</p>}
+      <WhatYouRead books={books} />
 
       {hasTime ? (
         <>
@@ -604,7 +673,7 @@ export default function Stats({ session, tab = '', summary, activity, books }) {
           </p>
         </>
       ) : (
-        activity && <ReadingCalendar days={activity.days} />
+        activity && <ReadingCalendar days={activity.days} books={books} />
       )}
     </div>
   )

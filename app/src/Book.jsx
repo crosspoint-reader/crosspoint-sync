@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowLeft, Hash, Image as ImageIcon, Loader2, Merge, Share2, X } from 'lucide-react'
+import { ArrowLeft, Hash, Image as ImageIcon, Loader2, Merge, Search, Share2, Star, X } from 'lucide-react'
 import { api } from './api.js'
 import { renderCard } from './shareCard.js'
 import ShareSheet from './ShareSheet.jsx'
@@ -329,6 +329,81 @@ function BookTools({ session, book, books, onChange }) {
   )
 }
 
+// Moods, genres and content warnings from Hardcover's catalog (when the server has them).
+function Details({ book }) {
+  const groups = [
+    ['Moods', book.moods, 'bg-brand-50 text-brand-700 ring-brand-200/60'],
+    ['Genres', book.genres, 'bg-stone-100 text-stone-700 ring-stone-950/5'],
+  ].filter(([, list]) => list?.length)
+  const warnings = book.content_warnings ?? []
+  if (!groups.length && !warnings.length) return null
+  return (
+    <Card className="mt-4 space-y-3 p-4">
+      {groups.map(([label, list, tone]) => (
+        <div key={label}>
+          <p className="text-xs font-medium text-stone-500">{label}</p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {list.map((t) => (
+              <span key={t} className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${tone}`}>
+                {t}
+              </span>
+            ))}
+          </div>
+        </div>
+      ))}
+      {warnings.length > 0 && (
+        <details className="text-xs text-stone-500">
+          <summary className="cursor-pointer font-medium">Content warnings ({warnings.length})</summary>
+          <p className="mt-1.5 text-stone-600">{warnings.join(', ')}</p>
+        </details>
+      )}
+      {book.hardcover_slug && (
+        <a href={`https://hardcover.app/books/${book.hardcover_slug}`} target="_blank" rel="noreferrer" className="block text-xs text-stone-400">
+          From Hardcover
+        </a>
+      )}
+    </Card>
+  )
+}
+
+// Finished (or nearly) a book in a series: show what comes next, and search the
+// Browse catalogs for it so it's a tap away from being on the reader.
+function NextInSeries({ session, book }) {
+  const done = book.status === 'finished' || book.percentage >= 0.9
+  const [data] = useLoad(() => (book.series && done ? api.next(session, book.document) : Promise.resolve(null)), [book.document, done], `next ${book.document}`)
+  const next = data?.next
+  if (!next) return null
+  const query = [next.title, next.author].filter(Boolean).join(' ')
+  return (
+    <Card className="mt-4 p-4">
+      <p className="text-xs font-medium text-stone-500">Next in {data.series ?? book.series}</p>
+      <div className="mt-2 flex gap-3">
+        {next.cover ? (
+          <img src={next.cover} alt="" loading="lazy" className="aspect-[2/3] w-14 shrink-0 rounded-md object-cover shadow-sm ring-1 ring-stone-950/10" />
+        ) : (
+          <div className="aspect-[2/3] w-14 shrink-0 rounded-md bg-cover ring-1 ring-stone-950/10" />
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="font-display text-base/tight font-semibold text-stone-900">{next.title}</p>
+          <p className="mt-0.5 text-xs text-stone-500">
+            Book {Number.isInteger(next.position) ? next.position : next.position.toFixed(1)}
+            {next.year ? ` · ${next.year}` : ''}
+          </p>
+          <a
+            href={`#/browse/search/${encodeURIComponent(query)}`}
+            className="mt-2 inline-flex h-9 items-center gap-1.5 rounded-full bg-brand-500 px-3.5 text-xs font-semibold text-white transition active:scale-[0.98]"
+          >
+            <Search className="size-3.5" strokeWidth={2.25} /> Find it in your catalogs
+          </a>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+const seriesLabel = (b) =>
+  b.series ? `${b.series}${b.series_position ? ` · Book ${Number.isInteger(b.series_position) ? b.series_position : b.series_position.toFixed(1)}` : ''}` : null
+
 export default function Book({ session, book, books, activity, onChange }) {
   if (!book) return <p className="py-16 text-center text-sm text-stone-500">Book not found.</p>
   return (
@@ -351,6 +426,14 @@ export default function Book({ session, book, books, activity, onChange }) {
                 {book.title || book.filename || 'Untitled book'}
               </h1>
               <p className="mt-1 text-sm text-stone-500">{book.author}</p>
+              {seriesLabel(book) && <p className="mt-1 text-xs text-stone-500">{seriesLabel(book)}</p>}
+              {book.rating && (
+                <p className="mt-1 flex items-center gap-1 text-xs text-stone-500">
+                  <Star className="size-3.5 fill-current text-amber-500" strokeWidth={0} />
+                  <span className="font-medium text-stone-700">{book.rating.toFixed(1)}</span>
+                  {book.release_year ? <span>· {book.release_year}</span> : null}
+                </p>
+              )}
               <p className="mt-3 font-mono text-xs text-stone-500">
                 <span className="font-semibold text-brand-600">{pct(book.percentage)}</span> · {book.device || book.device_id} · {ago(book.timestamp)}
               </p>
@@ -360,6 +443,8 @@ export default function Book({ session, book, books, activity, onChange }) {
           <div className="mt-6">
             <StatusPicker session={session} book={book} onChange={onChange} />
           </div>
+          <NextInSeries session={session} book={book} />
+          <Details book={book} />
           <Stats session={session} doc={book.document} activity={activity} />
           <BookTools key={`${book.document}-${book.page_count}`} session={session} book={book} books={books} onChange={onChange} />
         </aside>

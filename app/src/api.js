@@ -119,6 +119,7 @@ export const api = {
   activity: (s) => call(s, `/api/v1/stats/activity?tz=${new Date().getTimezoneOffset()}`),
   bookStats: (s, doc) => call(s, `/api/v1/stats/books/${doc}`),
   cover: (s, doc) => call(s, `/api/v1/documents/${doc}/cover`),
+  next: (s, doc) => call(s, `/api/v1/documents/${doc}/next`),
   setInfo: (s, doc, patch) => call(s, `/api/v1/documents/${doc}/info`, { method: 'PUT', body: JSON.stringify(patch) }),
   coverCandidates: (s, doc, q) => call(s, `/api/v1/documents/${doc}/cover/candidates${q ? `?q=${encodeURIComponent(q)}` : ''}`).then((r) => r.items),
   // `document` becomes an alias of `into`: its progress, clippings and stats move there.

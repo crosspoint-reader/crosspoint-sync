@@ -339,13 +339,26 @@ function signature(ctx, logo) {
   }
 }
 
-export async function renderStatsCard({ heading, tiles, covers, weeks }) {
+// "MOODS  Adventurous · Dark · Tense" under the headline numbers. Returns the height used.
+function moodLine(ctx, y, moods) {
+  if (!moods?.length) return 0
+  ctx.fillStyle = C.faint
+  ctx.font = '400 22px "Geist Mono"'
+  ctx.fillText('MOODS', PAD, y)
+  ctx.fillStyle = C.brand
+  ctx.font = '600 36px Lora'
+  ctx.fillText(moods.slice(0, 3).join(' · '), PAD, y + 46)
+  return 90
+}
+
+export async function renderStatsCard({ heading, tiles, covers, weeks, moods = [] }) {
   const [logo, ...images] = await Promise.all([loadImage('/logo.png', false), ...covers.slice(0, 5).map((u) => loadImage(u, isApp))])
   const { canvas, ctx } = await statsBase(heading, tiles)
 
-  // Recently finished covers.
+  // Recently finished covers, under the moods line when there is one.
   const shown = images.filter(Boolean)
-  const coverTop = 400 + Math.ceil(Math.min(tiles.length, 4) / 2) * 170 + 10
+  const tilesEnd = 400 + Math.ceil(Math.min(tiles.length, 4) / 2) * 170 + 10
+  const coverTop = tilesEnd + moodLine(ctx, tilesEnd - 10, moods)
   if (shown.length) {
     const cw = 150
     const chh = 225
@@ -399,7 +412,7 @@ export async function renderStatsCard({ heading, tiles, covers, weeks }) {
 // rows of shade levels (0-4, null = outside the period) and optional `top`
 // (column), `left` (row) and `bottom` (column) labels.
 const DAY_SHADES = ['#e7e5df', '#d6e5de', '#b3cfc2', '#8fb9a6', '#69917d']
-export async function renderCalendarCard({ eyebrow, heading, subtitle, tiles, blocks }) {
+export async function renderCalendarCard({ eyebrow, heading, subtitle, tiles, blocks, moods = [] }) {
   const logo = await loadImage('/logo.png', false)
   const { canvas, ctx, bottom: tilesBottom } = await statsBase(heading, tiles, 3, 440, eyebrow)
   ctx.fillStyle = C.soft
@@ -413,7 +426,7 @@ export async function renderCalendarCard({ eyebrow, heading, subtitle, tiles, bl
   const blockGap = 40
   const cols = Math.max(...blocks.map((b) => b.grid[0]?.length ?? 0))
   const rows = blocks.reduce((n, b) => n + b.grid.length, 0)
-  const areaTop = tilesBottom + 90
+  const areaTop = tilesBottom + 90 + moodLine(ctx, tilesBottom + 80, moods)
   const areaW = W - PAD * 2 - labelW
   const areaH = H - 140 - areaTop - blocks.length * (topH + bottomH) - (blocks.length - 1) * blockGap
   const gapRatio = 0.14

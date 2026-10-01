@@ -5,6 +5,7 @@ import { isValidDocument } from '../kosync.js';
 import { nowSeconds } from '../../models/sync.js';
 import { mergeDocuments, resolveDocument, unmergeDocument } from '../../models/merge.js';
 import { coverCandidates, documentInfo } from '../../models/cover.js';
+import { nextAfter, seriesBooks } from '../../models/hardcover-catalog.js';
 import { extractTitleAuthor } from '../../connectors/matching.js';
 import { documentMeta } from '../../connectors/store.js';
 import { fanOutProgress } from '../../connectors/fanout.js';
@@ -143,6 +144,26 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     const user = c.get('user');
     const info = await documentInfo(db, user.id, resolveDocument(db, user.id, param), http);
     return c.json({ url: info.cover, pages: info.pages });
+  });
+
+  // The next book in this book's series, from Hardcover (needs HARDCOVER_API_KEY and
+  // a looked-up series). { next: null } when there is none; pending while rate-limited.
+  app.get('/documents/:document/next', async (c) => {
+    const param = c.req.param('document');
+    if (!isValidDocument(param)) {
+      return kosyncError(c, 403, 2004, "Field 'document' not provided.");
+    }
+    const user = c.get('user');
+    const key = process.env.HARDCOVER_API_KEY;
+    const row = db
+      .prepare('SELECT series, hc_series_id, series_position FROM documents WHERE user_id = ? AND document = ?')
+      .get(user.id, resolveDocument(db, user.id, param)) as
+      | { series: string | null; hc_series_id: number | null; series_position: number | null }
+      | undefined;
+    if (!key || !row?.hc_series_id || row.series_position == null) return c.json({ next: null });
+    const list = await seriesBooks(db, http ?? fetchTransport, row.hc_series_id, key);
+    if (list === 'later') return c.json({ next: null, pending: true });
+    return c.json({ series: row.series, next: nextAfter(list, row.series_position) });
   });
 
   // Covers to choose from when the automatic one is wrong. ?q= searches a different title.
