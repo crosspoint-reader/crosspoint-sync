@@ -57,8 +57,9 @@ function useWide() {
   return wide
 }
 
-function Stats({ session, doc, activity: a, wide = false }) {
-  const [data] = useLoad(() => api.bookStats(session, doc), [session, doc], `bookstats:${doc}`)
+function Stats({ session, doc, aliases, activity: a, wide = false }) {
+  // Merging or separating copies changes which stats count, so refetch then.
+  const [data] = useLoad(() => api.bookStats(session, doc), [session, doc, aliases?.join()], `bookstats:${doc}`)
   const c = data?.combined
   let cells
   if (c?.sessions) {
@@ -335,15 +336,17 @@ function CoverPicker({ session, book, onDone, onClose }) {
 function MergePicker({ session, book, books, onDone, onClose }) {
   const [busy, setBusy] = useState(null)
   const [err, setErr] = useState(null)
+  const [stats, setStats] = useState(true)
   const others = books
     .filter((b) => b.document !== book.document)
     .sort((a, b) => Number(looksLikeSame(book, b)) - Number(looksLikeSame(book, a)) || (a.title ?? '').localeCompare(b.title ?? ''))
   async function merge(other) {
-    if (!confirm(`Merge "${other.title || other.filename}" into this book? Its progress, clippings and stats move here, and future syncs of it land here too.`)) return
+    const what = stats ? 'progress, clippings and reading stats' : 'progress and clippings'
+    if (!confirm(`Merge "${other.title || other.filename}" into this book? Its ${what} move here, and future syncs of it land here too.`)) return
     setBusy(other.document)
     setErr(null)
     try {
-      await api.merge(session, other.document, book.document)
+      await api.merge(session, other.document, book.document, stats)
       onDone()
     } catch (e) {
       setErr(e.message)
@@ -355,6 +358,10 @@ function MergePicker({ session, book, books, onDone, onClose }) {
       <p className="mt-2 text-sm/6 text-stone-500">
         When two readers identify the same book differently, it shows up twice. Pick the copy to fold into this one.
       </p>
+      <label className="mt-3 flex items-center gap-2 text-sm text-stone-600">
+        <input type="checkbox" checked={stats} onChange={(e) => setStats(e.target.checked)} className="size-4 accent-brand-500" />
+        Combine reading stats (time, pages, sessions)
+      </label>
       {err && <p className="mt-3 text-sm text-red-600">{err}</p>}
       <Card className="mt-4 divide-y divide-stone-100">
         {others.map((b) => (
@@ -676,7 +683,7 @@ export default function Book({ session, book, books, activity, onChange }) {
                 <span className="font-semibold text-brand-600">{pct(book.percentage)}</span> · {book.device || book.device_id} · {ago(book.timestamp)}
               </p>
               <ProgressBar value={book.percentage} className="mt-2" />
-              {wide && <Stats session={session} doc={book.document} activity={activity} wide />}
+              {wide && <Stats session={session} doc={book.document} aliases={book.aliases} activity={activity} wide />}
             </div>
             <div className="col-span-2 mt-6 md:col-span-1 md:col-start-2 md:self-end">
               <StatusPicker session={session} book={book} onChange={onChange} />
@@ -686,7 +693,7 @@ export default function Book({ session, book, books, activity, onChange }) {
           {/* Cards flow two-up; spacing moves to the bottom so a column break can't eat a top margin. */}
           <div className="md:mt-4 md:columns-2 md:gap-4 md:[&>*]:mt-0 md:[&>*]:mb-4 [&>*]:break-inside-avoid">
             <Details book={book} />
-            {!wide && <Stats session={session} doc={book.document} activity={activity} />}
+            {!wide && <Stats session={session} doc={book.document} aliases={book.aliases} activity={activity} />}
             <Services session={session} book={book} />
           </div>
         </div>

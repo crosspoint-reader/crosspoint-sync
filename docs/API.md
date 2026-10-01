@@ -444,6 +444,11 @@ for clients that render per-device numbers like the P2P screen does.
 Per-device rows plus a `combined` object (scalars/buckets summed, `completed` OR-ed, `avg_fwd`
 weighted by `pace_n`, `start_date` = earliest non-zero, `finished_date` = latest).
 
+Merged documents (`POST /api/v1/documents/merge`, `{"document", "into", "stats"?}`): stats rows
+stay under the hash each device uploaded them with and are combined on read. With `"stats": true`
+(the default) the alias's rows count toward the canonical book, and each row carries its
+`document`; with `"stats": false` they are left out. Unmerging hands the alias its stats back.
+
 ### Documents metadata (optional)
 
 `PUT /api/v1/documents` — `{"items": [{"document": "...", "title": "...", "author": "...",

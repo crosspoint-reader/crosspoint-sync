@@ -76,6 +76,7 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
   // Merge two synced listings that are really the same book (devices can hash
   // the same file differently). `document` becomes an alias of `into`: existing
   // data migrates onto `into`, and future pushes under `document` land there.
+  // Per-book reading stats are combined on read unless `stats` is false.
   app.post('/documents/merge', async (c) => {
     let body: unknown;
     try {
@@ -93,8 +94,10 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     if (from === into) {
       return kosyncError(c, 403, 2003, 'Documents are already merged');
     }
-    mergeDocuments(db, user.id, from, into, nowSeconds());
-    return c.json({ document: into, merged: from });
+    // Reading stats combine by default; `stats: false` keeps them apart.
+    const mergeStats = o.stats !== false;
+    mergeDocuments(db, user.id, from, into, nowSeconds(), mergeStats);
+    return c.json({ document: into, merged: from, stats: mergeStats });
   });
 
   // Undo a merge: the alias hash starts syncing separately again. Rows already

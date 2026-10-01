@@ -12,6 +12,53 @@ async function putProgress(
   return app.request('/syncs/progress', { method: 'PUT', headers, body: JSON.stringify(body) });
 }
 
+function bookStats(document: string, seconds: number, pages: number) {
+  return {
+    document,
+    v: 5,
+    sessions: 2,
+    seconds,
+    pages,
+    completed: false,
+    avg_fwd: 10,
+    pace_n: 5,
+    eta: 0,
+    start_manual: false,
+    finish_manual: false,
+    start_date: 1751000000,
+    finished_date: 0,
+    tod: [0, 0, 0, 0],
+    dow: [0, 0, 0, 0, 0, 0, 0],
+  };
+}
+
+/** Two devices with stats under different hashes, plus a same-device clash. */
+async function statsSetup(stats?: boolean) {
+  const { app, db } = makeTestApp();
+  const { headers } = await registerUser(app);
+  await putProgress(app, headers, { document: KOBO_DOC, progress: 'a', percentage: 0.1, device_id: 'kobo-1' });
+  await putProgress(app, headers, { document: CP_DOC, progress: 'b', percentage: 0.2, device_id: 'cp-1' });
+  const upload = (deviceId: string, items: unknown[]) =>
+    app.request('/api/v1/stats/books', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ device_id: deviceId, items }),
+    });
+  await upload('cp-1', [bookStats(CP_DOC, 600, 30), bookStats(KOBO_DOC, 300, 15)]);
+  await upload('kobo-1', [bookStats(KOBO_DOC, 900, 45)]);
+  const merge = await app.request('/api/v1/documents/merge', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ document: KOBO_DOC, into: CP_DOC, ...(stats === undefined ? {} : { stats }) }),
+  });
+  expect(merge.status).toBe(200);
+  const combined = async (doc = CP_DOC) => {
+    const res = await app.request(`/api/v1/stats/books/${doc}`, { headers });
+    return ((await res.json()) as { combined: { seconds: number; pages: number; sessions: number } }).combined;
+  };
+  return { app, db, headers, upload, combined };
+}
+
 async function setup() {
   const { app, db } = makeTestApp();
   const { headers } = await registerUser(app);
@@ -137,5 +184,38 @@ describe('document merge', () => {
     expect(del.status).toBe(200);
     const aliases = db.prepare('SELECT * FROM document_aliases').all();
     expect(aliases).toHaveLength(0);
+  });
+});
+
+describe('document merge stats', () => {
+  it('combines stats from both hashes by default, including same-device clashes', async () => {
+    const { combined } = await statsSetup();
+    expect(await combined()).toMatchObject({ seconds: 1800, pages: 90, sessions: 6 });
+    // Asking with the alias hash gives the same book.
+    expect((await combined(KOBO_DOC)).seconds).toBe(1800);
+  });
+
+  it('keeps counting uploads that devices still send under the alias hash', async () => {
+    const { upload, combined } = await statsSetup();
+    await upload('kobo-1', [bookStats(KOBO_DOC, 1200, 60)]);
+    expect((await combined()).seconds).toBe(2100);
+  });
+
+  it('leaves stats apart when merged with stats: false', async () => {
+    const { combined } = await statsSetup(false);
+    expect(await combined()).toMatchObject({ seconds: 600, pages: 30, sessions: 2 });
+  });
+
+  it('unmerge hands the alias its stats back', async () => {
+    const { app, headers, combined } = await statsSetup();
+    await app.request(`/api/v1/documents/merge/${KOBO_DOC}`, { method: 'DELETE', headers });
+    expect((await combined()).seconds).toBe(600);
+    expect((await combined(KOBO_DOC)).seconds).toBe(1200);
+  });
+
+  it('deleting the canonical book clears stats stored under its aliases', async () => {
+    const { app, db, headers } = await statsSetup();
+    await app.request(`/api/v1/progress/${CP_DOC}`, { method: 'DELETE', headers });
+    expect(db.prepare('SELECT * FROM stats_device_book').all()).toHaveLength(0);
   });
 });

@@ -774,7 +774,9 @@ function openMerge(doc) {
   box.hidden = false;
   const others = BOOKS.filter(b => b.document !== doc);
   if (!others.length) { box.innerHTML = '<p class="muted" style="margin:0">No other synced books to merge with.</p>'; return; }
-  box.innerHTML = '<div class="grp">This is the same book as</div>' + others.map(b => {
+  box.innerHTML = '<label class="meta" style="display:flex;gap:6px;align-items:center;margin-bottom:6px">'
+    + '<input type="checkbox" data-stats checked> Combine reading stats (time, pages, sessions)</label>'
+    + '<div class="grp">This is the same book as</div>' + others.map(b => {
     const pct = (Math.max(0, Math.min(1, Number(b.percentage) || 0)) * 100).toFixed(1).replace(/\\.0$/, '');
     return '<div class="row" style="padding:6px 0"><div style="min-width:0"><div class="title">' + esc(bookTitle(b)) + '</div>'
       + '<div class="meta">' + pct + '% · ' + esc(b.device || b.device_id || '') + '</div></div>'
@@ -784,7 +786,7 @@ function openMerge(doc) {
     $('err').textContent = '';
     btn.disabled = true; btn.textContent = 'Merging…';
     let r;
-    try { r = await jsend('/api/v1/documents/merge', 'POST', { document: doc, into: btn.dataset.into }); }
+    try { r = await jsend('/api/v1/documents/merge', 'POST', { document: doc, into: btn.dataset.into, stats: box.querySelector('[data-stats]').checked }); }
     catch { r = { ok:false, data:{} }; }
     if (!r.ok) {
       $('err').textContent = r.data.message || 'Could not merge.';
@@ -796,7 +798,7 @@ function openMerge(doc) {
 }
 
 async function unmerge(alias) {
-  if (!confirm('Unmerge this listing? The old copy starts syncing separately again; progress already merged stays here.')) return;
+  if (!confirm('Unmerge this listing? The old copy starts syncing separately again and takes its reading stats back; progress already merged stays here.')) return;
   $('err').textContent = '';
   let r;
   try { r = await jsend('/api/v1/documents/merge/' + encodeURIComponent(alias), 'DELETE'); }

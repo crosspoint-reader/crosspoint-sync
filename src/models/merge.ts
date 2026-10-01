@@ -31,12 +31,41 @@ export function aliasesByDocument(db: DB, userId: number): Map<string, string[]>
 }
 
 /**
+ * Document hashes whose per-book stats count toward `document`: itself plus
+ * every alias merged with stats. Stats rows stay under the hash the device
+ * uploaded them with (each upload replaces that device's cumulative snapshot),
+ * so they are combined here on read instead of being moved at merge time.
+ */
+export function statsDocuments(db: DB, userId: number, document: string): string[] {
+  const rows = db
+    .prepare('SELECT alias FROM document_aliases WHERE user_id = ? AND document = ? AND merge_stats = 1')
+    .all(userId, document) as unknown as { alias: string }[];
+  return [document, ...rows.map((r) => r.alias)];
+}
+
+/** Map of stats-merged alias -> canonical document for a user. */
+export function statsAliases(db: DB, userId: number): Map<string, string> {
+  const rows = db
+    .prepare('SELECT alias, document FROM document_aliases WHERE user_id = ? AND merge_stats = 1')
+    .all(userId) as unknown as { alias: string; document: string }[];
+  return new Map(rows.map((r) => [r.alias, r.document]));
+}
+
+/**
  * Merge `from` into `into`: migrate progress (furthest wins),
  * position samples, metadata (canonical's fields win, alias fills gaps),
- * bookmarks/clippings/stats, and connector matches, then record the alias.
+ * bookmarks/clippings and connector matches, then record the alias. Per-book
+ * stats are not moved; `mergeStats` decides whether they combine on read.
  * Callers must pass already-resolved, distinct documents.
  */
-export function mergeDocuments(db: DB, userId: number, from: string, into: string, now: number): void {
+export function mergeDocuments(
+  db: DB,
+  userId: number,
+  from: string,
+  into: string,
+  now: number,
+  mergeStats = true
+): void {
   withTransaction(db, () => {
     // progress PK (user, document, device_id): keep the furthest row per device.
     db.prepare(
@@ -95,7 +124,7 @@ export function mergeDocuments(db: DB, userId: number, from: string, into: strin
     db.prepare('DELETE FROM documents WHERE user_id = ? AND document = ?').run(userId, from);
 
     // Uniquely-keyed side tables: move what fits, drop the (rare) conflicts.
-    for (const table of ['bookmarks', 'clippings', 'stats_device_book', 'connector_matches', 'connector_queue']) {
+    for (const table of ['bookmarks', 'clippings', 'connector_matches', 'connector_queue']) {
       db.prepare(`UPDATE OR IGNORE ${table} SET document = ? WHERE user_id = ? AND document = ?`).run(
         into,
         userId,
@@ -104,22 +133,22 @@ export function mergeDocuments(db: DB, userId: number, from: string, into: strin
       db.prepare(`DELETE FROM ${table} WHERE user_id = ? AND document = ?`).run(userId, from);
     }
 
-    // Flatten chains (anything aliased to `from` now points at `into`), then
+    // Flatten chains (anything aliased to `from` now points at `into`; its
+    // stats were part of `from`'s, so they follow this merge's choice), then
     // record the merge itself.
-    db.prepare('UPDATE document_aliases SET document = ? WHERE user_id = ? AND document = ?').run(
-      into,
-      userId,
-      from
-    );
     db.prepare(
-      'INSERT OR REPLACE INTO document_aliases (user_id, alias, document, created_at) VALUES (?, ?, ?, ?)'
-    ).run(userId, from, into, now);
+      'UPDATE document_aliases SET document = ?, merge_stats = merge_stats AND ? WHERE user_id = ? AND document = ?'
+    ).run(into, mergeStats ? 1 : 0, userId, from);
+    db.prepare(
+      'INSERT OR REPLACE INTO document_aliases (user_id, alias, document, created_at, merge_stats) VALUES (?, ?, ?, ?, ?)'
+    ).run(userId, from, into, now, mergeStats ? 1 : 0);
   });
 }
 
 /**
  * Remove an alias mapping. Already-migrated rows stay on the canonical
  * document; the old hash just starts accumulating its own progress again.
+ * Its per-book stats were never moved, so they go back with it.
  */
 export function unmergeDocument(db: DB, userId: number, alias: string): boolean {
   const res = db

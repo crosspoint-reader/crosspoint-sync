@@ -48,6 +48,15 @@ export function deleteDocumentData(db: DB, userId: number, document: string): nu
         .run(userId, document);
       rows += Number(result.changes);
     }
+    // Stats stay under the hash a device uploaded them with, so merged-in
+    // copies still hold their own rows.
+    const aliasStats = db
+      .prepare(
+        `DELETE FROM stats_device_book WHERE user_id = ? AND document IN
+           (SELECT alias FROM document_aliases WHERE user_id = ? AND document = ?)`
+      )
+      .run(userId, userId, document);
+    rows += Number(aliasStats.changes);
     // Merge mappings in either direction die with the book too.
     const aliasResult = db
       .prepare('DELETE FROM document_aliases WHERE user_id = ? AND (alias = ? OR document = ?)')

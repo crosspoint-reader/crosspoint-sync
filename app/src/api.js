@@ -195,7 +195,7 @@ export const api = {
   setInfo: (s, doc, patch) => call(s, `/api/v1/documents/${doc}/info`, { method: 'PUT', body: JSON.stringify(patch) }),
   coverCandidates: (s, doc, q) => call(s, `/api/v1/documents/${doc}/cover/candidates${q ? `?q=${encodeURIComponent(q)}` : ''}`).then((r) => r.items),
   // `document` becomes an alias of `into`: its progress, clippings and stats move there.
-  merge: (s, document, into) => call(s, '/api/v1/documents/merge', { method: 'POST', body: JSON.stringify({ document, into }) }),
+  merge: (s, document, into, stats = true) => call(s, '/api/v1/documents/merge', { method: 'POST', body: JSON.stringify({ document, into, stats }) }),
   unmerge: (s, alias) => call(s, `/api/v1/documents/merge/${alias}`, { method: 'DELETE' }),
   // Every clipping across books; older servers without /clippings get fetched book by book.
   async allClippings(s, books) {

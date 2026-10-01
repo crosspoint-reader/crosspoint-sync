@@ -13,6 +13,7 @@ import {
 } from '../../models/stats.js';
 import { computeActivity, type DocInfo, type LogRow } from '../../models/activity.js';
 import { documentInfo } from '../../models/cover.js';
+import { resolveDocument, statsAliases, statsDocuments } from '../../models/merge.js';
 import type { HttpTransport } from '../../connectors/types.js';
 
 const MAX_BOOK_BATCH = 20;
@@ -135,18 +136,27 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
       return kosyncError(c, 403, 2004, "Field 'document' not provided.");
     }
     const user = c.get('user');
+    // Merged copies keep their stats under their own hash; fold in the ones
+    // merged with stats.
+    const documents = statsDocuments(db, user.id, resolveDocument(db, user.id, document));
     const rows = db
       .prepare(
-        `SELECT device_id, payload, updated_at FROM stats_device_book
-         WHERE user_id = ? AND document = ?`
+        `SELECT device_id, document, payload, updated_at FROM stats_device_book
+         WHERE user_id = ? AND document IN (${documents.map(() => '?').join(',')})`
       )
-      .all(user.id, document) as { device_id: string; payload: string; updated_at: number }[];
+      .all(user.id, ...documents) as {
+      device_id: string;
+      document: string;
+      payload: string;
+      updated_at: number;
+    }[];
     const snapshots = rows.map((r) => JSON.parse(r.payload) as BookStatsSnapshot);
     return c.json({
       document,
       combined: combineBookStats(snapshots),
       devices: rows.map((r) => ({
         device_id: r.device_id,
+        document: r.document,
         updated_at: r.updated_at,
         stats: JSON.parse(r.payload),
       })),
@@ -179,13 +189,15 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
       ).map((d) => [d.document, d])
     );
     // CrossInk's own finish dates, combined across devices like /stats/books/:document.
+    const merged = statsAliases(db, user.id);
     const snapshotsByDoc = new Map<string, BookStatsSnapshot[]>();
     for (const r of db
       .prepare('SELECT document, payload FROM stats_device_book WHERE user_id = ?')
       .all(user.id) as { document: string; payload: string }[]) {
-      const list = snapshotsByDoc.get(r.document) ?? [];
+      const document = merged.get(r.document) ?? r.document;
+      const list = snapshotsByDoc.get(document) ?? [];
       list.push(JSON.parse(r.payload) as BookStatsSnapshot);
-      snapshotsByDoc.set(r.document, list);
+      snapshotsByDoc.set(document, list);
     }
     const finishedDates = new Map<string, number>();
     for (const [document, snapshots] of snapshotsByDoc) {
