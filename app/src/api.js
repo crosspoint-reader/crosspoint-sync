@@ -192,6 +192,8 @@ export const api = {
   clearData: (s) => call(s, '/api/v1/account/data', { method: 'DELETE' }),
   deleteAccount: (s) => call(s, '/api/v1/account', { method: 'DELETE' }),
   removeBook: (s, doc) => call(s, `/api/v1/progress/${doc}`, { method: 'DELETE' }),
+  // Manual reading dates: { start_date, finished_date } as 'YYYY-MM-DD', null clears, omitted = unchanged.
+  setDates: (s, doc, dates) => call(s, `/api/v1/documents/${doc}/dates`, { method: 'PUT', body: JSON.stringify(dates) }),
   setInfo: (s, doc, patch) => call(s, `/api/v1/documents/${doc}/info`, { method: 'PUT', body: JSON.stringify(patch) }),
   coverCandidates: (s, doc, q) => call(s, `/api/v1/documents/${doc}/cover/candidates${q ? `?q=${encodeURIComponent(q)}` : ''}`).then((r) => r.items),
   // `document` becomes an alias of `into`: its progress, clippings and stats move there.

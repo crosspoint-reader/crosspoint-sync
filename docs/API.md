@@ -463,6 +463,15 @@ Manual reading status: `{"status": "reading" | "paused" | "finished" | "dnf"}`, 
 event to linked write-connectors. `GET /api/v1/progress` items carry the effective `status`
 (manual, else `finished` at ≥ 98%, else `reading`) and `cover_url`.
 
+#### PUT /api/v1/documents/{document}/dates
+
+Manual reading dates: `{"start_date": "2026-08-11", "finished_date": "2026-08-16"}` as calendar dates
+(`YYYY-MM-DD`, no later than tomorrow). An omitted field is left alone; `null` clears it back to the
+CrossInk / sync-history date. A start after the finish is a `400`. Manual dates win over device and
+derived dates in `/stats/activity` (which flags them with `start_manual` / `finish_manual`). Setting a
+finish date also marks the book `finished` and fans out a finished event dated that day. Response:
+`{"document", "start_date", "finished_date", "status"}` with dates as unix seconds at UTC midnight.
+
 #### GET /api/v1/documents/{document}/cover
 
 `{"url": "https://..." | null, "pages": 433 | null}`: cover URL and print-edition page count,

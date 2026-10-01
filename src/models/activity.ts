@@ -14,6 +14,7 @@
  * - Finished = first sync at >= 98%, unless a manual status says otherwise.
  *   A device-reported finish date (CrossInk stats) wins over the sync date,
  *   since a book can be finished offline and only synced days later.
+ * - Start and finish dates the user set by hand win over everything else.
  */
 export const FINISHED_AT = 0.98;
 
@@ -27,6 +28,9 @@ export interface DocInfo {
   page_count: number | null;
   status: string | null;
   status_at: number | null;
+  /** Dates the user set by hand: unix seconds at UTC midnight of the calendar day. */
+  start_date?: number | null;
+  finished_date?: number | null;
 }
 
 export interface BookActivity {
@@ -40,6 +44,9 @@ export interface BookActivity {
   /** Calendar days from start to finish, counting both (a one-day read is 1). Null when
    *  unfinished, finished only by a manual status, or already finished on its first sync. */
   days_to_finish: number | null;
+  /** Whether started_at / finished_at are dates the user set by hand. */
+  start_manual: boolean;
+  finish_manual: boolean;
 }
 
 export interface Activity {
@@ -113,17 +120,19 @@ export function computeActivity(
       b.to = max;
       if (logFinish === null && max >= FINISHED_AT) logFinish = r.at;
     }
-    const deviceFinish = localNoon(finishedDates.get(document));
+    // A finish date the user set, else the device's.
+    const manualFinish = localNoon(info?.finished_date ?? undefined);
+    const datedFinish = manualFinish ?? localNoon(finishedDates.get(document));
     const finished =
       info?.status == null
-        ? (deviceFinish ?? logFinish)
+        ? (datedFinish ?? logFinish)
         : info.status === 'finished'
-          ? (deviceFinish ?? logFinish ?? info.status_at)
+          ? (datedFinish ?? logFinish ?? info.status_at)
           : null;
     // Finished offline on a day the book never synced: still give that day a
     // timeline entry (no syncs, so it isn't counted as a reading day).
-    if (deviceFinish !== null && finished === deviceFinish) {
-      const key = dayKey(deviceFinish);
+    if (datedFinish !== null && finished === datedFinish) {
+      const key = dayKey(datedFinish);
       let d = days.get(key);
       if (!d) days.set(key, (d = { pages: 0, syncs: 0, books: new Map() }));
       if (!d.books.has(document)) {
@@ -133,13 +142,14 @@ export function computeActivity(
     }
     const pagesRead = pageCount ? Math.round(max * pageCount) : null;
     pagesTotal += pagesRead ?? 0;
-    // CrossInk's start date when it has one: a book is often read before it ever syncs.
-    const deviceStart = localNoon(startDates.get(document));
-    const started = deviceStart ?? list[0].at;
+    // A start date the user set, else CrossInk's: a book is often read before it ever syncs.
+    const manualStart = localNoon(info?.start_date ?? undefined);
+    const datedStart = manualStart ?? localNoon(startDates.get(document));
+    const started = datedStart ?? list[0].at;
     let daysToFinish: number | null = null;
     // A manual "finished" (status_at) marks when it was tapped, not when it was read.
-    const realFinish = finished !== null && (finished === deviceFinish || finished === logFinish);
-    if (realFinish && (deviceStart !== null || finished > started)) {
+    const realFinish = finished !== null && (finished === datedFinish || finished === logFinish);
+    if (realFinish && (datedStart !== null || finished > started)) {
       const days = (Date.parse(dayKey(finished)) - Date.parse(dayKey(started))) / 86400000 + 1;
       if (days >= 1) daysToFinish = days;
     }
@@ -152,6 +162,8 @@ export function computeActivity(
       page_count: pageCount,
       pages_read: pagesRead,
       days_to_finish: daysToFinish,
+      start_manual: manualStart !== null,
+      finish_manual: manualFinish !== null && finished === manualFinish,
     });
   }
 

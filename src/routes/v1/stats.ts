@@ -204,7 +204,7 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     const docs = new Map(
       (
         db
-          .prepare('SELECT document, page_count, status, status_at FROM documents WHERE user_id = ?')
+          .prepare('SELECT document, page_count, status, status_at, start_date, finished_date FROM documents WHERE user_id = ?')
           .all(user.id) as unknown as (DocInfo & { document: string })[]
       ).map((d) => [d.document, d])
     );

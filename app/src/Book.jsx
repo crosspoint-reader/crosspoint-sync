@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, Hash, MoreHorizontal, Split, Trash2, Image as ImageIcon, Loader2, Merge, Quote, Search, Share2, Star, X } from 'lucide-react'
+import { ArrowLeft, CalendarDays, Hash, MoreHorizontal, Split, Trash2, Image as ImageIcon, Loader2, Merge, Quote, Search, Share2, Star, X } from 'lucide-react'
 import { api, isApp } from './api.js'
 import { renderCard } from './shareCard.js'
 import { isPace, moodEmoji } from './moods.js'
@@ -67,15 +67,16 @@ function Stats({ session, doc, aliases, activity: a, wide = false }) {
       ['Time read', duration(c.seconds)],
       ['Sessions', c.sessions],
       ['Pages turned', c.pages],
-      ['Started', calendarDate(c.start_date)],
-      ['Finished', calendarDate(c.finished_date)],
+      // Dates set by hand win over the device's.
+      ['Started', a?.start_manual ? date(a.started_at) : calendarDate(c.start_date)],
+      ['Finished', a?.finish_manual ? date(a.finished_at) : calendarDate(c.finished_date)],
     ]
   } else if (a) {
-    const days = Math.max(1, Math.round(((a.finished_at ?? Date.now() / 1000) - a.started_at) / 86400))
+    const days = a.days_to_finish ?? Math.max(1, Math.round(((a.finished_at ?? Date.now() / 1000) - a.started_at) / 86400))
     cells = [
       ['Print pages', a.page_count ? `${a.pages_read} of ${a.page_count}` : 'Unknown'],
       [a.finished_at ? 'Took' : 'Reading for', `${days} ${days === 1 ? 'day' : 'days'}`],
-      ['First synced', date(a.started_at)],
+      [a.start_manual ? 'Started' : 'First synced', date(a.started_at)],
       ['Finished', date(a.finished_at)],
     ]
   } else return null
@@ -386,9 +387,92 @@ function MergePicker({ session, book, books, onDone, onClose }) {
 }
 
 // The ⋯ menu: fix what the automatic lookups got wrong, fold duplicates together, or remove the book.
-function BookMenu({ session, book, books, onChange }) {
+// A local calendar date as an <input type="date"> value. Activity dates are
+// pinned to local noon, so the local date is the intended day.
+const dateInput = (unix) => {
+  if (!unix) return ''
+  const d = new Date(unix * 1000)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function DatesSheet({ session, book, activity: a, onDone, onClose }) {
+  const initial = { start_date: dateInput(a?.started_at), finished_date: dateInput(a?.finished_at) }
+  const [form, setForm] = useState(initial)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+  const today = dateInput(Date.now() / 1000)
+  async function send(dates) {
+    setSaving(true)
+    setError(null)
+    try {
+      await api.setDates(session, book.document, dates)
+      onDone()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+  function save(e) {
+    e.preventDefault()
+    if (form.start_date && form.finished_date && form.start_date > form.finished_date) {
+      return setError('The start date is after the finish date.')
+    }
+    // Only what changed: untouched dates keep following the reader.
+    const changed = Object.fromEntries(Object.keys(form).filter((k) => form[k] !== initial[k]).map((k) => [k, form[k] || null]))
+    if (!Object.keys(changed).length) return onClose()
+    send(changed)
+  }
+  const input = (key, label) => (
+    <label className="block">
+      <span className="text-xs font-medium text-stone-500">{label}</span>
+      <input
+        type="date"
+        value={form[key]}
+        max={today}
+        onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+        className={`${field} mt-1`}
+      />
+    </label>
+  )
+  return (
+    <Sheet title="Reading dates" onClose={onClose}>
+      <p className="mt-1 text-sm text-stone-500">
+        Dates you set here win over your reader&apos;s. Setting a finish date marks the book finished.
+      </p>
+      <form onSubmit={save} className="mt-4 space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          {input('start_date', 'Started')}
+          {input('finished_date', 'Finished')}
+        </div>
+        {error && (
+          <p role="alert" className="text-sm text-red-600">
+            {error}
+          </p>
+        )}
+        <div className="flex gap-2 pt-1">
+          {(a?.start_manual || a?.finish_manual) && (
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => send({ start_date: null, finished_date: null })}
+              className="h-11 rounded-xl px-4 text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100 disabled:opacity-60"
+            >
+              Use reader&apos;s dates
+            </button>
+          )}
+          <button disabled={saving} className="ml-auto h-11 shrink-0 rounded-xl bg-brand-500 px-5 text-sm font-semibold text-white disabled:opacity-60">
+            Save
+          </button>
+        </div>
+      </form>
+    </Sheet>
+  )
+}
+
+function BookMenu({ session, book, books, activity, onChange }) {
   const [menu, setMenu] = useState(false)
-  const [open, setOpen] = useState(null) // 'cover' | 'pages' | 'merge'
+  const [open, setOpen] = useState(null) // 'cover' | 'pages' | 'dates' | 'merge'
   const [pages, setPages] = useState(book.page_count ?? '')
   const [saving, setSaving] = useState(false)
   const dupes = books.filter((b) => looksLikeSame(book, b)).length
@@ -455,6 +539,7 @@ function BookMenu({ session, book, books, onChange }) {
           <div className="fixed inset-0 z-30" onClick={() => setMenu(false)} />
           <div role="menu" className="absolute top-12 right-0 z-30 w-64 divide-y divide-stone-100 overflow-hidden rounded-xl bg-surface shadow-lg ring-1 ring-stone-950/10">
             {item(ImageIcon, 'Change cover', () => setOpen('cover'))}
+            {item(CalendarDays, 'Reading dates', () => setOpen('dates'))}
             {item(Hash, 'Print pages', () => setOpen('pages'), <span className="ml-auto font-mono text-xs text-stone-500">{book.page_count ?? '?'}</span>)}
             {item(
               Merge,
@@ -469,6 +554,7 @@ function BookMenu({ session, book, books, onChange }) {
         </>
       )}
       {open === 'cover' && <CoverPicker session={session} book={book} onDone={done} onClose={() => setOpen(null)} />}
+      {open === 'dates' && <DatesSheet session={session} book={book} activity={activity} onDone={done} onClose={() => setOpen(null)} />}
       {open === 'merge' && <MergePicker session={session} book={book} books={books} onDone={done} onClose={() => setOpen(null)} />}
       {open === 'pages' && (
         <Sheet title="Print pages" onClose={() => setOpen(null)}>
@@ -658,7 +744,7 @@ export default function Book({ session, book, books, activity, onChange }) {
         >
           <ArrowLeft className="size-6" strokeWidth={2} /> Library
         </a>
-        <BookMenu key={`${book.document}-${book.page_count}`} session={session} book={book} books={books} onChange={onChange} />
+        <BookMenu key={`${book.document}-${book.page_count}`} session={session} book={book} books={books} activity={activity} onChange={onChange} />
       </div>
       {/* One column at every size: the book up top, its cards two-up on wide screens, clippings below. */}
       <div className="md:mt-4">

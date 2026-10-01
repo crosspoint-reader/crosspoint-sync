@@ -15,6 +15,19 @@ import { fetchTransport } from '../../connectors/registry.js';
 const MAX_BATCH = 50;
 export const STATUSES = ['reading', 'finished', 'dnf', 'paused'] as const;
 
+const DAY = 86400;
+
+/** 'YYYY-MM-DD' -> unix seconds at UTC midnight; null clears; undefined = invalid.
+ *  Rejects impossible dates (2026-02-30) and anything past tomorrow. */
+export function parseCalendarDate(v: unknown): number | null | undefined {
+  if (v === null) return null;
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return undefined;
+  const ms = Date.parse(`${v}T00:00:00Z`);
+  if (!Number.isFinite(ms) || new Date(ms).toISOString().slice(0, 10) !== v) return undefined;
+  const at = ms / 1000;
+  return at > nowSeconds() + DAY ? undefined : at;
+}
+
 export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
@@ -137,6 +150,64 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     ).run(user.id, document, status as string | null, now, now);
     if (status === 'finished') fanOutProgress(db, user.id, document, 1, now);
     return c.json({ document, status, status_at: now });
+  });
+
+  // Manual reading dates as YYYY-MM-DD calendar dates; null clears one back to the
+  // device's (CrossInk) or the sync history's date, an omitted field is left alone.
+  // Setting a finish date marks the book finished, like the status button.
+  app.put('/documents/:document/dates', async (c) => {
+    const param = c.req.param('document');
+    let body: Record<string, unknown> | null;
+    try {
+      body = await c.req.json();
+    } catch {
+      return kosyncError(c, 403, 2003, 'Invalid request');
+    }
+    if (!isValidDocument(param) || typeof body !== 'object' || body === null) {
+      return kosyncError(c, 403, 2003, 'Invalid request');
+    }
+    const fields = ['start_date', 'finished_date'] as const;
+    const parsed: Partial<Record<(typeof fields)[number], number | null>> = {};
+    for (const f of fields) {
+      if (!(f in body)) continue;
+      const date = parseCalendarDate(body[f]);
+      if (date === undefined) return kosyncError(c, 403, 2003, 'Invalid request');
+      parsed[f] = date;
+    }
+    const user = c.get('user');
+    const document = resolveDocument(db, user.id, param);
+    const now = nowSeconds();
+    const stored = db
+      .prepare('SELECT status, start_date, finished_date FROM documents WHERE user_id = ? AND document = ?')
+      .get(user.id, document) as { status: string | null; start_date: number | null; finished_date: number | null } | undefined;
+    const start = 'start_date' in parsed ? parsed.start_date! : (stored?.start_date ?? null);
+    const finished = 'finished_date' in parsed ? parsed.finished_date! : (stored?.finished_date ?? null);
+    if (start !== null && finished !== null && start > finished) {
+      return c.json({ code: 2003, message: 'The start date is after the finish date' }, 400);
+    }
+    const markFinished = parsed.finished_date != null && stored?.status !== 'finished';
+    db.prepare(
+      `INSERT INTO documents (user_id, document, start_date, finished_date, status, status_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id, document) DO UPDATE SET
+         start_date = excluded.start_date,
+         finished_date = excluded.finished_date,
+         status = CASE WHEN ? THEN 'finished' ELSE documents.status END,
+         status_at = CASE WHEN ? THEN excluded.status_at ELSE documents.status_at END`
+    ).run(
+      user.id,
+      document,
+      start,
+      finished,
+      markFinished ? 'finished' : null,
+      markFinished ? now : null,
+      now,
+      markFinished ? 1 : 0,
+      markFinished ? 1 : 0
+    );
+    // Midday UTC on the chosen day, so services that take a date get that day.
+    if (markFinished) fanOutProgress(db, user.id, document, 1, finished! + 12 * 3600);
+    return c.json({ document, start_date: start, finished_date: finished, status: markFinished ? 'finished' : (stored?.status ?? null) });
   });
 
   app.get('/documents/:document/cover', async (c) => {
