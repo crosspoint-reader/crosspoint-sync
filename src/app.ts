@@ -1,9 +1,11 @@
+import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { DB } from './db/db.js';
 import type { Config } from './config.js';
 import { sessionOrKeyAuth, type AppEnv } from './auth/middleware.js';
 import { kosyncRoutes } from './routes/kosync.js';
+import { meRoutes } from './routes/v1/me.js';
 import { authRoutes } from './routes/auth.js';
 import { accountRoutes } from './routes/account.js';
 import { webRoutes } from './routes/web.js';
@@ -46,6 +48,22 @@ export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<A
 
   app.get('/healthz', (c) => c.json({ status: 'ok', version: VERSION }));
 
+  // The full CrossPoint Sync app (same build as the phone/desktop app) at /app/.
+  // WEB_APP_DIR is set in the Docker image; locally it falls back to app/dist.
+  const webApp = process.env.WEB_APP_DIR ?? 'app/dist';
+  app.get('/app', (c) => c.redirect('/app/'));
+  app.use(
+    '/app/*',
+    serveStatic({
+      root: webApp,
+      rewriteRequestPath: (p) => p.replace(/^\/app/, ''),
+      onFound: (path, c) => {
+        // Vite fingerprints assets; index.html must always be fresh.
+        c.header('Cache-Control', path.endsWith('.html') ? 'no-cache' : 'public, max-age=31536000, immutable');
+      },
+    })
+  );
+
   // Web UI (landing / account pages).
   app.route('/', webRoutes());
 
@@ -67,6 +85,7 @@ export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<A
   v1.route('/', statsRoutes(db, opts.connectorTransport));
   v1.route('/', documentRoutes(db, opts.connectorTransport));
   v1.route('/', connectorRoutes(db, opts.connectorTransport, config.trustProxy));
+  v1.route('/', meRoutes(db));
   // Self-host-only Amazon device registration (off unless explicitly enabled).
   if (config.kindleServerRegistration) {
     v1.route('/', kindleRegisterRoutes(db, opts.connectorTransport, config.trustProxy));

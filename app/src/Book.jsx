@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, Hash, Image as ImageIcon, Loader2, Merge, Search, Share2, Star, X } from 'lucide-react'
-import { api } from './api.js'
+import { ArrowLeft, Hash, Trash2, Image as ImageIcon, Loader2, Merge, Quote, Search, Share2, Star, X } from 'lucide-react'
+import { api, isApp } from './api.js'
 import { renderCard } from './shareCard.js'
 import { isPace, moodEmoji } from './moods.js'
 import ShareSheet from './ShareSheet.jsx'
-import { STATUS, Card, Cover, ErrorNote, ProgressBar, Spinner, ago, duration, pct, useLoad } from './ui.jsx'
+import { Picker } from './Settings.jsx'
+import { STATUS, Card, Cover, EmptyState, ErrorNote, ProgressBar, Spinner, ViaHardcover, ago, duration, notify, pct, useLoad } from './ui.jsx'
 
 const date = (unix) =>
   unix ? new Date(unix * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : null
@@ -98,7 +99,13 @@ function Clippings({ session, book }) {
   const [sharing, setSharing] = useState(null)
   if (error) return <ErrorNote error={error} />
   if (!items) return <Spinner />
-  if (!items.length) return <p className="py-8 text-center text-sm text-stone-500">No clippings for this book yet.</p>
+  if (!items.length) {
+    return (
+      <EmptyState compact icon={Quote} title="No clippings from this book yet">
+        Highlight passages on your reader and they collect here.
+      </EmptyState>
+    )
+  }
   let chapter = null
   return (
     <div className="space-y-3">
@@ -186,7 +193,9 @@ function CoverPicker({ session, book, onDone, onClose }) {
       ) : !items ? (
         <Spinner />
       ) : items.length === 0 ? (
-        <p className="mt-6 text-center text-sm text-stone-500">No covers found. Try another search or paste an image link.</p>
+        <EmptyState compact icon={ImageIcon} title="No covers found">
+          Try another search, or paste an image link.
+        </EmptyState>
       ) : (
         <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-4">
           {items.map((c) => (
@@ -324,6 +333,21 @@ function BookTools({ session, book, books, onChange }) {
           </button>
         </div>
       )}
+      <button
+        onClick={async () => {
+          if (!confirm(`Remove "${book.title || 'this book'}" from your library? Its progress, clippings and stats are deleted. A reader that still has it will sync it again.`)) return
+          try {
+            await api.removeBook(session, book.document)
+            location.hash = '#/'
+            onChange()
+          } catch (e) {
+            notify({ error: true, title: "Couldn't remove the book", detail: e.message })
+          }
+        }}
+        className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-red-600 active:bg-stone-50"
+      >
+        <Trash2 className="size-4" /> Remove from library
+      </button>
       {open === 'cover' && <CoverPicker session={session} book={book} onDone={done} onClose={() => setOpen(null)} />}
       {open === 'merge' && <MergePicker session={session} book={book} books={books} onDone={done} onClose={() => setOpen(null)} />}
     </Card>
@@ -367,16 +391,56 @@ function Details({ book }) {
           <p className="mt-1.5 text-stone-600">{warnings.join(', ')}</p>
         </details>
       )}
-      {book.hardcover_slug && (
-        <a href={`https://hardcover.app/books/${book.hardcover_slug}`} target="_blank" rel="noreferrer" className="block text-xs text-stone-400">
-          From Hardcover
-        </a>
-      )}
     </Card>
   )
 }
 
 // The book's description (from Hardcover), clamped with Read more when it's long.
+// Where this book syncs to: its match at each linked service, fixable in place.
+function Services({ session, book }) {
+  const [data, , reload] = useLoad(() => api.bookMatches(session, book.document), [book.document], `matches ${book.document}`)
+  const [picking, setPicking] = useState(null)
+  if (!data?.length) return null
+  return (
+    <Card className="mt-4 py-2">
+      <p className="px-4 pt-2 text-xs font-medium text-stone-500">Connected services</p>
+      {data.map((m) => (
+        <div key={m.id} className="px-4 py-2">
+          <div className="flex items-center gap-3">
+            <img src={`${session.server}/icons/${m.id}.png`} alt="" className="size-7 shrink-0 rounded-md bg-stone-100" onError={(e) => (e.currentTarget.style.visibility = 'hidden')} />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-stone-900">{m.name}</p>
+              <p className={`truncate text-xs ${m.matched ? 'text-stone-500' : m.source === 'manual' ? 'text-stone-500' : 'text-amber-700'}`}>
+                {m.matched ? (m.source === 'manual' ? 'Matched by you' : 'Matched') : m.source === 'manual' ? 'Not syncing' : 'Not matched'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPicking(picking === m.id ? null : m.id)}
+              className="h-8 shrink-0 rounded-full px-3 text-sm font-semibold text-brand-600 ring-1 ring-brand-200 active:bg-brand-50"
+            >
+              {picking === m.id ? 'Cancel' : m.matched ? 'Change' : 'Match'}
+            </button>
+          </div>
+          {m.push_note && <p className="mt-1 text-xs text-amber-700">{m.push_note}</p>}
+          {picking === m.id && (
+            <Picker
+              session={session}
+              id={m.id}
+              name={m.name}
+              book={book}
+              onDone={() => {
+                setPicking(null)
+                reload()
+              }}
+            />
+          )}
+        </div>
+      ))}
+    </Card>
+  )
+}
+
 function About({ session, book }) {
   const [data] = useLoad(() => api.about(session, book.document), [book.document], `about ${book.document}`)
   const [open, setOpen] = useState(false)
@@ -389,7 +453,8 @@ function About({ session, book }) {
   }, [description])
   if (!description) return null
   return (
-    <Card className="mt-4 p-4">
+    <Card className="relative mt-4 p-4">
+      <ViaHardcover slug={book.hardcover_slug} />
       <p className="text-xs font-medium text-stone-500">About this book</p>
       <p ref={text} className={`mt-1.5 text-sm/6 whitespace-pre-line text-stone-700 ${open ? '' : 'line-clamp-6'}`}>
         {description}
@@ -414,7 +479,7 @@ function NextInSeries({ session, book }) {
   // titles, so adding the author turns a hit into no results.
   const query = next.title
   return (
-    <Card className="mt-4 p-4">
+    <Card className="relative mt-4 p-4">
       <p className="text-xs font-medium text-stone-500">Next in {data.series ?? book.series}</p>
       <div className="mt-2 flex gap-3">
         {next.cover ? (
@@ -428,12 +493,14 @@ function NextInSeries({ session, book }) {
             Book {Number.isInteger(next.position) ? next.position : next.position.toFixed(1)}
             {next.year ? ` · ${next.year}` : ''}
           </p>
-          <a
-            href={`#/browse/search/${encodeURIComponent(query)}`}
-            className="mt-2 inline-flex h-9 items-center gap-1.5 rounded-full bg-brand-500 px-3.5 text-xs font-semibold text-white transition active:scale-[0.98]"
-          >
-            <Search className="size-3.5" strokeWidth={2.25} /> Find it in your catalogs
-          </a>
+          {isApp && (
+            <a
+              href={`#/browse/search/${encodeURIComponent(query)}`}
+              className="mt-2 inline-flex h-9 items-center gap-1.5 rounded-full bg-brand-500 px-3.5 text-xs font-semibold text-white transition active:scale-[0.98]"
+            >
+              <Search className="size-3.5" strokeWidth={2.25} /> Find it in your catalogs
+            </a>
+          )}
         </div>
       </div>
     </Card>
@@ -486,6 +553,7 @@ export default function Book({ session, book, books, activity, onChange }) {
           <NextInSeries session={session} book={book} />
           <Details book={book} />
           <Stats session={session} doc={book.document} activity={activity} />
+          <Services session={session} book={book} />
           <BookTools key={`${book.document}-${book.page_count}`} session={session} book={book} books={books} onChange={onChange} />
         </aside>
 

@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChartColumn, CloudOff, Compass, Quote, Eye, EyeOff, LibraryBig, Loader2, Lock, LogOut, Monitor, Moon, Send as SendIcon, Server, Settings, Sun, User } from 'lucide-react'
+import { ChartColumn, CloudOff, Compass, Quote, Eye, EyeOff, LibraryBig, Loader2, Lock, Send as SendIcon, Server, Settings as SettingsIcon, User } from 'lucide-react'
 import { useTheme } from './theme.js'
-import { DEFAULT_SERVER, api, lastServer, loadSession, login, logout, offline } from './api.js'
-import { ErrorNote, Spinner, Toaster, useLoad } from './ui.jsx'
+import { DEFAULT_SERVER, api, hostedServer, isApp, lastServer, loadSession, login, logout, offline, cached, register, saveSession } from './api.js'
+import { ErrorNote, PageSkeleton, RefreshPill, Toaster, useLoad } from './ui.jsx'
 import Library from './Library.jsx'
 import Book from './Book.jsx'
 import Stats from './Stats.jsx'
 import Send from './Send.jsx'
 import Wallpaper from './Wallpaper.jsx'
+import Settings, { Matches } from './Settings.jsx'
 import Browse from './Browse.jsx'
 import Clippings from './Clippings.jsx'
 import { updateWidget } from './widget.js'
@@ -34,6 +35,7 @@ function Login({ onLogin }) {
     return { selfHosted: server !== DEFAULT_SERVER, server: server === DEFAULT_SERVER ? '' : server, username: '', password: '' }
   })
   const [showPassword, setShowPassword] = useState(false)
+  const [creating, setCreating] = useState(false) // create an account instead of signing in
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
   const passwordRef = useRef(null)
@@ -52,7 +54,9 @@ function Login({ onLogin }) {
     setBusy(true)
     setError(null)
     try {
-      onLogin(await login(form.selfHosted ? form.server : DEFAULT_SERVER, form.username, form.password))
+      const server = hostedServer ?? (form.selfHosted ? form.server : DEFAULT_SERVER)
+      if (creating && form.password.length < 4) throw new Error('Pick a password of at least 4 characters.')
+      onLogin(await (creating ? register : login)(server, form.username, form.password))
     } catch (err) {
       setError(err.status === 401 ? 'Wrong username or password.' : err.message)
     }
@@ -62,10 +66,10 @@ function Login({ onLogin }) {
   return (
     <div className="flex min-h-dvh flex-col bg-stone-50 md:flex-row">
       <div className="relative m-3 h-[36dvh] min-h-60 shrink-0 overflow-hidden rounded-[28px] bg-brand-900 md:m-4 md:h-auto md:flex-1">
-        <img src="/hero.jpg" alt="" className="absolute inset-0 size-full object-cover" />
+        <img src={`${import.meta.env.BASE_URL}hero.jpg`} alt="" className="absolute inset-0 size-full object-cover" />
         <div className="absolute inset-0 bg-gradient-to-t from-brand-950/95 via-brand-950/40 to-transparent" />
         <div className="absolute inset-x-0 bottom-0 p-6 md:p-10">
-          <img src="/logo.png" alt="" className="size-12 rounded-xl ring-1 ring-white/20 md:size-14" />
+          <img src={`${import.meta.env.BASE_URL}logo.png`} alt="" className="size-12 rounded-xl ring-1 ring-white/20 md:size-14" />
           <p className="mt-4 inline-block -rotate-1 font-hand text-2xl/7 text-brand-200">Your reading, everywhere</p>
           <h1 className="font-display text-3xl/tight font-semibold tracking-tight text-white md:text-5xl/tight">CrossPoint Sync</h1>
           <p className="mt-2 hidden max-w-md text-base/7 text-white/75 md:block">
@@ -78,9 +82,12 @@ function Login({ onLogin }) {
         onSubmit={submit}
         className="flex flex-1 flex-col px-5 pt-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:max-w-md md:justify-center md:px-10 lg:max-w-lg lg:px-16"
       >
-        <h2 className="font-display text-2xl font-semibold text-stone-900">Sign in</h2>
-        <p className="mt-1 text-sm/6 text-stone-500">Use the username and password from CrossPoint Sync on your reader.</p>
+        <h2 className="font-display text-2xl font-semibold text-stone-900">{creating ? 'Create your account' : 'Sign in'}</h2>
+        <p className="mt-1 text-sm/6 text-stone-500">
+          {creating ? 'Pick a username and password, then use the same ones in CrossPoint Sync on your reader.' : 'Use the username and password from CrossPoint Sync on your reader.'}
+        </p>
 
+        {!hostedServer && (
         <div className="mt-5 grid grid-cols-2 gap-1 rounded-2xl bg-stone-200/60 p-1">
           {[
             [false, 'CrossPoint'],
@@ -98,9 +105,10 @@ function Login({ onLogin }) {
             </button>
           ))}
         </div>
+        )}
 
         <div className="mt-3 space-y-3">
-          {form.selfHosted ? (
+          {hostedServer ? null : form.selfHosted ? (
             <Field
               icon={Server}
               value={form.server}
@@ -160,10 +168,20 @@ function Login({ onLogin }) {
             disabled={busy}
             className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-brand-500 text-base font-semibold text-white shadow-sm transition active:scale-[0.98] active:bg-brand-600 disabled:opacity-60"
           >
-            {busy ? <Loader2 className="size-5 animate-spin" /> : 'Sign in'}
+            {busy ? <Loader2 className="size-5 animate-spin" /> : creating ? 'Create account' : 'Sign in'}
           </button>
-          <p className="mt-4 text-center text-xs/5 text-stone-500">
-            No account yet? Create one on your reader under Settings, CrossPoint Sync.
+          <p className="mt-4 text-center text-sm text-stone-500">
+            {creating ? 'Already have an account?' : 'No account yet?'}{' '}
+            <button
+              type="button"
+              onClick={() => {
+                setCreating(!creating)
+                setError(null)
+              }}
+              className="font-semibold text-brand-600"
+            >
+              {creating ? 'Sign in' : 'Create one'}
+            </button>
           </p>
         </div>
       </form>
@@ -185,11 +203,12 @@ function useHash() {
 }
 
 const NAV = [
-  { href: '#/', label: 'Library', icon: LibraryBig, active: (r) => !['stats', 'send', 'browse', 'clippings'].includes(r) },
-  { href: '#/browse', label: 'Browse', icon: Compass, active: (r) => r === 'browse' },
+  { href: '#/', label: 'Library', icon: LibraryBig, active: (r) => !['stats', 'send', 'browse', 'clippings', 'settings'].includes(r) },
+  // Browse and Send need the app (catalog access and the reader on your Wi-Fi), so the web leaves them out.
+  ...(isApp ? [{ href: '#/browse', label: 'Browse', icon: Compass, active: (r) => r === 'browse' }] : []),
   { href: '#/clippings', label: 'Clippings', icon: Quote, active: (r) => r === 'clippings' },
   { href: '#/stats', label: 'Stats', icon: ChartColumn, active: (r) => r === 'stats' },
-  { href: '#/send', label: 'Send', icon: SendIcon, active: (r) => r === 'send' },
+  ...(isApp ? [{ href: '#/send', label: 'Send', icon: SendIcon, active: (r) => r === 'send' }] : []),
 ]
 
 // Phone: bottom tab bar.
@@ -210,87 +229,29 @@ function TabBar({ route }) {
   )
 }
 
-// Appearance: follow the system, or force light or dark.
-const THEMES = [
-  ['system', 'System', Monitor],
-  ['light', 'Light', Sun],
-  ['dark', 'Dark', Moon],
-]
-function Appearance({ theme: [pref, setPref], className = '' }) {
+// Phone: settings gear top right, opening the Settings page.
+function SettingsLink({ active }) {
   return (
-    <div className={`grid grid-cols-3 gap-1 rounded-xl bg-stone-200/60 p-1 ${className}`} role="radiogroup" aria-label="Appearance">
-      {THEMES.map(([v, label, Icon]) => (
-        <button
-          key={v}
-          type="button"
-          role="radio"
-          aria-checked={pref === v}
-          onClick={() => setPref(v)}
-          className={`flex h-9 flex-col items-center justify-center rounded-lg text-[0.7rem] font-semibold transition ${
-            pref === v ? 'bg-raised text-stone-900 shadow-sm' : 'text-stone-500 active:bg-stone-200'
-          }`}
-        >
-          <Icon className="size-3.5" strokeWidth={2} />
-          {label}
-        </button>
-      ))}
-    </div>
-  )
-}
-
-// Phone: account icon top right; tapping opens a small menu so sign out is one deliberate step away.
-function AccountMenu({ session, onLogout, theme }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="absolute top-4 right-3 z-20 md:hidden">
-      <button
-        onClick={() => setOpen(!open)}
-        className="grid size-11 place-items-center rounded-full text-stone-600 active:bg-stone-200/70"
-        aria-label="Settings"
-        aria-expanded={open}
-      >
-        <Settings className="size-6" strokeWidth={1.75} />
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 mt-1 w-64 overflow-hidden rounded-2xl bg-surface shadow-lg ring-1 ring-stone-950/10">
-            <div className="px-4 py-3">
-              <p className="truncate text-sm font-semibold text-stone-900">{session.username}</p>
-              <p className="truncate font-mono text-xs text-stone-500">{new URL(session.server).host}</p>
-            </div>
-            <div className="border-t border-stone-100 px-3 py-3">
-              <Appearance theme={theme} />
-            </div>
-            <a
-              href="#/browse/manage"
-              onClick={() => setOpen(false)}
-              className="flex w-full items-center gap-3 border-t border-stone-100 px-4 py-3 text-sm font-medium text-stone-700 active:bg-stone-50"
-            >
-              <Server className="size-4" strokeWidth={1.75} />
-              Catalogs
-            </a>
-            <button
-              onClick={onLogout}
-              className="flex w-full items-center gap-3 border-t border-stone-100 px-4 py-3 text-sm font-medium text-red-600 active:bg-stone-50"
-            >
-              <LogOut className="size-4" strokeWidth={1.75} />
-              Sign out
-            </button>
-          </div>
-        </>
-      )}
-    </div>
+    <a
+      href="#/settings"
+      aria-label="Settings"
+      aria-current={active ? 'page' : undefined}
+      className={`absolute top-4 right-3 z-20 grid size-11 place-items-center rounded-full active:bg-stone-200/70 md:hidden ${
+        active ? 'text-brand-600' : 'text-stone-600'
+      }`}
+    >
+      <SettingsIcon className="size-6" strokeWidth={1.75} />
+    </a>
   )
 }
 
 // iPad / desktop: sidebar.
-function Sidebar({ route, session, onLogout, theme }) {
+function Sidebar({ route, session }) {
   return (
     <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r border-stone-200 bg-surface/60 px-4 py-6 md:flex lg:w-64">
       {/* 44px band at the top, matching each page's first row (back button / title). */}
       <div className="flex h-11 items-center gap-2.5 px-2">
-        <img src="/logo.png" alt="" className="size-8 rounded-lg" />
+        <img src={`${import.meta.env.BASE_URL}logo.png`} alt="" className="size-8 rounded-lg" />
         <span className="font-display text-lg font-semibold text-stone-900">CrossPoint Sync</span>
       </div>
       <nav className="mt-8 space-y-1">
@@ -307,27 +268,27 @@ function Sidebar({ route, session, onLogout, theme }) {
           </a>
         ))}
       </nav>
-      <div className="mt-auto border-t border-stone-200 px-2 pt-4">
-        <p className="truncate text-sm font-medium text-stone-900">{session.username}</p>
-        <p className="truncate font-mono text-xs text-stone-500">{new URL(session.server).host}</p>
-        <Appearance theme={theme} className="mt-3" />
-        <a href="#/browse/manage" className="mt-3 flex items-center gap-2 text-sm font-medium text-stone-500 hover:text-stone-900">
-          <Server className="size-4" strokeWidth={1.75} />
-          Catalogs
-        </a>
-        <button
-          onClick={onLogout}
-          className="mt-2 flex items-center gap-2 text-sm font-medium text-stone-500 hover:text-stone-900"
+      <div className="mt-auto border-t border-stone-200 pt-4">
+        <a
+          href="#/settings"
+          className={`flex items-center gap-3 rounded-lg px-3 py-2 transition ${
+            route === 'settings' ? 'bg-brand-50 text-brand-700' : 'text-stone-600 hover:bg-stone-100 hover:text-stone-900'
+          }`}
         >
-          <LogOut className="size-4" strokeWidth={1.75} />
-          Sign out
-        </button>
+          <SettingsIcon className="size-5 shrink-0" strokeWidth={1.75} />
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold">Settings</span>
+            <span className="block truncate font-mono text-xs text-stone-500">
+              {session.username} · {new URL(session.server).host}
+            </span>
+          </span>
+        </a>
       </div>
     </aside>
   )
 }
 
-function Home({ session, onLogout, theme }) {
+function Home({ session, onSession, onLogout, theme }) {
   const parts = useHash()
   // Offline: api.js serves the last saved copy and says so; show a slim notice until the network is back.
   const [isOffline, setOffline] = useState(false)
@@ -342,9 +303,10 @@ function Home({ session, onLogout, theme }) {
     }
   }, [])
   const [route, id] = parts
-  const [books, error, reloadBooks] = useLoad(() => api.books(session), [session])
-  const [summary, , reloadSummary] = useLoad(() => api.summary(session), [session])
-  const [activity, , reloadActivity] = useLoad(() => api.activity(session), [session])
+  // Start from the saved copies so launch paints the library at once, then refresh.
+  const [books, error, reloadBooks, booksLoading] = useLoad(() => api.books(session), [session], undefined, () => cached.books(session))
+  const [summary, , reloadSummary] = useLoad(() => api.summary(session), [session], undefined, () => cached.summary(session))
+  const [activity, , reloadActivity] = useLoad(() => api.activity(session), [session], undefined, () => cached.activity(session))
   useEffect(() => {
     updateWidget({ books, summary, activity })
   }, [books, summary, activity])
@@ -365,10 +327,11 @@ function Home({ session, onLogout, theme }) {
   })
 
   let page
-  if (route === 'send') page = id === 'wallpaper' ? <Wallpaper /> : <Send />
-  else if (route === 'browse') page = <Browse parts={parts} />
+  if (route === 'settings') page = id ? <Matches session={session} id={id} /> : <Settings session={session} theme={theme} onSession={onSession} onLogout={onLogout} />
+  else if (route === 'send' && isApp) page = id === 'wallpaper' ? <Wallpaper /> : <Send />
+  else if (route === 'browse' && isApp) page = <Browse parts={parts} />
   else if (error) page = <ErrorNote error={error} />
-  else if (!books) page = <Spinner />
+  else if (!books) page = <PageSkeleton route={route} />
   else if (route === 'clippings') page = <Clippings session={session} books={books} />
   else if (route === 'stats') page = <Stats session={session} tab={id} summary={summary} activity={activity} books={books} />
   else if (route === 'book') page = (
@@ -387,14 +350,15 @@ function Home({ session, onLogout, theme }) {
 
   return (
     <div className="min-h-dvh md:flex">
-      <Sidebar route={route} session={session} onLogout={onLogout} theme={theme} />
+      <Sidebar route={route} session={session} />
       <main className="relative mx-auto w-full max-w-xl pb-24 md:max-w-6xl md:pb-10">
         {isOffline && (
           <div className="sticky top-0 z-30 flex items-center justify-center gap-2 bg-stone-800 px-4 py-2 text-xs font-medium text-stone-100">
             <CloudOff className="size-3.5" /> Offline. Showing what was saved on this device.
           </div>
         )}
-        <AccountMenu key={parts.join('/')} session={session} onLogout={onLogout} theme={theme} />
+        <SettingsLink active={route === 'settings'} />
+        <RefreshPill active={booksLoading && !!books} />
         <Toaster />
         {page}
       </main>
@@ -411,6 +375,10 @@ export default function App() {
     <Home
       session={session}
       theme={theme}
+      onSession={(s) => {
+        saveSession(s)
+        setSession(s)
+      }}
       onLogout={() => {
         logout()
         setSession(null)

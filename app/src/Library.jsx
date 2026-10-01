@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { ChevronRight, Merge } from 'lucide-react'
+import { BookOpen, ChevronRight, Merge } from 'lucide-react'
+import { isApp } from './api.js'
 import { looksLikeSame } from './Book.jsx'
-import { STATUS, Card, Cover, Eyebrow, ProgressBar, ago, duration, pct } from './ui.jsx'
+import { STATUS, Card, Cover, EmptyAction, EmptyState, Eyebrow, ProgressBar, ago, duration, pct } from './ui.jsx'
 
 function greeting() {
   const now = new Date()
@@ -125,13 +126,57 @@ export default function Library({ session, books, summary, activity }) {
             ))}
           </Card>
         )}
-        {shown.length === 0 && (
-          <p className="py-16 text-center text-sm text-stone-500">
-            {books.length ? 'Nothing here yet.' : 'No synced books yet. Sync progress from your reader to see it here.'}
-          </p>
-        )}
+        {shown.length === 0 && <LibraryEmpty tab={tab} hasBooks={books.length > 0} />}
       </div>
 
     </div>
+  )
+}
+
+// What each Library tab says when it's empty, and where to go instead.
+const EMPTY = {
+  reading: {
+    note: 'Your shelf is waiting',
+    title: 'Nothing in progress',
+    body: 'Open a book on your CrossPoint and it shows up here as it syncs.',
+    action: isApp ? ['#/browse', 'Find a book'] : null,
+  },
+  paused: {
+    note: 'Taking a breather?',
+    title: 'No paused books',
+    body: 'Set a book aside from its page and it waits here until you pick it back up.',
+  },
+  finished: {
+    note: 'The best part is ahead',
+    title: 'No finished books yet',
+    body: 'Books you finish land here, along with how long each one took.',
+    action: ['#/stats', 'See your stats'],
+  },
+  dnf: {
+    note: 'Life is too short',
+    title: 'Nothing abandoned',
+    body: 'Books you stop reading go here, guilt-free. Not every book is for everyone.',
+  },
+}
+
+function LibraryEmpty({ tab, hasBooks }) {
+  if (!hasBooks) {
+    return (
+      <EmptyState
+        icon={BookOpen}
+        note="Let's get reading"
+        title="No books synced yet"
+        action={isApp ? <EmptyAction href="#/send">Send a book to your reader</EmptyAction> : null}
+      >
+        Turn on CrossPoint Sync in your reader&apos;s settings and your books appear here as you read.
+      </EmptyState>
+    )
+  }
+  const e = EMPTY[tab]
+  const status = STATUS.find((s) => s.id === tab)
+  return (
+    <EmptyState icon={status?.icon} note={e.note} title={e.title} action={e.action && <EmptyAction href={e.action[0]}>{e.action[1]}</EmptyAction>}>
+      {e.body}
+    </EmptyState>
   )
 }

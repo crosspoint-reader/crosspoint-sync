@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { BookOpen, ChevronLeft, ChevronRight, CircleCheck, Share2 } from 'lucide-react'
+import { BookOpen, CalendarDays, ChevronLeft, ChevronRight, CircleCheck, Share2 } from 'lucide-react'
 import ShareSheet from './ShareSheet.jsx'
 import { renderCalendarCard, renderStatsCard } from './shareCard.js'
-import { Card, Cover, Eyebrow, ProgressBar, duration, pct } from './ui.jsx'
+import { Card, Cover, EmptyState, Eyebrow, ProgressBar, ViaHardcover, duration, pct } from './ui.jsx'
 import { isPace, moodEmoji } from './moods.js'
 
 const WEEKS = 52 // phones show the newest 26
@@ -153,7 +153,10 @@ function WhatYouRead({ books }) {
   if (!moods.length && !genres.length) return null
   return (
     <section>
-      <h2 className="mt-10 font-display text-xl font-semibold text-stone-900">What you read</h2>
+      <div className="mt-10 flex items-baseline justify-between gap-3">
+        <h2 className="font-display text-xl font-semibold text-stone-900">What you read</h2>
+        <ViaHardcover inline />
+      </div>
       <div className="md:grid md:grid-cols-2 md:gap-4">
         {moods.length > 0 && (
           <Card className="mt-4 p-4">
@@ -173,7 +176,6 @@ function WhatYouRead({ books }) {
           </Card>
         )}
       </div>
-      <p className="mt-3 text-xs/5 text-stone-500">From Hardcover readers&apos; tags for each book. Books you didn&apos;t finish are left out.</p>
     </section>
   )
 }
@@ -622,7 +624,11 @@ function Timeline({ session, activity, books }) {
       )}
 
       {!days.length ? (
-        <p className="py-10 text-center text-sm text-stone-500">Your reading shows up here as your reader syncs.</p>
+        <div className="mt-6">
+          <EmptyState icon={CalendarDays} note="Every day counts" title="Your timeline starts soon">
+            Each day you read shows up here, book by book, as your reader syncs.
+          </EmptyState>
+        </div>
       ) : (
         <ol className="mt-8">
           {days.slice(0, shown).map((d) => {

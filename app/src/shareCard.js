@@ -81,7 +81,7 @@ export async function renderCard({ quote, title, author, chapter, coverUrl }) {
       document.fonts.load(f)
     )
   )
-  const [cover, logo] = await Promise.all([coverUrl ? loadImage(coverUrl, isApp) : null, loadImage('/logo.png', false)])
+  const [cover, logo] = await Promise.all([coverUrl ? loadImage(coverUrl, isApp) : null, loadImage(`${import.meta.env.BASE_URL}logo.png`, false)])
 
   const canvas = document.createElement('canvas')
   canvas.width = W
@@ -352,7 +352,7 @@ function moodLine(ctx, y, moods) {
 }
 
 export async function renderStatsCard({ heading, tiles, covers, weeks, moods = [] }) {
-  const [logo, ...images] = await Promise.all([loadImage('/logo.png', false), ...covers.slice(0, 5).map((u) => loadImage(u, isApp))])
+  const [logo, ...images] = await Promise.all([loadImage(`${import.meta.env.BASE_URL}logo.png`, false), ...covers.slice(0, 5).map((u) => loadImage(u, isApp))])
   const { canvas, ctx } = await statsBase(heading, tiles)
 
   // Recently finished covers, under the moods line when there is one.
@@ -413,7 +413,7 @@ export async function renderStatsCard({ heading, tiles, covers, weeks, moods = [
 // (column), `left` (row) and `bottom` (column) labels.
 const DAY_SHADES = ['#e7e5df', '#d6e5de', '#b3cfc2', '#8fb9a6', '#69917d']
 export async function renderCalendarCard({ eyebrow, heading, subtitle, tiles, blocks, moods = [] }) {
-  const logo = await loadImage('/logo.png', false)
+  const logo = await loadImage(`${import.meta.env.BASE_URL}logo.png`, false)
   const { canvas, ctx, bottom: tilesBottom } = await statsBase(heading, tiles, 3, 440, eyebrow)
   ctx.fillStyle = C.soft
   ctx.font = '400 28px "Geist Mono"'

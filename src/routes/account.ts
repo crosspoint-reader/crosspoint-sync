@@ -10,8 +10,8 @@ import { SESSION_COOKIE } from '../auth/session.js';
 import { nowSeconds } from '../models/sync.js';
 import { USERNAME_RE } from './kosync.js';
 
-/** Permanently delete a kosync user and every row of its reading data. */
-function deleteKosyncUserData(db: DB, userId: number, username: string): void {
+/** Permanently delete a kosync user's reading data, and (unless keepUser) the user. */
+export function deleteKosyncUserData(db: DB, userId: number, username: string, { keepUser = false } = {}): void {
   withTransaction(db, () => {
     for (const table of [
       'connector_queue',
@@ -29,7 +29,7 @@ function deleteKosyncUserData(db: DB, userId: number, username: string): void {
     ]) {
       db.prepare(`DELETE FROM ${table} WHERE user_id = ?`).run(userId);
     }
-    db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    if (!keepUser) db.prepare('DELETE FROM users WHERE id = ?').run(userId);
   });
   invalidateAuthCache(username);
 }

@@ -4,7 +4,7 @@ import { isApp } from './api.js'
 import { loadDevicePrefs } from './device.js'
 import { download, feed as fetchFeed, loadCatalogs, navRows, readable, saveCatalogs, search, sendDownload } from './catalogs.js'
 import { progressLabel } from './Send.jsx'
-import { Card, Eyebrow, Spinner, folderLabel, notify } from './ui.jsx'
+import { Card, EmptyAction, EmptyState, Eyebrow, Spinner, folderLabel, notify } from './ui.jsx'
 
 // Hash routes:
 //   #/browse                         storefront: a block of rails per catalog
@@ -472,9 +472,11 @@ function Storefront({ catalogs }) {
       <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">Browse</h1>
       <SearchBox placeholder="Search all catalogs" onSubmit={searchAll} />
       {catalogs.length === 0 && (
-        <Card className="mt-6 p-4 text-sm/6 text-stone-600">
-          No catalogs yet. <a href="#/browse/manage" className="font-semibold text-brand-600">Add one</a> to start browsing.
-        </Card>
+        <div className="mt-6 md:max-w-2xl">
+          <EmptyState icon={Server} note="Find your next book" title="No catalogs yet" action={<EmptyAction href="#/browse/manage">Add a catalog</EmptyAction>}>
+            Add an OPDS catalog, like Project Gutenberg or your own library, to browse books and send them to your reader.
+          </EmptyState>
+        </div>
       )}
       {catalogs.map((c) => (
         <CatalogBlock key={c.id} cat={c} />
@@ -605,7 +607,11 @@ function FeedView({ cat, url, query }) {
             </div>
           )}
 
-          {!rows.length && !loose.length && !feed.groups.length && <p className="py-16 text-center text-sm text-stone-500">Nothing here.</p>}
+          {!rows.length && !loose.length && !feed.groups.length && (
+            <EmptyState compact icon={BookOpen} title="This shelf is empty">
+              Nothing is listed here yet. Try another section of the catalog.
+            </EmptyState>
+          )}
 
           {feed.next && (
             <button

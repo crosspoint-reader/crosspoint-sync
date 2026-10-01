@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
-import { Copy, FileDown, Search, Share2 } from 'lucide-react'
+import { Copy, FileDown, Quote, Search, Share2 } from 'lucide-react'
 import { api, isApp } from './api.js'
 import { saveFile } from './shareCard.js'
 import { ClipShare } from './Book.jsx'
-import { Card, Cover, ErrorNote, Eyebrow, Spinner, useLoad } from './ui.jsx'
+import { Card, Cover, EmptyState, ErrorNote, Eyebrow, Spinner, useLoad } from './ui.jsx'
 
 const date = (unix) => new Date(unix * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 
@@ -91,7 +91,11 @@ export default function Clippings({ session, books }) {
       ) : !items ? (
         <Spinner />
       ) : all.length === 0 ? (
-        <p className="py-16 text-center text-sm text-stone-500">No clippings yet. Highlight passages on your reader and turn on clipping sync.</p>
+        <div className="mt-6 md:max-w-2xl">
+          <EmptyState icon={Quote} note="Clean margins, for now" title="No clippings yet">
+            Highlight a passage on your reader with clipping sync on, and it lands here, ready to search and share.
+          </EmptyState>
+        </div>
       ) : (
         <>
           {daily && !q && !only && (
@@ -145,7 +149,11 @@ export default function Clippings({ session, books }) {
             ))}
           </div>
 
-          {groups.length === 0 && <p className="py-12 text-center text-sm text-stone-500">No clippings match.</p>}
+          {groups.length === 0 && (
+            <EmptyState compact icon={Search} title="No clippings match">
+              Try another word, or clear the book filter.
+            </EmptyState>
+          )}
           {groups.map(({ book, clips }) => (
             <section key={book.document} className="mt-8">
               <a href={`#/book/${book.document}`} className="flex items-center gap-3">

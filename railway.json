@@ -12,7 +12,13 @@
       "tsconfig.json",
       "Dockerfile",
       ".dockerignore",
-      "railway.json"
+      "railway.json",
+      "app/src/**",
+      "app/public/**",
+      "app/index.html",
+      "app/vite.config.js",
+      "app/package.json",
+      "app/package-lock.json"
     ]
   }
 }

@@ -1,8 +1,12 @@
 import { runInNewContext } from 'node:vm';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { makeTestApp } from './helpers.js';
 
 describe('Micro.blog web setup', () => {
+  // These exercise the old server-rendered pages.
+  beforeAll(() => void (process.env.LEGACY_WEB = '1'));
+  afterAll(() => void delete process.env.LEGACY_WEB);
+
   it('lists Micro.blog on the public services page', async () => {
     const { app } = makeTestApp();
     const html = await (await app.request('/')).text();

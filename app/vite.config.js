@@ -6,6 +6,8 @@ import tailwindcss from '@tailwindcss/vite'
 const host = process.env.TAURI_DEV_HOST
 
 export default defineConfig({
+  // Relative asset URLs: the same build runs in the native app and at /app/ on the sync server.
+  base: './',
   plugins: [react(), tailwindcss()],
   clearScreen: false,
   server: {

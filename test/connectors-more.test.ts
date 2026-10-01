@@ -377,6 +377,20 @@ describe('candidates-first matching + metadata backfill', () => {
     expect(review.books).toHaveLength(1);
     expect(review.books[0]).toMatchObject({ document: DOC, title: 'Foundryside', matched: false });
   });
+
+  it("lists one book's match at each linked service, and a manual pick shows up", async () => {
+    const fake = fakeTransport();
+    const { app } = makeTestApp({}, { connectorTransport: fake.transport });
+    const { headers } = await registerUser(app);
+    await linkHardcover(app, headers, fake);
+    let r = await (await app.request(`/api/v1/documents/${DOC}/matches`, { headers })).json();
+    expect(r.services).toEqual([expect.objectContaining({ id: 'hardcover', matched: false })]);
+    await app.request(`/api/v1/connectors/hardcover/matches/${DOC}`, {
+      method: 'PUT', headers, body: JSON.stringify({ external_id: '42', external_edition: '7', title: 'Foundryside' }),
+    });
+    r = await (await app.request(`/api/v1/documents/${DOC}/matches`, { headers })).json();
+    expect(r.services[0]).toMatchObject({ id: 'hardcover', matched: true, external_id: '42', source: 'manual' });
+  });
 });
 
 describe('backfill / "Sync now"', () => {

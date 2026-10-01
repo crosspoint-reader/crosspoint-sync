@@ -7,13 +7,26 @@ COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build && npm prune --omit=dev
 
+# The CrossPoint Sync app's web build (the same React app the phone/desktop app
+# ships), served at /app/. Only the web half: no Rust/Tauri build needed.
+FROM node:24-alpine AS web
+WORKDIR /web
+COPY app/package.json app/package-lock.json ./
+RUN npm ci --ignore-scripts
+COPY app/index.html app/vite.config.js ./
+COPY app/public ./public
+COPY app/src ./src
+RUN npx vite build
+
 FROM node:24-alpine
 ENV NODE_ENV=production \
     DATABASE_PATH=/data/crosspoint.db \
-    PORT=8080
+    PORT=8080 \
+    WEB_APP_DIR=/app/web
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+COPY --from=web /web/dist ./web
 COPY migrations ./migrations
 COPY assets ./assets
 COPY extension ./extension

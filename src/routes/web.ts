@@ -328,19 +328,21 @@ async function copyWithFeedback(btn, text) {
   btn.disabled = true;
   setTimeout(() => { btn.textContent = original; btn.classList.remove('copied'); btn.disabled = false; }, 1600);
 }
+// Where to go after signing in: ?next=/kindle (same-site paths only), else the account page.
+const NEXT = (() => { const n = new URLSearchParams(location.search).get('next') || ''; return /^\/[a-z]/i.test(n) ? n : '/account'; })();
 $('copyTok').onclick = () => copyWithFeedback($('copyTok'), $('tokenVal').textContent);
 $('ksLogin').onclick = async () => {
   $('ksLoginErr').textContent = '';
   const { ok, data } = await post('/auth/login-kosync', { username: $('ksu').value.trim(), password: $('ksp').value });
   if (!ok) { $('ksLoginErr').textContent = data.error || 'Invalid credentials'; return; }
-  location.href = '/account';
+  location.href = NEXT;
 };
 $('tokToggle').onclick = (e) => { e.preventDefault(); $('tokBox').hidden = !$('tokBox').hidden; };
 $('login').onclick = async () => {
   $('liErr').textContent = '';
   const { ok, data } = await post('/auth/login', { token: $('li').value.trim() });
   if (!ok) { $('liErr').textContent = data.error || 'Invalid token'; return; }
-  location.href = '/account';
+  location.href = NEXT;
 };
 </script>`,
   true
@@ -946,6 +948,15 @@ function bindChoose(btn) {
 </script>`
 );
 
+// The landing page when the website is the app: every way in goes to /app/.
+const APP_LANDING = LANDING.replace('href="#get-started"', 'href="/app/"').replace(
+  /<div class="narrow">[\s\S]*?<p class="foot">/,
+  `<div class="narrow" style="text-align:center"><h2 id="get-started" style="${SECTION}text-align:center">Get started</h2>
+     <a href="/app/"><button class="primary">Open CrossPoint Sync</button></a>
+     <p class="muted" style="margin-top:12px">Create an account or sign in with your reader&rsquo;s sync username and password.</p></div>
+   <p class="foot">`
+).replace(/<script>[\s\S]*?<\/script>/, ''); // its sign-in forms are gone
+
 const KINDLE = shell(
   'Connect your Kindle',
   `<div style="margin-top:16px"><span class="eyebrow">Experimental</span>
@@ -984,7 +995,7 @@ const KINDLE = shell(
    </script>`
 );
 
-export function webRoutes(): Hono<AppEnv> {
+export function webRoutes(legacy = process.env.LEGACY_WEB === '1'): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   app.get('/logo.png', (c) => {
@@ -1015,6 +1026,23 @@ export function webRoutes(): Hono<AppEnv> {
     c.header('cache-control', 'public, max-age=3600');
     return c.body(new Uint8Array(zip));
   });
+
+  // By default the website is the app at /app/; these pages stay only for the
+  // Kindle connector (its browser-extension link flow). LEGACY_WEB=1 keeps the
+  // whole old site for self-hosters who prefer it.
+  if (!legacy) {
+    app.get('/', (c) => c.html(APP_LANDING));
+    app.get('/signin', (c) => c.html(LANDING));
+    app.get('/account', (c) => c.redirect('/app/#/settings'));
+    app.get('/progress', (c) => c.redirect('/app/'));
+    app.get('/link/:id', (c) => (c.req.param('id') === 'kindle' ? c.html(LINK) : c.redirect('/app/#/settings')));
+    app.get('/review/:id', (c) => (c.req.param('id') === 'kindle' ? c.html(REVIEW) : c.redirect(`/app/#/settings/${encodeURIComponent(c.req.param('id'))}`)));
+    app.get('/kindle', (c) => {
+      if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect('/signin?next=/kindle#get-started');
+      return c.html(KINDLE);
+    });
+    return app;
+  }
 
   app.get('/', (c) => {
     if (verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect('/account');

@@ -6,4 +6,7 @@ data
 test
 scripts
 docs
-app
+# The app's web half is built into the image; its native/Rust parts never are.
+app/src-tauri
+app/node_modules
+app/dist

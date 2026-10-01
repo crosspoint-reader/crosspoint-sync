@@ -4,6 +4,8 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 // In the app, requests go through Rust (plain-http LAN servers, any CORS_ORIGINS);
 // in a plain browser, the webview fetch.
 export const isApp = '__TAURI_INTERNALS__' in window
+// Served by a sync server at /app/: that server is the only one to sign in to.
+export const hostedServer = !isApp && /^https?:$/.test(location.protocol) && location.pathname.startsWith('/app') ? location.origin : null
 
 // File bytes for raw-body commands (send_bytes, save_file). Android's WebView can't
 // pass request bodies to Tauri's IPC protocol, so there the message is JSON-encoded
@@ -37,6 +39,11 @@ function read(key) {
 export const loadSession = () => read(KEY)
 export const lastServer = () => read(LAST_SERVER) ?? DEFAULT_SERVER
 
+// After a password change: the same session with the new key.
+export function saveSession(session) {
+  localStorage.setItem(KEY, JSON.stringify(session))
+}
+
 export function logout() {
   localStorage.removeItem(KEY)
 }
@@ -67,7 +74,11 @@ async function call(session, path, init = {}) {
     return JSON.parse(saved)
   }
   if (res.status === 401) throw Object.assign(new Error('Signed out'), { status: 401 })
-  if (!res.ok) throw Object.assign(new Error(`Server error ${res.status}`), { status: res.status })
+  if (!res.ok) {
+    // Keep the server's reason (e.g. "Hardcover key is missing the read:me permission").
+    const body = await res.json().catch(() => null)
+    throw Object.assign(new Error(body?.message || `Server error ${res.status}`), { status: res.status })
+  }
   const data = await res.json()
   if (isGet) {
     offline.dispatchEvent(new Event('online'))
@@ -99,6 +110,23 @@ async function resolveServer(input) {
   throw new Error(`Could not reach a CrossPoint Sync server at ${input.trim()}.`)
 }
 
+/** Create a sync account (the same registration a reader does), then sign in to it. */
+export async function register(server, username, password) {
+  const base = await resolveServer(server)
+  const res = await http(`${base}/users/create`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/vnd.koreader.v1+json' },
+    body: JSON.stringify({ username: username.trim(), password: SparkMD5.hash(password) }),
+  })
+  if (res.status !== 201) {
+    const body = await res.json().catch(() => null)
+    throw new Error(
+      res.status === 402 ? 'That username is taken.' : body?.message === 'Registration is disabled' ? 'This server does not allow new accounts.' : body?.message || `Server error ${res.status}`
+    )
+  }
+  return login(base, username, password)
+}
+
 export async function login(server, username, password) {
   const session = {
     server: await resolveServer(server),
@@ -111,9 +139,28 @@ export async function login(server, username, password) {
   return session
 }
 
+// The last saved copy of a GET (the offline cache), for painting before the network answers.
+function saved(session, path) {
+  try {
+    return JSON.parse(localStorage.getItem(`${OFFLINE}${session.username}@${session.server}${path}`))
+  } catch {
+    return null
+  }
+}
+const bookList = (r) => r.items.filter((b) => b.title || b.filename)
+
+export const cached = {
+  books: (s) => {
+    const r = saved(s, '/api/v1/progress?limit=500')
+    return r ? bookList(r) : null
+  },
+  summary: (s) => saved(s, '/api/v1/stats/summary'),
+  activity: (s) => saved(s, `/api/v1/stats/activity?tz=${new Date().getTimezoneOffset()}`),
+}
+
 export const api = {
   // Books a device synced without any metadata can't be shown meaningfully; hide them.
-  books: (s) => call(s, '/api/v1/progress?limit=500').then((r) => r.items.filter((b) => b.title || b.filename)),
+  books: (s) => call(s, '/api/v1/progress?limit=500').then(bookList),
   summary: (s) => call(s, '/api/v1/stats/summary'),
   // tz: minutes behind UTC, so the server buckets pages into local days.
   activity: (s) => call(s, `/api/v1/stats/activity?tz=${new Date().getTimezoneOffset()}`),
@@ -121,6 +168,30 @@ export const api = {
   cover: (s, doc) => call(s, `/api/v1/documents/${doc}/cover`),
   next: (s, doc) => call(s, `/api/v1/documents/${doc}/next`),
   about: (s, doc) => call(s, `/api/v1/documents/${doc}/about`),
+  // Connected services (same endpoints as the web dashboard).
+  connectors: (s) => call(s, '/api/v1/connectors'),
+  linkConnector: (s, id, credential) => call(s, `/api/v1/connectors/${id}`, { method: 'PUT', body: JSON.stringify({ credential }) }),
+  unlinkConnector: (s, id) => call(s, `/api/v1/connectors/${id}`, { method: 'DELETE' }),
+  syncConnector: (s, id) => call(s, `/api/v1/connectors/${id}/sync`, { method: 'POST' }),
+  beginLink: (s, id) => call(s, `/api/v1/connectors/${id}/link/begin`, { method: 'POST' }),
+  pollLink: (s, id, deviceCode) =>
+    call(s, `/api/v1/connectors/${id}/link/poll`, { method: 'POST', body: JSON.stringify({ device_code: deviceCode }) }),
+  // Matches review (which book at the service each synced title maps to).
+  review: (s, id) => call(s, `/api/v1/connectors/${id}/review`).then((r) => r.books),
+  candidates: (s, id) => call(s, `/api/v1/connectors/${id}/candidates`).then((r) => r.books ?? []),
+  searchConnector: (s, id, q) => call(s, `/api/v1/connectors/${id}/search?q=${encodeURIComponent(q)}`).then((r) => r.books ?? []),
+  bookMatches: (s, doc) => call(s, `/api/v1/documents/${doc}/matches`).then((r) => r.services),
+  // pick: a search/candidate row, or null for "don't sync this book".
+  setMatch: (s, id, doc, pick) =>
+    call(s, `/api/v1/connectors/${id}/matches/${doc}`, {
+      method: 'PUT',
+      body: JSON.stringify(pick ? { external_id: pick.externalId, external_edition: pick.edition ?? null, title: pick.title, author: pick.author } : { external_id: null }),
+    }),
+  // The sync account itself.
+  changePassword: (s, password) => call(s, '/api/v1/account/password', { method: 'POST', body: JSON.stringify({ key: SparkMD5.hash(password) }) }),
+  clearData: (s) => call(s, '/api/v1/account/data', { method: 'DELETE' }),
+  deleteAccount: (s) => call(s, '/api/v1/account', { method: 'DELETE' }),
+  removeBook: (s, doc) => call(s, `/api/v1/progress/${doc}`, { method: 'DELETE' }),
   setInfo: (s, doc, patch) => call(s, `/api/v1/documents/${doc}/info`, { method: 'PUT', body: JSON.stringify(patch) }),
   coverCandidates: (s, doc, q) => call(s, `/api/v1/documents/${doc}/cover/candidates${q ? `?q=${encodeURIComponent(q)}` : ''}`).then((r) => r.items),
   // `document` becomes an alias of `into`: its progress, clippings and stats move there.

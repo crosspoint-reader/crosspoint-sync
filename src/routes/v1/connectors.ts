@@ -81,6 +81,7 @@ export function connectorRoutes(
           credential_kind: conn.credentialKind,
           library_refresh: !!conn.refreshLibrary,
           asin_lookup: !!conn.lookup,
+          matches: conn.matchBy !== 'document',
           linked: !!account,
           status: account?.status ?? null,
           account: account?.account_label ?? null,
@@ -277,6 +278,29 @@ export function connectorRoutes(
         updated_at: m.updated_at,
       })),
     });
+  });
+
+  // One book's match at each linked service (the app's book page).
+  app.get('/documents/:document/matches', (c) => {
+    const document = c.req.param('document');
+    if (!isValidDocument(document)) return kosyncError(c, 403, 2004, "Field 'document' not provided.");
+    const user = c.get('user');
+    const services = listConnectors().flatMap((conn) => {
+      // Services keyed on our own document hash (another KOSync server) have nothing to match.
+      if (conn.matchBy === 'document' || !getAccount(db, user.id, conn.id)) return [];
+      const m = getMatch(db, user.id, conn.id, document);
+      return [
+        {
+          id: conn.id,
+          name: conn.displayName,
+          matched: !!m?.external_id,
+          external_id: m?.external_id ?? null,
+          source: m?.source ?? 'none',
+          push_note: m?.push_note ?? null,
+        },
+      ];
+    });
+    return c.json({ document, services });
   });
 
   // Review list: every synced book with its title and this connector's match state.

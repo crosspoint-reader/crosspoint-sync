@@ -4,7 +4,7 @@ import { isApp } from './api.js'
 import { reader, sendFile } from './catalogs.js'
 import { folders, loadDevicePrefs, makeFolder } from './device.js'
 import { saveImage } from './shareCard.js'
-import { Card, Eyebrow, notify } from './ui.jsx'
+import { Card, EmptyState, Eyebrow, notify } from './ui.jsx'
 import { CATEGORIES, canFilter, communityPage, fullImage } from './wallpaper/community.js'
 import { DEFAULTS, DEVICES, DITHERS, autoLevels, placement, renderWallpaper, toBmp } from './wallpaper/render.js'
 
@@ -165,7 +165,9 @@ function Community({ onPick }) {
           <Loader2 className="size-6 animate-spin text-stone-400" />
         </div>
       ) : !items.length ? (
-        <p className="mt-4 text-sm text-stone-500">No wallpapers match.</p>
+        <EmptyState compact icon={Search} title="No wallpapers match">
+          Try another word or category.
+        </EmptyState>
       ) : (
         more && (
           <button

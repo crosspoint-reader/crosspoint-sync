@@ -22,7 +22,7 @@ import {
 import { isApp } from './api.js'
 import { DEFAULT_HOST, EXTENSIONS, connect, deleteFiles, folders, isBook, joinPath, listFiles, loadDevicePrefs, makeFolder, renameFile, saveDevicePrefs } from './device.js'
 import { downloads as listDownloads, removeDownload, sendDownload, sendFile } from './catalogs.js'
-import { Card, Eyebrow, folderLabel, notify } from './ui.jsx'
+import { Card, EmptyState, Eyebrow, folderLabel, notify } from './ui.jsx'
 
 const size = (n) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`)
 // Android's picker filters by MIME type and has none for .md, so let it show everything there.
@@ -328,7 +328,7 @@ function ReaderFiles({ base, onFoldersChanged }) {
             <Loader2 className="mx-auto size-5 animate-spin text-stone-400" />
           </div>
         ) : files.length === 0 ? (
-          <p className="px-4 py-6 text-center text-sm text-stone-500">This folder is empty.</p>
+          <EmptyState compact icon={Folder} title="This folder is empty" />
         ) : (
           files.map((f) => {
             const full = joinPath(path, f.name)
