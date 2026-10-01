@@ -56,6 +56,17 @@ function useCellTip() {
 // Cells are pressed and held for their tooltip: no long-press text selection or callout.
 const NO_CALLOUT = { WebkitTouchCallout: 'none' }
 
+// Readers that sent stats, with repeats grouped: "2 CrossInk readers, KOReader".
+// Device names come from the firmware, so every CrossInk reader is "CrossInk".
+const deviceList = (devices) => {
+  const counts = new Map()
+  for (const d of devices) {
+    const name = d.device || d.device_id
+    counts.set(name, (counts.get(name) ?? 0) + 1)
+  }
+  return [...counts].map(([name, n]) => (n > 1 ? `${n} ${name} readers` : name)).join(', ')
+}
+
 function Heatmap({ summary }) {
   const { read, anchor, anchorRow } = decodeHistory(summary.history_b64, summary.anchor_day)
   let days = 0
@@ -782,7 +793,7 @@ export default function Stats({ session, tab = '', summary, activity, books }) {
             <Bars title="Day of week" labels={['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']} values={summary.dow} />
           </div>
           <p className="mt-6 text-center font-mono text-[0.65rem] text-stone-400">
-            Combined from {summary.devices.map((d) => d.device || d.device_id).join(', ')}
+            Combined from {deviceList(summary.devices)}
           </p>
         </>
       ) : (
