@@ -12,6 +12,7 @@ import Settings, { Matches } from './Settings.jsx'
 import Browse from './Browse.jsx'
 import Clippings from './Clippings.jsx'
 import { updateWidget } from './widget.js'
+import InstallPrompt from './Install.jsx'
 
 // A filled, full-width field with a leading icon: the native mobile idiom.
 function Field({ icon: Icon, trailing, inputRef, ...props }) {
@@ -351,13 +352,14 @@ function Home({ session, onSession, onLogout, theme }) {
   return (
     <div className="min-h-dvh md:flex">
       <Sidebar route={route} session={session} />
-      <main className="relative mx-auto w-full max-w-xl pb-24 md:max-w-6xl md:pb-10">
+      <main className="relative mx-auto w-full min-w-0 max-w-xl pb-24 md:max-w-6xl md:pb-10">
         {isOffline && (
           <div className="sticky top-0 z-30 flex items-center justify-center gap-2 bg-stone-800 px-4 py-2 text-xs font-medium text-stone-100">
             <CloudOff className="size-3.5" /> Offline. Showing what was saved on this device.
           </div>
         )}
-        <SettingsLink active={route === 'settings'} />
+        {/* Sub-screens (a book, a service's matches, a catalog...) have a back link instead. Stats' second segment is just its tab. */}
+        {(parts.length < 2 || route === 'stats') && <SettingsLink active={route === 'settings'} />}
         <RefreshPill active={booksLoading && !!books} />
         <Toaster />
         {page}
@@ -372,17 +374,21 @@ export default function App() {
   const [session, setSession] = useState(loadSession)
   if (!session) return <Login onLogin={setSession} />
   return (
-    <Home
-      session={session}
-      theme={theme}
-      onSession={(s) => {
-        saveSession(s)
-        setSession(s)
-      }}
-      onLogout={() => {
-        logout()
-        setSession(null)
-      }}
-    />
+    <>
+      <Home
+        session={session}
+        theme={theme}
+        onSession={(s) => {
+          saveSession(s)
+          setSession(s)
+        }}
+        onLogout={() => {
+          logout()
+          setSession(null)
+        }}
+      />
+      {/* After sign-in, so the card never covers the sign-in button. */}
+      <InstallPrompt />
+    </>
   )
 }

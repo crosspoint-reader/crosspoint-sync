@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, Hash, Trash2, Image as ImageIcon, Loader2, Merge, Quote, Search, Share2, Star, X } from 'lucide-react'
+import { ArrowLeft, Hash, MoreHorizontal, Split, Trash2, Image as ImageIcon, Loader2, Merge, Quote, Search, Share2, Star, X } from 'lucide-react'
 import { api, isApp } from './api.js'
 import { renderCard } from './shareCard.js'
 import { isPace, moodEmoji } from './moods.js'
@@ -22,7 +22,7 @@ function StatusPicker({ session, book, onChange }) {
     }
   }
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
       {STATUS.map((s) => (
         <button
           key={s.id}
@@ -43,7 +43,19 @@ function StatusPicker({ session, book, onChange }) {
 }
 
 // Device stats (CrossInk) when present, else what the sync history shows.
-function Stats({ session, doc, activity: a }) {
+// Tablet/desktop layout? (Tailwind's md breakpoint.)
+const wideQuery = window.matchMedia('(min-width: 48rem)')
+function useWide() {
+  const [wide, setWide] = useState(wideQuery.matches)
+  useEffect(() => {
+    const on = () => setWide(wideQuery.matches)
+    wideQuery.addEventListener('change', on)
+    return () => wideQuery.removeEventListener('change', on)
+  }, [])
+  return wide
+}
+
+function Stats({ session, doc, activity: a, wide = false }) {
   const [data] = useLoad(() => api.bookStats(session, doc), [session, doc], `bookstats:${doc}`)
   const c = data?.combined
   let cells
@@ -66,11 +78,11 @@ function Stats({ session, doc, activity: a }) {
   } else return null
   cells = cells.filter(([, v]) => v)
   return (
-    <Card className="mt-4 grid grid-cols-2 gap-px overflow-hidden bg-stone-100">
+    <Card className={`mt-4 gap-px overflow-hidden bg-stone-100 ${wide ? 'flex flex-wrap' : 'grid grid-cols-2'}`}>
       {cells.map(([l, v]) => (
-        <div key={l} className="bg-surface px-4 py-3">
+        <div key={l} className={`bg-surface py-3 ${wide ? 'min-w-fit flex-1 px-3 whitespace-nowrap lg:px-4' : 'px-4'}`}>
           <p className="text-xs text-stone-500">{l}</p>
-          <p className="mt-0.5 font-display text-lg font-semibold text-stone-900">{v}</p>
+          <p className={`mt-0.5 font-display font-semibold text-stone-900 ${wide ? 'text-base lg:text-lg' : 'text-lg'}`}>{v}</p>
         </div>
       ))}
     </Card>
@@ -271,86 +283,103 @@ function MergePicker({ session, book, books, onDone, onClose }) {
   )
 }
 
-// Fix what the automatic lookups got wrong, and fold duplicates together.
-function BookTools({ session, book, books, onChange }) {
-  const [open, setOpen] = useState(null) // 'cover' | 'merge'
+// The ⋯ menu: fix what the automatic lookups got wrong, fold duplicates together, or remove the book.
+function BookMenu({ session, book, books, onChange }) {
+  const [menu, setMenu] = useState(false)
+  const [open, setOpen] = useState(null) // 'cover' | 'pages' | 'merge'
   const [pages, setPages] = useState(book.page_count ?? '')
   const [saving, setSaving] = useState(false)
   const dupes = books.filter((b) => looksLikeSame(book, b)).length
-  async function savePages(value) {
-    setSaving(true)
-    try {
-      await api.setInfo(session, book.document, { page_count: value })
-      onChange()
-    } finally {
-      setSaving(false)
-    }
-  }
   const done = () => {
     setOpen(null)
     onChange()
   }
+  async function savePages(e) {
+    e.preventDefault()
+    const n = parseInt(pages, 10)
+    if (!(n > 0)) return
+    setSaving(true)
+    try {
+      await api.setInfo(session, book.document, { page_count: n })
+      done()
+    } finally {
+      setSaving(false)
+    }
+  }
+  async function separate() {
+    if (!confirm('Separate the merged copies again? Future syncs from them will show as their own books.')) return
+    for (const alias of book.aliases) await api.unmerge(session, alias)
+    onChange()
+  }
+  async function remove() {
+    if (!confirm(`Remove "${book.title || 'this book'}" from your library? Its progress, clippings and stats are deleted. A reader that still has it will sync it again.`)) return
+    try {
+      await api.removeBook(session, book.document)
+      location.hash = '#/'
+      onChange()
+    } catch (e) {
+      notify({ error: true, title: "Couldn't remove the book", detail: e.message })
+    }
+  }
+  const item = (Icon, label, run, extra = null, danger = false) => (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={() => {
+        setMenu(false)
+        run()
+      }}
+      className={`flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium active:bg-stone-50 md:hover:bg-stone-50 ${danger ? 'text-red-600' : 'text-stone-800'}`}
+    >
+      <Icon className={`size-4 ${danger ? '' : 'text-stone-400'}`} /> {label}
+      {extra}
+    </button>
+  )
+
   return (
-    <Card className="mt-4 divide-y divide-stone-100">
-      <button onClick={() => setOpen('cover')} className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-stone-800 active:bg-stone-50">
-        <ImageIcon className="size-4 text-stone-400" /> Change cover
-      </button>
-      <form
-        className="flex items-center gap-3 px-4 py-2"
-        onSubmit={(e) => {
-          e.preventDefault()
-          const n = parseInt(pages, 10)
-          if (n > 0) savePages(n)
-        }}
-      >
-        <Hash className="size-4 shrink-0 text-stone-400" />
-        <label className="min-w-0 flex-1 text-sm font-medium text-stone-800" htmlFor="print-pages">
-          Print pages
-        </label>
-        <input id="print-pages" value={pages} onChange={(e) => setPages(e.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder="?" className="h-9 w-20 rounded-lg bg-stone-50 px-2 text-right text-sm text-stone-900 ring-1 ring-stone-950/10 outline-none focus:ring-2 focus:ring-brand-500/60" />
-        {String(pages) !== String(book.page_count ?? '') && (
-          <button disabled={saving} className="h-9 rounded-lg bg-brand-500 px-3 text-xs font-semibold text-white disabled:opacity-60">
-            Save
-          </button>
-        )}
-      </form>
-      <button onClick={() => setOpen('merge')} className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-stone-800 active:bg-stone-50">
-        <Merge className="size-4 text-stone-400" /> Merge a duplicate
-        {dupes > 0 && <span className="ml-auto rounded-full bg-brand-50 px-2 py-0.5 text-[0.65rem] font-semibold text-brand-700">{dupes} likely</span>}
-      </button>
-      {book.aliases?.length > 0 && (
-        <div className="px-4 py-3 text-sm text-stone-600">
-          Also synced as {book.aliases.length === 1 ? 'another copy' : `${book.aliases.length} other copies`}.{' '}
-          <button
-            className="font-semibold text-brand-600"
-            onClick={async () => {
-              if (!confirm('Separate the merged copies again? Future syncs from them will show as their own books.')) return
-              for (const alias of book.aliases) await api.unmerge(session, alias)
-              onChange()
-            }}
-          >
-            Separate
-          </button>
-        </div>
-      )}
+    <div className="relative ml-auto">
       <button
-        onClick={async () => {
-          if (!confirm(`Remove "${book.title || 'this book'}" from your library? Its progress, clippings and stats are deleted. A reader that still has it will sync it again.`)) return
-          try {
-            await api.removeBook(session, book.document)
-            location.hash = '#/'
-            onChange()
-          } catch (e) {
-            notify({ error: true, title: "Couldn't remove the book", detail: e.message })
-          }
-        }}
-        className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-red-600 active:bg-stone-50"
+        type="button"
+        aria-label="More"
+        aria-haspopup="menu"
+        aria-expanded={menu}
+        onClick={() => setMenu(!menu)}
+        className="grid size-11 place-items-center rounded-full text-stone-600 transition active:bg-stone-200/70 md:hover:bg-stone-100"
       >
-        <Trash2 className="size-4" /> Remove from library
+        <MoreHorizontal className="size-6" />
       </button>
+      {menu && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setMenu(false)} />
+          <div role="menu" className="absolute top-12 right-0 z-30 w-64 divide-y divide-stone-100 overflow-hidden rounded-xl bg-surface shadow-lg ring-1 ring-stone-950/10">
+            {item(ImageIcon, 'Change cover', () => setOpen('cover'))}
+            {item(Hash, 'Print pages', () => setOpen('pages'), <span className="ml-auto font-mono text-xs text-stone-500">{book.page_count ?? '?'}</span>)}
+            {item(
+              Merge,
+              'Merge a duplicate',
+              () => setOpen('merge'),
+              dupes > 0 && <span className="ml-auto rounded-full bg-brand-50 px-2 py-0.5 text-[0.65rem] font-semibold text-brand-700">{dupes} likely</span>
+            )}
+            {book.aliases?.length > 0 &&
+              item(Split, book.aliases.length === 1 ? 'Separate merged copy' : `Separate ${book.aliases.length} merged copies`, separate)}
+            {item(Trash2, 'Remove from library', remove, null, true)}
+          </div>
+        </>
+      )}
       {open === 'cover' && <CoverPicker session={session} book={book} onDone={done} onClose={() => setOpen(null)} />}
       {open === 'merge' && <MergePicker session={session} book={book} books={books} onDone={done} onClose={() => setOpen(null)} />}
-    </Card>
+      {open === 'pages' && (
+        <Sheet title="Print pages" onClose={() => setOpen(null)}>
+          <p className="mt-1 text-sm text-stone-500">The printed edition&apos;s page count, used for pages read and stats.</p>
+          <form onSubmit={savePages} className="mt-4 flex gap-2">
+            <input autoFocus value={pages} onChange={(e) => setPages(e.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder="e.g. 384" className={field} />
+            <button disabled={saving} className="h-11 shrink-0 rounded-xl bg-brand-500 px-5 text-sm font-semibold text-white disabled:opacity-60">
+              Save
+            </button>
+          </form>
+        </Sheet>
+      )}
+    </div>
   )
 }
 
@@ -396,47 +425,55 @@ function Details({ book }) {
 }
 
 // The book's description (from Hardcover), clamped with Read more when it's long.
-// Where this book syncs to: its match at each linked service, fixable in place.
+// Beyond this book: the next one in its series, and where this one syncs to
+// (its match at each linked service, fixable in place).
 function Services({ session, book }) {
+  const done = book.status === 'finished' || book.percentage >= 0.9
+  const [series] = useLoad(() => (book.series && done ? api.next(session, book.document) : Promise.resolve(null)), [book.document, done], `next ${book.document}`)
   const [data, , reload] = useLoad(() => api.bookMatches(session, book.document), [book.document], `matches ${book.document}`)
   const [picking, setPicking] = useState(null)
-  if (!data?.length) return null
+  if (!series?.next && !data?.length) return null
   return (
-    <Card className="mt-4 py-2">
-      <p className="px-4 pt-2 text-xs font-medium text-stone-500">Connected services</p>
-      {data.map((m) => (
-        <div key={m.id} className="px-4 py-2">
-          <div className="flex items-center gap-3">
-            <img src={`${session.server}/icons/${m.id}.png`} alt="" className="size-7 shrink-0 rounded-md bg-stone-100" onError={(e) => (e.currentTarget.style.visibility = 'hidden')} />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-stone-900">{m.name}</p>
-              <p className={`truncate text-xs ${m.matched ? 'text-stone-500' : m.source === 'manual' ? 'text-stone-500' : 'text-amber-700'}`}>
-                {m.matched ? (m.source === 'manual' ? 'Matched by you' : 'Matched') : m.source === 'manual' ? 'Not syncing' : 'Not matched'}
-              </p>
+    <Card className="mt-4 divide-y divide-stone-100">
+      {series?.next && <NextInSeries book={book} data={series} />}
+      {data?.length > 0 && (
+        <div className="py-2">
+          <p className="px-4 pt-2 text-xs font-medium text-stone-500">Connected services</p>
+          {data.map((m) => (
+            <div key={m.id} className="px-4 py-2">
+              <div className="flex items-center gap-3">
+                <img src={`${session.server}/icons/${m.id}.png`} alt="" className="size-7 shrink-0 rounded-md bg-stone-100" onError={(e) => (e.currentTarget.style.visibility = 'hidden')} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-stone-900">{m.name}</p>
+                  <p className={`truncate text-xs ${m.matched ? 'text-stone-500' : m.source === 'manual' ? 'text-stone-500' : 'text-amber-700'}`}>
+                    {m.matched ? (m.source === 'manual' ? 'Matched by you' : 'Matched') : m.source === 'manual' ? 'Not syncing' : 'Not matched'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPicking(picking === m.id ? null : m.id)}
+                  className="h-8 shrink-0 rounded-full px-3 text-sm font-semibold text-brand-600 ring-1 ring-brand-200 active:bg-brand-50"
+                >
+                  {picking === m.id ? 'Cancel' : m.matched ? 'Change' : 'Match'}
+                </button>
+              </div>
+              {m.push_note && <p className="mt-1 text-xs text-amber-700">{m.push_note}</p>}
+              {picking === m.id && (
+                <Picker
+                  session={session}
+                  id={m.id}
+                  name={m.name}
+                  book={book}
+                  onDone={() => {
+                    setPicking(null)
+                    reload()
+                  }}
+                />
+              )}
             </div>
-            <button
-              type="button"
-              onClick={() => setPicking(picking === m.id ? null : m.id)}
-              className="h-8 shrink-0 rounded-full px-3 text-sm font-semibold text-brand-600 ring-1 ring-brand-200 active:bg-brand-50"
-            >
-              {picking === m.id ? 'Cancel' : m.matched ? 'Change' : 'Match'}
-            </button>
-          </div>
-          {m.push_note && <p className="mt-1 text-xs text-amber-700">{m.push_note}</p>}
-          {picking === m.id && (
-            <Picker
-              session={session}
-              id={m.id}
-              name={m.name}
-              book={book}
-              onDone={() => {
-                setPicking(null)
-                reload()
-              }}
-            />
-          )}
+          ))}
         </div>
-      ))}
+      )}
     </Card>
   )
 }
@@ -470,16 +507,13 @@ function About({ session, book }) {
 
 // Finished (or nearly) a book in a series: show what comes next, and search the
 // Browse catalogs for it so it's a tap away from being on the reader.
-function NextInSeries({ session, book }) {
-  const done = book.status === 'finished' || book.percentage >= 0.9
-  const [data] = useLoad(() => (book.series && done ? api.next(session, book.document) : Promise.resolve(null)), [book.document, done], `next ${book.document}`)
-  const next = data?.next
-  if (!next) return null
+function NextInSeries({ book, data }) {
+  const next = data.next
   // Title only: many OPDS catalogs (Mayberry included) match the whole query against
   // titles, so adding the author turns a hit into no results.
   const query = next.title
   return (
-    <Card className="relative mt-4 p-4">
+    <div className="px-4 py-3">
       <p className="text-xs font-medium text-stone-500">Next in {data.series ?? book.series}</p>
       <div className="mt-2 flex gap-3">
         {next.cover ? (
@@ -503,7 +537,7 @@ function NextInSeries({ session, book }) {
           )}
         </div>
       </div>
-    </Card>
+    </div>
   )
 }
 
@@ -511,24 +545,27 @@ const seriesLabel = (b) =>
   b.series ? `${b.series}${b.series_position ? ` · Book ${Number.isInteger(b.series_position) ? b.series_position : b.series_position.toFixed(1)}` : ''}` : null
 
 export default function Book({ session, book, books, activity, onChange }) {
+  const wide = useWide()
   if (!book) return <p className="py-16 text-center text-sm text-stone-500">Book not found.</p>
   return (
     <div className="px-4 pt-4 pb-6 md:px-8 md:pt-6 lg:px-12">
-      {/* Top bar: same 44px row as the account avatar (top-4, size-11) so they line up. */}
-      <div className="flex h-11 items-center pr-12 md:pr-0">
+      <div className="-mr-2 flex h-11 items-center">
         <a
           href="#/"
           className="-ml-2 flex h-11 items-center gap-1.5 rounded-full pr-4 pl-2 text-lg font-semibold text-brand-600 transition active:bg-stone-200/70 md:hover:bg-stone-100"
         >
           <ArrowLeft className="size-6" strokeWidth={2} /> Library
         </a>
+        <BookMenu key={`${book.document}-${book.page_count}`} session={session} book={book} books={books} onChange={onChange} />
       </div>
-      <div className="md:mt-4 md:grid md:grid-cols-[19rem_1fr] md:items-start md:gap-8 lg:grid-cols-[23rem_1fr] lg:gap-10">
-        <aside className="md:sticky md:top-8">
-          <div className="relative mt-3 flex gap-4 md:mt-0 md:flex-col md:gap-5">
-            <Cover session={session} book={book} className="w-28 md:mx-auto md:w-full md:max-w-60" />
-            <div className="min-w-0 flex-1 pt-1 md:pt-0">
-              <h1 className="font-display text-2xl/tight font-semibold tracking-tight text-balance text-stone-900">
+      {/* One column at every size: the book up top, its cards two-up on wide screens, clippings below. */}
+      <div className="md:mt-4">
+        <div>
+          {/* Phone: cover beside the title, status buttons full width below. Wider: status sits under the title, beside the cover. */}
+          <div className="relative mt-3 grid grid-cols-[7rem_1fr] gap-x-4 md:mt-0 md:grid-cols-[11rem_1fr] md:grid-rows-[auto_1fr] md:gap-x-8 lg:grid-cols-[13rem_1fr]">
+            <Cover session={session} book={book} className="w-full md:row-span-2" />
+            <div className="min-w-0 pt-1 md:pt-0">
+              <h1 className="font-display text-2xl/tight font-semibold md:text-3xl/tight tracking-tight text-balance text-stone-900">
                 {book.title || book.filename || 'Untitled book'}
               </h1>
               <p className="mt-1 text-sm text-stone-500">{book.author}</p>
@@ -544,21 +581,23 @@ export default function Book({ session, book, books, activity, onChange }) {
                 <span className="font-semibold text-brand-600">{pct(book.percentage)}</span> · {book.device || book.device_id} · {ago(book.timestamp)}
               </p>
               <ProgressBar value={book.percentage} className="mt-2" />
+              {wide && <Stats session={session} doc={book.document} activity={activity} wide />}
+            </div>
+            <div className="col-span-2 mt-6 md:col-span-1 md:col-start-2 md:self-end">
+              <StatusPicker session={session} book={book} onChange={onChange} />
             </div>
           </div>
-          <div className="mt-6">
-            <StatusPicker session={session} book={book} onChange={onChange} />
-          </div>
           <About session={session} book={book} />
-          <NextInSeries session={session} book={book} />
-          <Details book={book} />
-          <Stats session={session} doc={book.document} activity={activity} />
-          <Services session={session} book={book} />
-          <BookTools key={`${book.document}-${book.page_count}`} session={session} book={book} books={books} onChange={onChange} />
-        </aside>
+          {/* Cards flow two-up; spacing moves to the bottom so a column break can't eat a top margin. */}
+          <div className="md:mt-4 md:columns-2 md:gap-4 md:[&>*]:mt-0 md:[&>*]:mb-4 [&>*]:break-inside-avoid">
+            <Details book={book} />
+            {!wide && <Stats session={session} doc={book.document} activity={activity} />}
+            <Services session={session} book={book} />
+          </div>
+        </div>
 
-        <section className="md:max-w-2xl">
-          <h2 className="mt-8 mb-3 font-display text-xl font-semibold text-stone-900 md:mt-0 md:text-2xl">Clippings</h2>
+        <section>
+          <h2 className="mt-8 mb-3 font-display text-xl font-semibold text-stone-900 md:mt-6 md:text-2xl">Clippings</h2>
           <Clippings session={session} book={book} />
         </section>
       </div>
