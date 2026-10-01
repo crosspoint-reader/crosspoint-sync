@@ -277,3 +277,25 @@ export function combineBookStats(snapshots: BookStatsSnapshot[]): BookStatsCombi
   out.avg_fwd = paceWeight > 0 ? Math.round(paceSum / paceWeight) : 0;
   return out;
 }
+
+/** Local dates already include the reader's configured UTC offset. Never re-zone them. */
+export interface DailyReading { date: string; seconds: number }
+
+export function parseDailyReading(raw: unknown): DailyReading[] | null {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw) || raw.length > 20) return null;
+  const dates = new Set<string>();
+  const out: DailyReading[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) return null;
+    const { date, seconds } = item as Record<string, unknown>;
+    if (typeof date !== 'string' || !/^20\d{2}-\d{2}-\d{2}$/.test(date) ||
+        !Number.isSafeInteger(seconds) || (seconds as number) < 0 || (seconds as number) > 0xffffffff ||
+        dates.has(date)) return null;
+    const parsed = new Date(date + 'T00:00:00Z');
+    if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) return null;
+    dates.add(date);
+    out.push({ date, seconds: seconds as number });
+  }
+  return out;
+}

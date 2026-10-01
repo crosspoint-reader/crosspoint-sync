@@ -8,6 +8,7 @@ import {
   combineGlobalStats,
   parseBookStats,
   parseGlobalStats,
+  parseDailyReading,
   type BookStatsSnapshot,
   type GlobalStatsSnapshot,
 } from '../../models/stats.js';
@@ -38,21 +39,31 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     const o = (body ?? {}) as Record<string, unknown>;
     const deviceId = deviceIdFrom(o);
     const snapshot = parseGlobalStats(o);
-    if (!deviceId || !snapshot) {
+    const daily = parseDailyReading(o.daily);
+    if (!deviceId || !snapshot || !daily) {
       return kosyncError(c, 403, 2003, 'Invalid request');
     }
     const device = typeof o.device === 'string' ? o.device.slice(0, 128) : '';
     const user = c.get('user');
     const now = nowSeconds();
-    db.prepare(
-      `INSERT INTO stats_device_global (user_id, device_id, device, payload, updated_at)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(user_id, device_id) DO UPDATE SET
-         device = excluded.device,
-         payload = excluded.payload,
-         updated_at = excluded.updated_at`
-    ).run(user.id, deviceId, device, JSON.stringify(snapshot), now);
-    return c.json({ until: now });
+    withTransaction(db, () => {
+      db.prepare(
+        `INSERT INTO stats_device_global (user_id, device_id, device, payload, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, device_id) DO UPDATE SET
+           device = excluded.device, payload = excluded.payload, updated_at = excluded.updated_at`
+      ).run(user.id, deviceId, device, JSON.stringify(snapshot), now);
+      const upsertDay = db.prepare(
+        `INSERT INTO stats_device_day (user_id, device_id, date, seconds, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, device_id, date) DO UPDATE SET
+           seconds = MAX(stats_device_day.seconds, excluded.seconds),
+           updated_at = excluded.updated_at`
+      );
+      for (const day of daily) upsertDay.run(user.id, deviceId, day.date, day.seconds, now);
+    });
+    // Explicit acknowledgment lets readers retain unsent counters when talking to old servers.
+    return c.json({ until: now, accepted_daily: daily.length });
   });
 
   app.put('/stats/books', async (c) => {
@@ -106,7 +117,11 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
         device_id: r.device_id,
         device: r.device,
         updated_at: r.updated_at,
-        stats: JSON.parse(r.payload),
+        stats: {
+          ...JSON.parse(r.payload),
+          daily: db.prepare('SELECT date, seconds FROM stats_device_day WHERE user_id = ? AND device_id = ? ORDER BY date')
+            .all(user.id, r.device_id),
+        },
       })),
     });
   });
@@ -122,6 +137,11 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     const summary = combineGlobalStats(snapshots);
     return c.json({
       ...summary,
+      daily: (db.prepare(
+        'SELECT date, SUM(seconds) AS seconds FROM stats_device_day WHERE user_id = ? GROUP BY date ORDER BY date'
+      ).all(user.id) as { date: string; seconds: number }[]).map((day) => ({
+        ...day, minutes: day.seconds / 60,
+      })),
       devices: rows.map((r) => ({
         device_id: r.device_id,
         device: r.device,

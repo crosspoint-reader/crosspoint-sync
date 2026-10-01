@@ -175,3 +175,83 @@ describe('v1 stats endpoints', () => {
     expect(res.status).toBe(403);
   });
 });
+
+
+describe('daily reading counters', () => {
+  const body = (device: string, daily?: unknown) => ({ device_id: device, ...snapshot(), ...(daily === undefined ? {} : { daily }) });
+  it('keeps max per device/day across retries, old payloads, partial batches and reordered uploads', async () => {
+    const { app } = makeTestApp();
+    const { headers } = await registerUser(app);
+    const put = async (device: string, daily?: unknown) => {
+      const r = await app.request('/api/v1/stats/global', { method: 'PUT', headers, body: JSON.stringify(body(device, daily)) });
+      expect(r.status).toBe(200);
+      return r.json();
+    };
+    expect((await put('A', [{ date: '2026-09-30', seconds: 61 }])).accepted_daily).toBe(1);
+    await put('A', [{ date: '2026-09-30', seconds: 61 }]);
+    await put('A', [{ date: '2026-10-01', seconds: 15 }]);
+    await put('A', [{ date: '2026-09-30', seconds: 10 }]);
+    await put('A');
+    await put('B', [{ date: '2026-09-30', seconds: 29 }]);
+    const sum = await (await app.request('/api/v1/stats/summary', { headers })).json();
+    expect(sum.daily).toEqual([
+      { date: '2026-09-30', seconds: 90, minutes: 1.5 },
+      { date: '2026-10-01', seconds: 15, minutes: .25 },
+    ]);
+    expect(sum.seconds).toBe(7200); // legacy aggregates stay intact
+    const devices = await (await app.request('/api/v1/stats/global', { headers })).json();
+    expect(devices.devices.find((d: any) => d.device_id === 'A').stats.daily).toEqual([
+      { date: '2026-09-30', seconds: 61 }, { date: '2026-10-01', seconds: 15 },
+    ]);
+    const secondUser = await registerUser(app);
+    const other = await (await app.request('/api/v1/stats/summary', { headers: secondUser.headers })).json();
+    expect(other.daily).toEqual([]);
+  });
+  it('rejects malformed/duplicate/oversized daily data atomically', async () => {
+    const { app, db } = makeTestApp();
+    const { headers } = await registerUser(app);
+    for (const daily of [null, {}, [{ date: '2026-02-29', seconds: 1 }],
+      [{ date: '1999-12-31', seconds: 1 }], [{ date: '2026-10-01', seconds: -1 }],
+      [{ date: '2026-10-01', seconds: 1.5 }], [{ date: '2026-10-01', seconds: 4294967296 }],
+      [{ date: '2026-10-01', seconds: '60' }], [null],
+      [{ date: '2026-10-01', seconds: 1 }, { date: '2026-10-01', seconds: 2 }],
+      Array.from({ length: 21 }, (_, i) => ({ date: `2026-10-${String(i + 1).padStart(2, '0')}`, seconds: 1 })),
+    ]) {
+      const r = await app.request('/api/v1/stats/global', { method: 'PUT', headers, body: JSON.stringify(body('A', daily)) });
+      expect(r.status).toBe(403);
+    }
+    expect(db.prepare('SELECT COUNT(*) AS n FROM stats_device_global').get()).toEqual({ n: 0 });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM stats_device_day').get()).toEqual({ n: 0 });
+  });
+  it('accepts leap days, keeps local dates unchanged, and upgrades populated old databases', async () => {
+    const { app, db } = makeTestApp();
+    const { headers } = await registerUser(app);
+    await app.request('/api/v1/stats/global', { method: 'PUT', headers, body: JSON.stringify(body('old')) });
+    const before = db.prepare('SELECT payload FROM stats_device_global').get();
+    db.exec('DROP TABLE stats_device_day');
+    db.prepare('DELETE FROM migrations WHERE name = ?').run('0014_daily_reading.sql');
+    const { migrate } = await import('../src/db/db.js');
+    migrate(db);
+    expect(db.prepare('SELECT payload FROM stats_device_global').get()).toEqual(before);
+    const res = await app.request('/api/v1/stats/global', { method: 'PUT', headers,
+      body: JSON.stringify(body('new', [{ date: '2028-02-29', seconds: 1 }])) });
+    expect(res.status).toBe(200);
+    const sum = await (await app.request('/api/v1/stats/summary?tz=840', { headers })).json();
+    expect(sum.daily[0].date).toBe('2028-02-29');
+  });
+});
+
+it('daily counters are independent of book merges and removed with account data', async () => {
+ const {app,db}=makeTestApp(); const {headers,username}=await registerUser(app);
+ await app.request('/api/v1/stats/global',{method:'PUT',headers,body:JSON.stringify({device_id:'A',...snapshot(),daily:[{date:'2026-10-01',seconds:61}]})});
+ const before=db.prepare('SELECT * FROM stats_device_day').all();
+ const id=(db.prepare('SELECT id FROM users WHERE username = ?').get(username) as {id:number}).id;
+ const {mergeDocuments,unmergeDocument}=await import('../src/models/merge.js');
+ mergeDocuments(db,id,'a'.repeat(32),'b'.repeat(32),1234,true);
+ expect(db.prepare('SELECT * FROM stats_device_day').all()).toEqual(before);
+ unmergeDocument(db,id,'a'.repeat(32));
+ expect(db.prepare('SELECT * FROM stats_device_day').all()).toEqual(before);
+ const {deleteKosyncUserData}=await import('../src/routes/account.js');
+ deleteKosyncUserData(db,id,username,{keepUser:true});
+ expect(db.prepare('SELECT * FROM stats_device_day').all()).toEqual([]);
+});

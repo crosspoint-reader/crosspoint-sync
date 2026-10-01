@@ -152,3 +152,34 @@ New delta reads use the family's highest revision for each clipping ID.
 Per-book stats retain the existing selective merge policy: uploads remain under
 the original document hash, and only aliases merged with stats contribute to the
 canonical book's totals. Unmerging restores the original independent stats.
+
+
+### Daily reading duration
+
+`PUT /api/v1/stats/global` accepts an optional `daily` array (up to 20 unique
+local dates per request), e.g. `[{"date":"2026-10-01","seconds":61}]`, alongside
+the existing global snapshot. Seconds are whole cumulative **device-local**
+reading seconds for that calendar date; minutes are derived as seconds / 60.
+Valid dates are 2000–2099; durations are integers from 0 through 4294967295.
+The response includes `accepted_daily`, including 0 for legacy payloads.
+
+Migration `0014_daily_reading.sql` adds `stats_device_day` without modifying old
+snapshots or generating historical days. Each `(user_id, device_id, date)` stores
+the maximum received counter. Repeats, stale requests, and missing dates in partial
+batches cannot add time twice or erase it. Devices must send only their own local
+counters with a stable ID; copying a device's history to another identity would
+count it twice. Concurrent reading on two devices counts each device's active
+time. Counters are monotonic history, independent of resettable global totals.
+
+`GET /api/v1/stats/global` includes `stats.daily` for each device.
+`GET /api/v1/stats/summary` includes date-sorted `daily` rows with `date`, summed
+`seconds`, and fractional `minutes`. The reader has already applied its timezone;
+these dates are never converted using the server or browser timezone. Absent daily
+history means unknown, not historical zero. Account data deletion removes the new
+data; book merges/unmerges/deletion do not change device/day counters.
+
+
+Regression checks: `npm test`, `npm run build`; after building the CrossInk
+simulator, `node test/daily-firmware-smoke.mjs /absolute/path/to/crossink/.pio/build/simulator/program`
+checks manual upload, shared sender/retries/increments, and an old server without
+a daily acknowledgment using only disposable loopback fixtures.

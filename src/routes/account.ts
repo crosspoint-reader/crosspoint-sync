@@ -20,6 +20,7 @@ export function deleteKosyncUserData(db: DB, userId: number, username: string, {
       'connector_accounts',
       'stats_device_book',
       'stats_device_global',
+      'stats_device_day',
       'clippings',
       'bookmarks',
       'documents',
