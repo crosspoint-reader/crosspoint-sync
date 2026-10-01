@@ -78,6 +78,15 @@ describe('computeActivity', () => {
     // Local noon on Aug 24 in New York, so the client shows the device's date.
     expect(by.a.finished_at).toBe(finishedOn + 12 * 3600 + 240 * 60);
     expect(by.dnf.finished_at).toBeNull();
+    // Aug 24 had no sync but still gets a timeline entry, at the position known by then.
+    expect(a.days.find((d) => d.day === '2026-08-24')).toEqual({
+      day: '2026-08-24',
+      pages: 0,
+      syncs: 0,
+      books: [{ document: 'a', pages: 0, syncs: 0, from: 0, to: 0 }],
+    });
+    // The dnf book's device date is ignored, so it adds no entry.
+    expect(a.days.filter((d) => d.books.some((b) => b.document === 'dnf'))).toHaveLength(1);
   });
 });
 

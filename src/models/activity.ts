@@ -76,8 +76,9 @@ export function computeActivity(
   const books: BookActivity[] = [];
   const days = new Map<string, { pages: number; syncs: number; books: Map<string, DayBook> }>();
   // The day bucket for a sync, and this book's entry in it (opened at position `from`).
+  const dayKey = (at: number) => new Date((at - tzOffsetMinutes * 60) * 1000).toISOString().slice(0, 10);
   const dayOf = (at: number, document: string, from: number) => {
-    const key = new Date((at - tzOffsetMinutes * 60) * 1000).toISOString().slice(0, 10);
+    const key = dayKey(at);
     let d = days.get(key);
     if (!d) days.set(key, (d = { pages: 0, syncs: 0, books: new Map() }));
     let b = d.books.get(document);
@@ -115,6 +116,17 @@ export function computeActivity(
         : info.status === 'finished'
           ? (deviceFinish ?? logFinish ?? info.status_at)
           : null;
+    // Finished offline on a day the book never synced: still give that day a
+    // timeline entry (no syncs, so it isn't counted as a reading day).
+    if (deviceFinish !== null && finished === deviceFinish) {
+      const key = dayKey(deviceFinish);
+      let d = days.get(key);
+      if (!d) days.set(key, (d = { pages: 0, syncs: 0, books: new Map() }));
+      if (!d.books.has(document)) {
+        const at = list.reduce((m, r) => (dayKey(r.at) <= key ? Math.max(m, r.percentage) : m), 0);
+        d.books.set(document, { document, pages: 0, syncs: 0, from: at, to: at });
+      }
+    }
     const pagesRead = pageCount ? Math.round(max * pageCount) : null;
     pagesTotal += pagesRead ?? 0;
     books.push({

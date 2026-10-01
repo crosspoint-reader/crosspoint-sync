@@ -506,8 +506,10 @@ Pages are print pages (furthest percent x page count), not screen pages. A day's
 forward progress after a book's first logged sync, as a running max across devices; `syncs` counts
 every logged sync that day, so any day with a sync is a reading day. `books` breaks the day down per
 book for a reading timeline; `from`/`to` are the furthest position before and after that day. History from before the log
-existed is backfilled from progress samples (migration 0013). `finished_at` is the
-first sync at >= 98%, overridden by a manual status. This never estimates reading time.
+existed is backfilled from progress samples (migration 0013). `finished_at` is CrossInk's
+`finished_date` (pinned to local noon on that day) when a device reported one, else the first sync at
+>= 98%, overridden by a manual status. A CrossInk finish day with no sync still gets a `books` entry
+(`syncs: 0`) so the timeline can show it. This never estimates reading time.
 
 ### Connectors (master sync hub)
 
