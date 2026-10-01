@@ -147,7 +147,12 @@ function saved(session, path) {
     return null
   }
 }
-const bookList = (r) => r.items.filter((b) => b.title || b.filename)
+// A book marked finished reads as 100% wherever the reader left off; the reader's
+// real position stays in device_percentage (and on the server, which syncs it back).
+const bookList = (r) =>
+  r.items
+    .filter((b) => b.title || b.filename)
+    .map((b) => (b.status === 'finished' ? { ...b, device_percentage: b.percentage, percentage: 1 } : b))
 
 export const cached = {
   books: (s) => {
