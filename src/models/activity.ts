@@ -37,6 +37,9 @@ export interface BookActivity {
   finished_at: number | null;
   page_count: number | null;
   pages_read: number | null;
+  /** Calendar days from start to finish, counting both (a one-day read is 1). Null when
+   *  unfinished, finished only by a manual status, or already finished on its first sync. */
+  days_to_finish: number | null;
 }
 
 export interface Activity {
@@ -57,15 +60,19 @@ export interface DayBook {
 }
 
 /**
- * `finishedDates`: device-reported finish dates (CrossInk `finished_date`), unix
- * seconds at UTC midnight of the device's local calendar date.
+ * `finishedDates` / `startDates`: device-reported dates (CrossInk `finished_date` /
+ * `start_date`), unix seconds at UTC midnight of the device's local calendar date.
  */
 export function computeActivity(
   rows: LogRow[],
   docs: Map<string, DocInfo>,
   tzOffsetMinutes = 0,
-  finishedDates: Map<string, number> = new Map()
+  finishedDates: Map<string, number> = new Map(),
+  startDates: Map<string, number> = new Map()
 ): Activity {
+  // Device dates are calendar dates: pin them to local noon in the client
+  // timezone so they land on that same day however they're displayed.
+  const localNoon = (date: number | undefined) => (date ? date + 12 * 3600 + tzOffsetMinutes * 60 : null);
   const byDoc = new Map<string, LogRow[]>();
   for (const r of rows) {
     const list = byDoc.get(r.document) ?? [];
@@ -106,10 +113,7 @@ export function computeActivity(
       b.to = max;
       if (logFinish === null && max >= FINISHED_AT) logFinish = r.at;
     }
-    // The device date is a calendar date: pin it to local noon in the client
-    // timezone so it lands on that same day however it's displayed.
-    const date = finishedDates.get(document);
-    const deviceFinish = date ? date + 12 * 3600 + tzOffsetMinutes * 60 : null;
+    const deviceFinish = localNoon(finishedDates.get(document));
     const finished =
       info?.status == null
         ? (deviceFinish ?? logFinish)
@@ -129,14 +133,25 @@ export function computeActivity(
     }
     const pagesRead = pageCount ? Math.round(max * pageCount) : null;
     pagesTotal += pagesRead ?? 0;
+    // CrossInk's start date when it has one: a book is often read before it ever syncs.
+    const deviceStart = localNoon(startDates.get(document));
+    const started = deviceStart ?? list[0].at;
+    let daysToFinish: number | null = null;
+    // A manual "finished" (status_at) marks when it was tapped, not when it was read.
+    const realFinish = finished !== null && (finished === deviceFinish || finished === logFinish);
+    if (realFinish && (deviceStart !== null || finished > started)) {
+      const days = (Date.parse(dayKey(finished)) - Date.parse(dayKey(started))) / 86400000 + 1;
+      if (days >= 1) daysToFinish = days;
+    }
     books.push({
       document,
-      started_at: list[0].at,
+      started_at: started,
       last_at: list[list.length - 1].at,
       percentage: max,
       finished_at: finished,
       page_count: pageCount,
       pages_read: pagesRead,
+      days_to_finish: daysToFinish,
     });
   }
 

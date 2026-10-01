@@ -62,6 +62,47 @@ describe('computeActivity', () => {
     expect(a.days.map(({ books, ...d }) => d)).toEqual([{ day: '2026-08-31', pages: 10, syncs: 2 }]);
   });
 
+  it('prefers the device start date over the first sync', () => {
+    const startedOn = Date.UTC(2026, 7, 11) / 1000; // started Aug 11, first synced Sep 1
+    const a = computeActivity(
+      [
+        { document: 'a', percentage: 0.5, at: T },
+        { document: 'b', percentage: 0.5, at: T },
+      ],
+      new Map([['a', doc(100)], ['b', doc(100)]]),
+      240,
+      new Map(),
+      new Map([['a', startedOn]])
+    );
+    const by = Object.fromEntries(a.books.map((b) => [b.document, b]));
+    expect(by.a.started_at).toBe(startedOn + 12 * 3600 + 240 * 60);
+    expect(by.b.started_at).toBe(T);
+  });
+
+  it('counts days to finish inclusively, and only when the start is known', () => {
+    const aug = (d: number) => Date.UTC(2026, 7, d) / 1000;
+    const a = computeActivity(
+      [
+        { document: 'device', percentage: 1, at: T },
+        { document: 'oneDay', percentage: 1, at: T },
+        { document: 'log', percentage: 0.2, at: T },
+        { document: 'log', percentage: 0.99, at: T + 3 * DAY },
+        { document: 'firstSync', percentage: 0.99, at: T },
+        { document: 'reading', percentage: 0.5, at: T },
+        { document: 'manual', percentage: 0.1, at: T },
+      ],
+      new Map([
+        ...['device', 'oneDay', 'log', 'firstSync', 'reading'].map((d): [string, DocInfo] => [d, doc(100)]),
+        ['manual', doc(100, 'finished', T + 3600)],
+      ]),
+      240,
+      new Map([['device', aug(16)], ['oneDay', aug(20)]]),
+      new Map([['device', aug(11)], ['oneDay', aug(20)]])
+    );
+    const by = Object.fromEntries(a.books.map((b) => [b.document, b.days_to_finish]));
+    expect(by).toEqual({ device: 6, oneDay: 1, log: 4, firstSync: null, reading: null, manual: null });
+  });
+
   it('prefers the device finish date over the sync that reported it', () => {
     const finishedOn = Date.UTC(2026, 7, 24) / 1000; // finished offline Aug 24, synced Sep 30
     const a = computeActivity(

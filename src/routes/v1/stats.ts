@@ -220,11 +220,13 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
       snapshotsByDoc.set(document, list);
     }
     const finishedDates = new Map<string, number>();
+    const startDates = new Map<string, number>();
     for (const [document, snapshots] of snapshotsByDoc) {
       const combined = combineBookStats(snapshots);
       if (combined.completed && combined.finished_date > 0) finishedDates.set(document, combined.finished_date);
+      if (combined.start_date > 0) startDates.set(document, combined.start_date);
     }
-    return c.json(computeActivity(rows, docs, tz, finishedDates));
+    return c.json(computeActivity(rows, docs, tz, finishedDates, startDates));
   });
 
   return app;

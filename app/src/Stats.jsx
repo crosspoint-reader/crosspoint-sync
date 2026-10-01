@@ -521,7 +521,7 @@ function PagesAndBooks({ activity: all, books, onShare }) {
   const shown = all.books.filter((b) => titles.has(b.document))
   const activity = { ...all, books: shown, pages_total: shown.reduce((n, b) => n + (b.pages_read ?? 0), 0) }
   const finished = activity.books.filter((b) => b.finished_at).sort((a, b) => b.finished_at - a.finished_at)
-  const spans = finished.map((b) => (b.finished_at - b.started_at) / 86400).filter((d) => d >= 1)
+  const spans = finished.map((b) => b.days_to_finish).filter(Boolean)
   const known = activity.books.filter((b) => b.page_count).length
   const tiles = [
     ['Pages read', activity.pages_total.toLocaleString()],

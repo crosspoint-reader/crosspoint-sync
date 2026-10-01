@@ -497,7 +497,8 @@ CrossPoint, KOReader). Every progress change is logged server-side. `tz` is the 
 ```json
 {"pages_total": 1923,
  "books": [{"document": "...", "started_at": 1790000000, "last_at": 1790600000, "percentage": 0.997,
-            "finished_at": 1790600000, "page_count": 400, "pages_read": 399}],
+            "finished_at": 1790600000, "page_count": 400, "pages_read": 399,
+            "days_to_finish": 7}],
  "days": [{"day": "2026-09-28", "pages": 56, "syncs": 4,
            "books": [{"document": "...", "pages": 56, "syncs": 4, "from": 0.41, "to": 0.55}]}]}
 ```
@@ -506,10 +507,13 @@ Pages are print pages (furthest percent x page count), not screen pages. A day's
 forward progress after a book's first logged sync, as a running max across devices; `syncs` counts
 every logged sync that day, so any day with a sync is a reading day. `books` breaks the day down per
 book for a reading timeline; `from`/`to` are the furthest position before and after that day. History from before the log
-existed is backfilled from progress samples (migration 0013). `finished_at` is CrossInk's
+existed is backfilled from progress samples (migration 0013). `started_at` is CrossInk's
+`start_date` (pinned to local noon on that day) when a device reported one, else the first sync. `finished_at` is CrossInk's
 `finished_date` (pinned to local noon on that day) when a device reported one, else the first sync at
 >= 98%, overridden by a manual status. A CrossInk finish day with no sync still gets a `books` entry
-(`syncs: 0`) so the timeline can show it. This never estimates reading time.
+(`syncs: 0`) so the timeline can show it. `days_to_finish` counts calendar days from start to finish,
+both included (a one-day read is 1); it is null when unfinished, finished only by a manual status, or
+already finished on the first sync with no CrossInk start date. This never estimates reading time.
 
 ### Connectors (master sync hub)
 
