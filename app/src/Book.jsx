@@ -7,8 +7,10 @@ import ShareSheet from './ShareSheet.jsx'
 import { Picker } from './Settings.jsx'
 import { STATUS, Card, Cover, EmptyState, ErrorNote, ProgressBar, Spinner, ViaHardcover, ago, duration, notify, pct, useLoad } from './ui.jsx'
 
-const date = (unix) =>
-  unix ? new Date(unix * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : null
+const date = (unix, opts) =>
+  unix ? new Date(unix * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', ...opts }) : null
+// CrossInk stats dates are calendar dates sent as UTC midnight: show them in UTC so they don't slip a day.
+const calendarDate = (unix) => date(unix, { timeZone: 'UTC' })
 
 function StatusPicker({ session, book, onChange }) {
   const [busy, setBusy] = useState(null)
@@ -64,8 +66,8 @@ function Stats({ session, doc, activity: a, wide = false }) {
       ['Time read', duration(c.seconds)],
       ['Sessions', c.sessions],
       ['Pages turned', c.pages],
-      ['Started', date(c.start_date)],
-      ['Finished', date(c.finished_date)],
+      ['Started', calendarDate(c.start_date)],
+      ['Finished', calendarDate(c.finished_date)],
     ]
   } else if (a) {
     const days = Math.max(1, Math.round(((a.finished_at ?? Date.now() / 1000) - a.started_at) / 86400))

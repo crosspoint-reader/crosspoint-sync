@@ -12,6 +12,8 @@
  * - Every day with any sync counts as a reading day (`syncs`), even a book's
  *   first sync or one with no known page count: a sync means the book was open.
  * - Finished = first sync at >= 98%, unless a manual status says otherwise.
+ *   A device-reported finish date (CrossInk stats) wins over the sync date,
+ *   since a book can be finished offline and only synced days later.
  */
 export const FINISHED_AT = 0.98;
 
@@ -54,7 +56,16 @@ export interface DayBook {
   to: number;
 }
 
-export function computeActivity(rows: LogRow[], docs: Map<string, DocInfo>, tzOffsetMinutes = 0): Activity {
+/**
+ * `finishedDates`: device-reported finish dates (CrossInk `finished_date`), unix
+ * seconds at UTC midnight of the device's local calendar date.
+ */
+export function computeActivity(
+  rows: LogRow[],
+  docs: Map<string, DocInfo>,
+  tzOffsetMinutes = 0,
+  finishedDates: Map<string, number> = new Map()
+): Activity {
   const byDoc = new Map<string, LogRow[]>();
   for (const r of rows) {
     const list = byDoc.get(r.document) ?? [];
@@ -94,8 +105,16 @@ export function computeActivity(rows: LogRow[], docs: Map<string, DocInfo>, tzOf
       b.to = max;
       if (logFinish === null && max >= FINISHED_AT) logFinish = r.at;
     }
+    // The device date is a calendar date: pin it to local noon in the client
+    // timezone so it lands on that same day however it's displayed.
+    const date = finishedDates.get(document);
+    const deviceFinish = date ? date + 12 * 3600 + tzOffsetMinutes * 60 : null;
     const finished =
-      info?.status == null ? logFinish : info.status === 'finished' ? (logFinish ?? info.status_at) : null;
+      info?.status == null
+        ? (deviceFinish ?? logFinish)
+        : info.status === 'finished'
+          ? (deviceFinish ?? logFinish ?? info.status_at)
+          : null;
     const pagesRead = pageCount ? Math.round(max * pageCount) : null;
     pagesTotal += pagesRead ?? 0;
     books.push({

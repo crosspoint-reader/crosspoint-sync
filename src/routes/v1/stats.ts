@@ -178,7 +178,21 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
           .all(user.id) as unknown as (DocInfo & { document: string })[]
       ).map((d) => [d.document, d])
     );
-    return c.json(computeActivity(rows, docs, tz));
+    // CrossInk's own finish dates, combined across devices like /stats/books/:document.
+    const snapshotsByDoc = new Map<string, BookStatsSnapshot[]>();
+    for (const r of db
+      .prepare('SELECT document, payload FROM stats_device_book WHERE user_id = ?')
+      .all(user.id) as { document: string; payload: string }[]) {
+      const list = snapshotsByDoc.get(r.document) ?? [];
+      list.push(JSON.parse(r.payload) as BookStatsSnapshot);
+      snapshotsByDoc.set(r.document, list);
+    }
+    const finishedDates = new Map<string, number>();
+    for (const [document, snapshots] of snapshotsByDoc) {
+      const combined = combineBookStats(snapshots);
+      if (combined.completed && combined.finished_date > 0) finishedDates.set(document, combined.finished_date);
+    }
+    return c.json(computeActivity(rows, docs, tz, finishedDates));
   });
 
   return app;

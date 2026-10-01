@@ -61,6 +61,24 @@ describe('computeActivity', () => {
     );
     expect(a.days.map(({ books, ...d }) => d)).toEqual([{ day: '2026-08-31', pages: 10, syncs: 2 }]);
   });
+
+  it('prefers the device finish date over the sync that reported it', () => {
+    const finishedOn = Date.UTC(2026, 7, 24) / 1000; // finished offline Aug 24, synced Sep 30
+    const a = computeActivity(
+      [
+        { document: 'a', percentage: 0.5, at: T },
+        { document: 'a', percentage: 1, at: T + 29 * DAY },
+        { document: 'dnf', percentage: 1, at: T },
+      ],
+      new Map([['a', doc(100)], ['dnf', doc(100, 'dnf', T)]]),
+      240,
+      new Map([['a', finishedOn], ['dnf', finishedOn]])
+    );
+    const by = Object.fromEntries(a.books.map((b) => [b.document, b]));
+    // Local noon on Aug 24 in New York, so the client shows the device's date.
+    expect(by.a.finished_at).toBe(finishedOn + 12 * 3600 + 240 * 60);
+    expect(by.dnf.finished_at).toBeNull();
+  });
 });
 
 describe('progress_log backfill (0013)', () => {
