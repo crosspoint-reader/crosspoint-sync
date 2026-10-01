@@ -62,7 +62,7 @@ export async function resolveMatch(
   const connector = getConnector(connectorId);
   const account = getAccount(db, userId, connectorId);
   if (!connector || !account) return null;
-  const cred = decryptCredential(account);
+  const cred = decryptCredential(account, db);
   const meta = documentMeta(db, userId, document);
 
   let match: Match | null = null;
@@ -141,7 +141,7 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
     return;
   }
 
-  const cred = decryptCredential(account);
+  const cred = decryptCredential(account, db);
   try {
     const result = await connector.push(cred, match, ev, http, { db, userId: row.user_id });
     if (result.ok) {

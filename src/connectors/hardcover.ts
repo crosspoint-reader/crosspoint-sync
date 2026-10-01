@@ -1,14 +1,19 @@
 import { decideMatch, extractTitleAuthor, type Candidate } from './matching.js';
-import type {
-  Connector,
-  Credential,
-  DocumentMeta,
-  ExternalBook,
-  HttpTransport,
-  Match,
-  OutboundEvent,
-  PushResult,
-  ValidateResult,
+import {
+  ConnectorOperationError,
+  SAVE_CREDENTIAL,
+  type Connector,
+  type Credential,
+  type DeviceLinkPoll,
+  type DeviceLinkStart,
+  type DocumentMeta,
+  type ExternalBook,
+  type HttpTransport,
+  type Match,
+  type OutboundEvent,
+  type PushResult,
+  type SavableCredential,
+  type ValidateResult,
 } from './types.js';
 
 /**
@@ -27,6 +32,14 @@ import type {
 
 const ENDPOINT = 'https://api.hardcover.app/v1/graphql';
 
+// Since August 2026 Hardcover API keys (hc_pat_...) carry only the permissions
+// ticked when they're created (older keys keep full access). This connector
+// reads the profile and library, searches the catalog, and writes the library.
+export const HARDCOVER_SCOPES = ['read:me', 'read:library', 'read:catalog', 'write:library'];
+// Hardcover's new-key form with those scopes pre-ticked (their "PAT link" format).
+export const HARDCOVER_NEW_KEY_URL = `https://hardcover.app/account/api/keys/new?scope=${HARDCOVER_SCOPES.join('+')}`;
+const SCOPE_HINT = `Create a Hardcover API key with ${HARDCOVER_SCOPES.join(', ')}.`;
+
 // GATE: confirm Hardcover's user_book status ids (want-to-read/reading/read).
 const STATUS_READING = 2;
 const STATUS_READ = 3;
@@ -35,10 +48,127 @@ interface HardcoverCred extends Credential {
   token: string;
 }
 
-function tokenOf(cred: Credential): string {
-  const t = (cred as HardcoverCred).token;
-  if (typeof t !== 'string' || t.length === 0) throw new Error('missing hardcover token');
-  return t;
+// ---- Linking ---------------------------------------------------------------
+// Users sign in with Hardcover's OAuth Device Authorization Grant: we show a
+// code, they approve CrossPoint Sync at hardcover.app/link. "CrossPoint Sync" is
+// registered as a public (no secret) Hardcover app, so this client id ships here
+// and works for self-hosted servers too; HARDCOVER_CLIENT_ID overrides it.
+// A pasted API key ({ token }) still works for older links and as a fallback.
+const CLIENT_ID = process.env.HARDCOVER_CLIENT_ID || '80a1b03b-d090-4243-b049-515857b83d97';
+const TOKEN_URL = 'https://api.hardcover.app/oauth2/token';
+const DEVICE_URL = 'https://api.hardcover.app/oauth2/device';
+
+interface TokenSet {
+  access_token: string;
+  refresh_token: string;
+  expires_at: number; // unix seconds
+}
+
+async function oauthPost(http: HttpTransport, url: string, fields: Record<string, string>) {
+  const res = await http(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+    body: new URLSearchParams(fields).toString(),
+  });
+  let body: any = {};
+  try {
+    body = await res.json();
+  } catch {
+    body = {};
+  }
+  return { status: res.status, body };
+}
+
+const tokenSet = (body: any): TokenSet | null =>
+  typeof body?.access_token === 'string' && typeof body?.refresh_token === 'string'
+    ? {
+        access_token: body.access_token,
+        refresh_token: body.refresh_token,
+        expires_at: Math.floor(Date.now() / 1000) + (Number(body.expires_in) || 7 * 86400),
+      }
+    : null;
+
+async function beginLink(http: HttpTransport): Promise<DeviceLinkStart> {
+  const { status, body } = await oauthPost(http, DEVICE_URL, { client_id: CLIENT_ID, scope: HARDCOVER_SCOPES.join(' ') });
+  if (status !== 200 || typeof body?.device_code !== 'string') {
+    throw new Error(body?.error_description ?? body?.error ?? `Hardcover answered ${status}`);
+  }
+  return {
+    deviceCode: body.device_code,
+    userCode: body.user_code,
+    verificationUri: body.verification_uri ?? 'https://hardcover.app/link',
+    verificationUriComplete: body.verification_uri_complete,
+    interval: body.interval ?? 5,
+    expiresIn: body.expires_in ?? 900,
+  };
+}
+
+async function pollLink(deviceCode: string, http: HttpTransport): Promise<DeviceLinkPoll> {
+  const { status, body } = await oauthPost(http, TOKEN_URL, {
+    grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+    device_code: deviceCode,
+    client_id: CLIENT_ID,
+  });
+  const tokens = tokenSet(body);
+  if (tokens) return { status: 'ok', credential: { ...tokens } };
+  switch (body?.error) {
+    case 'authorization_pending':
+    case 'slow_down':
+      return { status: 'pending' };
+    case 'access_denied':
+      return { status: 'denied', error: 'You declined the request on Hardcover.' };
+    case 'expired_token':
+      return { status: 'expired', error: 'The code expired. Start again.' };
+    default:
+      return status >= 500 ? { status: 'pending' } : { status: 'error', error: body?.error_description ?? body?.error ?? `status ${status}` };
+  }
+}
+
+// Refresh tokens rotate on every use, and reusing a spent one makes Hardcover
+// revoke the whole sign-in. So refreshes are serialized per token, and a caller
+// holding an already-spent token (a credential loaded before another refresh)
+// follows the chain to the newest set instead of replaying it.
+// ponytail: in-process only; run a single server process (as deployed) or move this to the DB.
+const inflight = new Map<string, Promise<TokenSet>>();
+const successor = new Map<string, TokenSet>();
+
+async function refreshed(http: HttpTransport, refreshToken: string): Promise<TokenSet> {
+  let next = successor.get(refreshToken);
+  while (next && successor.has(next.refresh_token)) next = successor.get(next.refresh_token)!;
+  if (next && next.expires_at - 300 > Date.now() / 1000) return next;
+  const from = next?.refresh_token ?? refreshToken;
+  let pending = inflight.get(from);
+  if (!pending) {
+    pending = (async () => {
+      const { status, body } = await oauthPost(http, TOKEN_URL, { grant_type: 'refresh_token', refresh_token: from, client_id: CLIENT_ID });
+      const tokens = tokenSet(body);
+      if (tokens) {
+        successor.set(from, tokens);
+        return tokens;
+      }
+      if (status === 400 || status === 401) {
+        throw new ConnectorOperationError('Hardcover sign-in expired or was revoked. Link Hardcover again.', false, true);
+      }
+      throw new ConnectorOperationError(`Hardcover token refresh failed (${status})`, true);
+    })().finally(() => inflight.delete(from));
+    inflight.set(from, pending);
+  }
+  return pending;
+}
+
+/** A usable bearer token: the pasted API key, or a fresh OAuth access token. */
+async function accessToken(cred: Credential, http: HttpTransport): Promise<string> {
+  const pat = (cred as HardcoverCred).token;
+  if (typeof pat === 'string' && pat.length > 0) return pat;
+  const c = cred as SavableCredential & Partial<TokenSet>;
+  if (typeof c.access_token !== 'string' || typeof c.refresh_token !== 'string') {
+    throw new ConnectorOperationError('Hardcover is not linked', false, true);
+  }
+  if ((c.expires_at ?? 0) - 300 > Date.now() / 1000) return c.access_token;
+  const tokens = await refreshed(http, c.refresh_token);
+  Object.assign(c, tokens);
+  c[SAVE_CREDENTIAL]?.();
+  return tokens.access_token;
 }
 
 async function gql(
@@ -56,7 +186,20 @@ async function gql(
     body: JSON.stringify({ query, variables }),
   });
   if (res.status === 401 || res.status === 403) {
-    return { status: res.status, errors: [{ message: 'unauthorized' }] };
+    // Body: { error: "invalid_token" | "insufficient_scope" | ..., error_description, scope }
+    let body: { error?: string; error_description?: string; scope?: string } = {};
+    try {
+      body = (await res.json()) as typeof body;
+    } catch {
+      /* no body */
+    }
+    const message =
+      res.status === 401
+        ? `Hardcover key is invalid or expired. ${SCOPE_HINT}`
+        : body.error === 'insufficient_scope'
+          ? `Hardcover key is missing the ${body.scope ?? 'required'} permission. ${SCOPE_HINT}`
+          : `Hardcover refused the request (${body.error_description ?? body.error ?? res.status}).`;
+    return { status: res.status, errors: [{ message }] };
   }
   let body: any = {};
   try {
@@ -69,10 +212,9 @@ async function gql(
 
 async function validate(cred: Credential, http: HttpTransport): Promise<ValidateResult> {
   try {
-    const token = tokenOf(cred);
+    const token = await accessToken(cred, http);
     // GATE: confirm the `me` query shape.
     const r = await gql(http, token, `query { me { username } }`, {});
-    if (r.status === 401 || r.status === 403) return { ok: false, error: 'invalid token' };
     if (r.errors?.length) return { ok: false, error: r.errors[0].message };
     const username = r.data?.me?.[0]?.username ?? r.data?.me?.username;
     // No username means the API did not recognize the token even though the
@@ -93,7 +235,7 @@ async function match(
 ): Promise<Match | null> {
   const ta = extractTitleAuthor(doc);
   if (!ta) return null;
-  const token = tokenOf(cred);
+  const token = await accessToken(cred, http);
   const q = `${ta.title} ${ta.author}`.trim();
   // GATE: confirm Hardcover's search query name and result shape.
   const r = await gql(
@@ -123,7 +265,7 @@ async function match(
 
 /** The user's "Currently Reading" shelf (status_id 2). */
 async function listCurrentlyReading(cred: Credential, http: HttpTransport): Promise<ExternalBook[]> {
-  const token = tokenOf(cred);
+  const token = await accessToken(cred, http);
   // GATE: confirm user_books/status_id shape.
   const r = await gql(
     http,
@@ -153,7 +295,7 @@ async function listCurrentlyReading(cred: Credential, http: HttpTransport): Prom
 
 /** Free-text catalog search (for the manual-match picker). */
 async function search(cred: Credential, query: string, http: HttpTransport): Promise<ExternalBook[]> {
-  const token = tokenOf(cred);
+  const token = await accessToken(cred, http);
   const r = await gql(
     http,
     token,
@@ -200,7 +342,7 @@ export function extractSearchHits(data: any): Candidate[] {
 /** Turn a GraphQL/HTTP response into a retry decision, or null if it's fine. */
 function classify(r: { status: number; errors?: { message: string }[] }): PushResult | null {
   if (r.status === 401 || r.status === 403) {
-    return { ok: false, retryable: false, needsReauth: true, error: 'unauthorized' };
+    return { ok: false, retryable: false, needsReauth: true, error: r.errors?.[0]?.message ?? 'unauthorized' };
   }
   if (r.status === 429) return { ok: false, retryable: true, error: 'rate limited' };
   if (r.status >= 500) return { ok: false, retryable: true, error: `server ${r.status}` };
@@ -250,7 +392,15 @@ async function push(
   ev: OutboundEvent,
   http: HttpTransport
 ): Promise<PushResult> {
-  const token = tokenOf(cred);
+  let token: string;
+  try {
+    token = await accessToken(cred, http);
+  } catch (err) {
+    if (err instanceof ConnectorOperationError) {
+      return { ok: false, retryable: err.retryable, needsReauth: err.needsReauth, error: err.message };
+    }
+    throw err;
+  }
   const bookId = Number(m.externalId);
   if (!Number.isFinite(bookId)) return { ok: false, retryable: false, error: 'bad book id' };
   const pct = Math.max(0, Math.min(1, ev.percentage ?? 0));
@@ -453,11 +603,13 @@ export const hardcoverConnector: Connector = {
   tier: 1,
   capabilities: { read: false, write: true },
   carries: ['progress', 'finished'],
-  credentialKind: 'token',
+  credentialKind: 'device_code',
   experimental: false,
   validate,
   match,
   push,
   listCurrentlyReading,
   search,
+  beginLink,
+  pollLink,
 };

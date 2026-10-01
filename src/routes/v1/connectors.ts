@@ -140,6 +140,7 @@ export function connectorRoutes(
         device_code: start.deviceCode,
         user_code: start.userCode,
         verification_uri: start.verificationUri,
+        verification_uri_complete: start.verificationUriComplete ?? null,
         interval: start.interval,
         expires_in: start.expiresIn,
       });
@@ -197,7 +198,7 @@ export function connectorRoutes(
     const account = getAccount(db, user.id, conn.id);
     if (!account) return c.json({ code: 2003, message: 'Connector not linked' }, 400);
     try {
-      const result = await conn.refreshLibrary(decryptCredential(account), transport);
+      const result = await conn.refreshLibrary(decryptCredential(account, db), transport);
       return c.json(result ?? { count: null });
     } catch (err) {
       return c.json({ code: 2003, message: err instanceof Error ? err.message : 'refresh failed' }, 502);
@@ -224,7 +225,7 @@ export function connectorRoutes(
     const account = getAccount(db, user.id, conn.id);
     if (!account) return c.json({ code: 2003, message: 'Connector not linked' }, 400);
     try {
-      const book = await conn.lookup(decryptCredential(account), externalId, transport);
+      const book = await conn.lookup(decryptCredential(account, db), externalId, transport);
       return c.json({ found: !!book, book: book ?? null });
     } catch (err) {
       return c.json({ code: 2003, message: err instanceof Error ? err.message : 'lookup failed' }, 502);
@@ -329,7 +330,7 @@ export function connectorRoutes(
     const account = getAccount(db, user.id, conn.id);
     if (!account) return c.json({ code: 2003, message: 'Connector not linked' }, 400);
     try {
-      const books = await conn.listCurrentlyReading(decryptCredential(account), transport);
+      const books = await conn.listCurrentlyReading(decryptCredential(account, db), transport);
       return c.json({ books });
     } catch (err) {
       return c.json({ books: [], error: err instanceof Error ? err.message : 'failed' });
@@ -346,7 +347,7 @@ export function connectorRoutes(
     const account = getAccount(db, user.id, conn.id);
     if (!account) return c.json({ code: 2003, message: 'Connector not linked' }, 400);
     try {
-      const books = await conn.search(decryptCredential(account), q, transport);
+      const books = await conn.search(decryptCredential(account, db), q, transport);
       return c.json({ books });
     } catch (err) {
       return c.json({ books: [], error: err instanceof Error ? err.message : 'failed' });
@@ -387,7 +388,7 @@ export function connectorRoutes(
       const account = getAccount(db, user.id, conn.id);
       if (account) {
         try {
-          externalEdition = await conn.resolveEdition(decryptCredential(account), externalId, transport);
+          externalEdition = await conn.resolveEdition(decryptCredential(account, db), externalId, transport);
         } catch {
           externalEdition = null; // best-effort; push can still fall back
         }

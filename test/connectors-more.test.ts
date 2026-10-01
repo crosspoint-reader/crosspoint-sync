@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DOC, makeTestApp, registerUser } from './helpers.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
-import type { HttpTransport } from '../src/connectors/types.js';
+import { SAVE_CREDENTIAL, type HttpTransport } from '../src/connectors/types.js';
 import { drainQueue } from '../src/connectors/runner.js';
 import { claimReady } from '../src/connectors/queue.js';
 import { kosyncConnector, baseUrl } from '../src/connectors/kosync.js';
@@ -837,5 +837,101 @@ describe('bookorbit connector', () => {
     const ch = await bookorbitConnector.pullProgress!(cred('pull'), m, fake.transport, since);
     expect(ch).toMatchObject({ externalId: '12', percentage: 0.55, finished: false });
     expect(await bookorbitConnector.pullProgress!(cred('pull'), m, fake.transport, Date.parse('2026-09-01T00:00:00Z'))).toBeNull();
+  });
+});
+
+describe('hardcover scoped API keys', () => {
+  const CRED = { token: 'hc_pat_test' };
+
+  it('validates a new hc_pat_ key with the needed scopes', async () => {
+    const fake = fakeTransport();
+    fake.on('me', 200, { data: { me: [{ username: 'julia' }] } });
+    expect(await hardcoverConnector.validate(CRED, fake.transport)).toEqual({ ok: true, accountLabel: 'julia' });
+  });
+
+  it('names the missing permission instead of calling the key invalid', async () => {
+    const fake = fakeTransport();
+    fake.on('me', 403, { error: 'insufficient_scope', error_description: 'missing scope', scope: 'read:me' });
+    const v = await hardcoverConnector.validate(CRED, fake.transport);
+    expect(v.ok).toBe(false);
+    expect(v.error).toContain('missing the read:me permission');
+    expect(v.error).toContain('write:library');
+  });
+
+  it('reports invalid or expired keys', async () => {
+    const fake = fakeTransport();
+    fake.on('me', 401, { error: 'invalid_token' });
+    expect((await hardcoverConnector.validate(CRED, fake.transport)).error).toContain('invalid or expired');
+  });
+
+  it('asks to relink with the real reason when a push hits a missing scope', async () => {
+    const fake = fakeTransport();
+    fake.on('graphql', 403, { error: 'insufficient_scope', scope: 'write:library' });
+    const r = await hardcoverConnector.push(
+      CRED,
+      { externalId: '42', confidence: 1 },
+      { kind: 'progress', document: 'd', percentage: 0.5, timestamp: 1 },
+      fake.transport
+    );
+    expect(r).toMatchObject({ ok: false, needsReauth: true });
+    expect(!r.ok && r.error).toContain('write:library');
+  });
+});
+
+describe('hardcover OAuth sign-in (device grant)', () => {
+  it('starts a device link with the pre-filled approval URL', async () => {
+    const fake = fakeTransport();
+    fake.on('/oauth2/device', 200, {
+      device_code: 'dc', user_code: 'NEE3-0G1A', verification_uri: 'https://hardcover.app/link',
+      verification_uri_complete: 'https://hardcover.app/link?c=NEE30G1A', interval: 5, expires_in: 900,
+    });
+    const start = await hardcoverConnector.beginLink!(fake.transport);
+    expect(start).toMatchObject({ userCode: 'NEE3-0G1A', verificationUriComplete: 'https://hardcover.app/link?c=NEE30G1A' });
+    const req = fake.calls[0];
+    expect(req.body).toContain('scope=read%3Ame+read%3Alibrary+read%3Acatalog+write%3Alibrary');
+  });
+
+  it('polls until approved, then returns the token set', async () => {
+    const fake = fakeTransport();
+    fake.on('/oauth2/token', 400, { error: 'authorization_pending' });
+    expect((await hardcoverConnector.pollLink!('dc', fake.transport)).status).toBe('pending');
+    fake.on('/oauth2/token', 200, { access_token: 'hc_at_1', refresh_token: 'hc_rt_1', expires_in: 604800 });
+    const done = await hardcoverConnector.pollLink!('dc', fake.transport);
+    expect(done.status).toBe('ok');
+    expect(done.credential).toMatchObject({ access_token: 'hc_at_1', refresh_token: 'hc_rt_1' });
+  });
+
+  it('refreshes an expired access token once, saves it, and never replays a spent refresh token', async () => {
+    const fake = fakeTransport();
+    fake.on('/oauth2/token', 200, { access_token: 'hc_at_2', refresh_token: 'hc_rt_2', expires_in: 604800 });
+    fake.on('me', 200, { data: { me: [{ username: 'julia' }] } });
+    let saves = 0;
+    const expired = () => ({ access_token: 'hc_at_1', refresh_token: 'hc_rt_spent', expires_at: 0 });
+    const a: any = expired();
+    a[SAVE_CREDENTIAL] = () => saves++;
+    const b: any = expired(); // a stale copy loaded before the refresh
+    // Both at once: one refresh request between them.
+    const [va, vb] = await Promise.all([hardcoverConnector.validate(a, fake.transport), hardcoverConnector.validate(b, fake.transport)]);
+    expect(va.ok && vb.ok).toBe(true);
+    expect(fake.calls.filter((c) => c.url.includes('/oauth2/token'))).toHaveLength(1);
+    expect(a).toMatchObject({ access_token: 'hc_at_2', refresh_token: 'hc_rt_2' });
+    expect(saves).toBe(1);
+    // A later stale copy follows the chain instead of reusing hc_rt_spent.
+    const c = expired();
+    await hardcoverConnector.validate(c, fake.transport);
+    expect(fake.calls.filter((x) => x.url.includes('/oauth2/token'))).toHaveLength(1);
+    expect(c.refresh_token).toBe('hc_rt_2');
+  });
+
+  it('asks to link again when the refresh token was revoked', async () => {
+    const fake = fakeTransport();
+    fake.on('/oauth2/token', 400, { error: 'invalid_grant' });
+    const r = await hardcoverConnector.push(
+      { access_token: 'hc_at_x', refresh_token: 'hc_rt_revoked', expires_at: 0 },
+      { externalId: '42', confidence: 1 },
+      { kind: 'progress', document: 'd', percentage: 0.5, timestamp: 1 },
+      fake.transport
+    );
+    expect(r).toMatchObject({ ok: false, needsReauth: true });
   });
 });

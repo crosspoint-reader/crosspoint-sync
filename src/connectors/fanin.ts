@@ -71,7 +71,7 @@ export async function pollConnector(
 
   if (conn.pullProgress) {
     let applied = 0;
-    const credential = decryptCredential(account);
+    const credential = decryptCredential(account, db);
     const matches = options.document ? [getMatch(db, userId, connectorId, options.document)] : listMatches(db, userId, connectorId);
     for (const match of matches) {
       if (!match?.external_id) continue;
@@ -106,7 +106,7 @@ export async function pollConnector(
   const since = getPullCursor(db, userId, connectorId);
   let changes;
   try {
-    changes = await conn.pullChanges!(decryptCredential(account), http, since);
+    changes = await conn.pullChanges!(decryptCredential(account, db), http, since);
   } catch {
     return 0; // best-effort; try again next tick
   }

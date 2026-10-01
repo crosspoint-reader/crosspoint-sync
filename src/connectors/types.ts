@@ -20,6 +20,8 @@ export interface DeviceLinkStart {
   deviceCode: string;
   userCode: string;
   verificationUri: string;
+  /** verificationUri with the code pre-filled, when the provider offers one. */
+  verificationUriComplete?: string;
   interval: number;
   expiresIn: number;
 }
@@ -156,6 +158,14 @@ export interface HttpTransport {
 
 /** A parsed credential (shape is connector-specific; stored encrypted as JSON). */
 export type Credential = Record<string, unknown>;
+
+/**
+ * Present on credentials loaded for a linked account: persists the credential's
+ * current fields (e.g. after an OAuth refresh rotated its tokens). A symbol, so
+ * it never reaches JSON.
+ */
+export const SAVE_CREDENTIAL = Symbol('saveCredential');
+export type SavableCredential = Credential & { [SAVE_CREDENTIAL]?: () => void };
 
 export interface Connector {
   id: string;

@@ -6,6 +6,7 @@ import { getCookie } from 'hono/cookie';
 import type { AppEnv } from '../auth/middleware.js';
 import { SESSION_COOKIE, verifySession } from '../auth/session.js';
 import { extensionZip } from '../kindle-zip.js';
+import { HARDCOVER_NEW_KEY_URL, HARDCOVER_SCOPES } from '../connectors/hardcover.js';
 
 /**
  * Minimal server-rendered web UI (no framework, no build step, no deps). Styled
@@ -91,6 +92,9 @@ const STYLE = `
     font-weight:600; cursor:pointer; font-family:inherit; }
   button.primary { background:var(--brand-500); color:#fff; box-shadow:0 1px 2px rgba(0,0,0,0.06); }
   button.primary:hover { background:var(--brand-600); }
+  a.primary { display:block; text-align:center; border-radius:8px; padding:10px 16px; font-size:14px; font-weight:600;
+    background:var(--brand-500); color:#fff; text-decoration:none; }
+  a.primary:hover { background:var(--brand-600); }
   button.ghost { background:#fff; color:var(--stone-700); box-shadow:0 0 0 1px var(--stone-200); }
   button.ghost:hover { background:var(--stone-50); }
   button.danger { background:#fff; color:#b91c1c; box-shadow:0 0 0 1px #f0cccc; }
@@ -560,7 +564,7 @@ async function linkCredential(body) {
 }
 
 const HINTS = {
-  hardcover: 'Paste your Hardcover API token from hardcover.app/account/api. Syncs your reading progress and shelf status.',
+  hardcover: 'Syncs your reading progress and shelf status to Hardcover.',
   microblog: 'Connect an app token to keep your Currently reading and Finished reading bookshelves in sync.',
   readwise: 'Paste your Readwise access token from readwise.io/access_token. Syncs your highlights.',
   'readwise-reader': 'Paste your Readwise access token from readwise.io/access_token. Archives books in Reader when you finish them, and brings your Reader progress back to your device.',
@@ -571,6 +575,12 @@ const HINTS = {
 };
 
 const TOKEN_HELP = {
+  hardcover: '<div class="muted" style="margin-bottom:18px"><p style="margin-top:0"><b>Create a Hardcover API key:</b></p>'
+    + '<ol style="padding-left:20px;margin-bottom:10px">'
+    + '<li>Open <a href="${HARDCOVER_NEW_KEY_URL}" target="_blank" rel="noopener noreferrer">Hardcover\u2019s New API Key form</a> (signed in). The permissions CrossPoint Sync needs are already ticked: <code>${HARDCOVER_SCOPES.join('</code>, <code>')}</code>.</li>'
+    + '<li>Name it <b>CrossPoint Sync</b>, pick an expiration, and create it.</li>'
+    + '<li>Copy the key (it starts with <code>hc_pat_</code>) and paste it below.</li>'
+    + '</ol><p style="margin-bottom:0">When the key expires, sync pauses until you link a new one.</p></div>',
   microblog: '<div class="muted" style="margin-bottom:18px"><p style="margin-top:0"><b>Get a Micro.blog app token:</b></p>'
     + '<ol style="padding-left:20px;margin-bottom:10px">'
     + '<li>Sign in to Micro.blog in another tab.</li>'
@@ -598,11 +608,13 @@ const TOKEN_HELP = {
   const conn = (data.connectors || []).find(c => c.id === ID);
   if (!conn) { location.href = '/account'; return; }
   $('title').textContent = 'Link ' + conn.name;
+  CONN_NAME = conn.name;
   $('desc').textContent = HINTS[ID] || '';
   if (conn.experimental) $('eyebrow').textContent = 'Experimental';
   render(conn);
 })();
 
+let CONN_NAME = 'the service';
 function done() { location.href = '/account'; }
 
 function render(conn) {
@@ -638,8 +650,17 @@ function render(conn) {
     };
   } else if (conn.credential_kind === 'device_code') {
     f.innerHTML = '<p class="muted" style="margin-top:0">Click start, then approve the request on ' + esc(conn.name) + '.</p>'
-      + '<button class="primary" id="start">Start</button><div id="dc" style="margin-top:14px"></div><div class="err" id="e"></div>';
+      + '<button class="primary" id="start">Start</button><div id="dc" style="margin-top:14px"></div><div class="err" id="e"></div>'
+      // Hardcover also takes a pasted API key (older links, or if sign-in isn't an option).
+      + (ID === 'hardcover' ? '<details style="margin-top:22px"><summary class="muted" style="cursor:pointer">Use an API key instead</summary><div style="margin-top:12px">'
+          + (TOKEN_HELP.hardcover || '') + '<label>API key</label><input id="tok" class="mono" type="password" placeholder="hc_pat_…">'
+          + '<button class="primary full mt" id="go">Link Hardcover</button><div class="err" id="te"></div></div></details>' : '');
     $('start').onclick = startDeviceFlow;
+    if ($('go')) $('go').onclick = async () => {
+      $('te').textContent = '';
+      const r = await linkCredential({ token: $('tok').value.trim().replace(/^Bearer\s+/i, '') });
+      if (r.ok) done(); else $('te').textContent = r.data.message || 'Could not link';
+    };
   } else {
     f.innerHTML = '<p class="muted">This connector is not linkable from here yet.</p>';
   }
@@ -650,8 +671,13 @@ async function startDeviceFlow() {
   $('start').disabled = true;
   const r = await jsend('/api/v1/connectors/' + ID + '/link/begin');
   if (!r.ok) { $('e').textContent = r.data.message || 'Could not start'; $('start').disabled = false; return; }
-  const { device_code, user_code, verification_uri, interval } = r.data;
-  $('dc').innerHTML = '<div class="notice"><p style="margin:0 0 8px">Go to <a href="' + esc(verification_uri) + '" target="_blank" rel="noopener">' + esc(verification_uri) + '</a> and enter this code:</p>'
+  const { device_code, user_code, verification_uri, verification_uri_complete, interval } = r.data;
+  // With a pre-filled link, one tap opens the approval page with the code already entered.
+  $('dc').innerHTML = '<div class="notice">'
+    + (verification_uri_complete
+        ? '<a class="primary" href="' + esc(verification_uri_complete) + '" target="_blank" rel="noopener">Approve on ' + esc(CONN_NAME) + '</a>'
+          + '<p class="muted" style="margin:10px 0 8px">Or go to <a href="' + esc(verification_uri) + '" target="_blank" rel="noopener">' + esc(verification_uri) + '</a> and enter this code:</p>'
+        : '<p style="margin:0 0 8px">Go to <a href="' + esc(verification_uri) + '" target="_blank" rel="noopener">' + esc(verification_uri) + '</a> and enter this code:</p>')
     + '<code class="token" style="text-align:center;font-size:20px;letter-spacing:3px">' + esc(user_code) + '</code>'
     + '<p class="muted" id="poll" style="margin:8px 0 0">Waiting for approval…</p></div>';
   const deadline = Date.now() + 15 * 60 * 1000;

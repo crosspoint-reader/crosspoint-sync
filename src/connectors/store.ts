@@ -1,7 +1,7 @@
 import type { DB } from '../db/db.js';
 import { nowSeconds } from '../models/sync.js';
 import { decryptSecret, encryptSecret } from '../crypto/secrets.js';
-import type { Credential, DocumentMeta, Match } from './types.js';
+import { SAVE_CREDENTIAL, type Credential, type DocumentMeta, type Match, type SavableCredential } from './types.js';
 
 export interface AccountRow {
   user_id: number;
@@ -52,8 +52,19 @@ export function listAccounts(db: DB, userId: number): AccountRow[] {
     .all(userId) as unknown as AccountRow[];
 }
 
-export function decryptCredential(row: AccountRow): Credential {
-  return JSON.parse(decryptSecret(row.cred_enc)) as Credential;
+/** Decrypt an account's credential. With `db`, it can save itself back (see SAVE_CREDENTIAL). */
+export function decryptCredential(row: AccountRow, db?: DB): Credential {
+  const cred = JSON.parse(decryptSecret(row.cred_enc)) as SavableCredential;
+  if (db) {
+    cred[SAVE_CREDENTIAL] = () => {
+      const enc = encryptSecret(JSON.stringify(cred));
+      db.prepare('UPDATE connector_accounts SET cred_enc = ?, updated_at = ? WHERE user_id = ? AND connector_id = ?').run(
+        enc, nowSeconds(), row.user_id, row.connector_id
+      );
+      row.cred_enc = enc;
+    };
+  }
+  return cred;
 }
 
 export function deleteAccount(db: DB, userId: number, connectorId: string): void {
