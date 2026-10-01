@@ -84,31 +84,22 @@ function topMoods(books, documents, n = 3) {
   return tagCounts(picked, 'moods').filter(([m]) => !isPace(m)).slice(0, n).map(([m]) => m)
 }
 
-// Moods as outlined stickers: size follows how many of your books carry the mood,
-// with a slight tilt each like they were stuck on by hand.
-const TILTS = [-4, 3, -2, 5, -3]
+// Moods as outlined stickers, with how many of your books carry each.
 function MoodStickers({ rows }) {
-  const max = Math.max(...rows.map(([, n]) => n), 1)
   return (
-    <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-4 py-2">
-      {rows.map(([mood, n], i) => {
-        const big = n / max
-        return (
-          <span
-            key={mood}
-            style={{ transform: `rotate(${TILTS[i % TILTS.length]}deg)` }}
-            className={`relative inline-flex items-center gap-1.5 rounded-full border-2 border-stone-900 bg-surface font-semibold text-stone-900 shadow-[3px_3px_0_var(--color-stone-900)] ${
-              big > 0.75 ? 'px-4 py-2 text-lg' : big > 0.4 ? 'px-3.5 py-1.5 text-base' : 'px-3 py-1 text-sm'
-            }`}
-          >
-            <span aria-hidden="true">{moodEmoji(mood)}</span>
-            {mood}
-            <span className="absolute -top-2.5 -right-2 grid size-5 place-items-center rounded-full bg-brand-500 font-mono text-[0.6rem] text-white ring-2 ring-surface">
-              {n}
-            </span>
+    <div className="mt-3 flex flex-wrap gap-x-3 gap-y-4 pt-1">
+      {rows.map(([mood, n]) => (
+        <span
+          key={mood}
+          className="relative inline-flex items-center gap-1.5 rounded-full border-2 border-stone-900 bg-surface px-3.5 py-1.5 text-base font-semibold text-stone-900 shadow-[3px_3px_0_var(--color-stone-900)]"
+        >
+          <span aria-hidden="true">{moodEmoji(mood)}</span>
+          {mood}
+          <span className="absolute -top-2.5 -right-2 grid size-5 place-items-center rounded-full bg-brand-500 font-mono text-[0.6rem] text-white ring-2 ring-surface">
+            {n}
           </span>
-        )
-      })}
+        </span>
+      ))}
     </div>
   )
 }
@@ -169,7 +160,7 @@ function WhatYouRead({ books }) {
             <h3 className="font-display text-lg font-semibold text-stone-900">Your moods</h3>
             <MoodStickers rows={moods} />
             {pace && (
-              <p className="mt-2 text-center text-xs text-stone-500">
+              <p className="mt-3 text-xs text-stone-500">
                 Mostly {pace.toLowerCase()} {moodEmoji(pace)}
               </p>
             )}

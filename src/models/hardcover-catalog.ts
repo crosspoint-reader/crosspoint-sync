@@ -35,6 +35,7 @@ export interface HardcoverBook {
   release_year: number | null;
   pages: number | null;
   cover: string | null;
+  description: string | null;
 }
 
 // ---- throttle (in-process; one server) --------------------------------------
@@ -104,6 +105,7 @@ function toBook(doc: any): HardcoverBook | null {
     release_year: typeof doc.release_year === 'number' ? doc.release_year : null,
     pages: typeof doc.pages === 'number' && doc.pages > 0 ? doc.pages : null,
     cover: typeof doc.image?.url === 'string' ? doc.image.url : null,
+    description: typeof doc.description === 'string' && doc.description.trim() ? doc.description.trim().slice(0, 6000) : null,
   };
 }
 

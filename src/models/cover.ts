@@ -183,10 +183,12 @@ function saveHardcover(db: DB, userId: number, document: string, hc: HardcoverBo
   const json = (v: string[] | undefined) => (v?.length ? JSON.stringify(v) : null);
   db.prepare(
     `UPDATE documents SET hc_id = ?, hc_slug = ?, moods = ?, genres = ?, content_warnings = ?, rating = ?,
-       series = ?, hc_series_id = ?, series_position = ?, release_year = ?, hc_checked_at = ? WHERE user_id = ? AND document = ?`
+       series = ?, hc_series_id = ?, series_position = ?, release_year = ?, description = ?, hc_checked_at = ?
+     WHERE user_id = ? AND document = ?`
   ).run(
     hc?.id ?? null, hc?.slug ?? null, json(hc?.moods), json(hc?.genres), json(hc?.content_warnings), hc?.rating ?? null,
-    hc?.series ?? null, hc?.series_id ?? null, hc?.series_position ?? null, hc?.release_year ?? null, nowSeconds(), userId, document
+    hc?.series ?? null, hc?.series_id ?? null, hc?.series_position ?? null, hc?.release_year ?? null,
+    hc?.description ?? null, nowSeconds(), userId, document
   );
 }
 

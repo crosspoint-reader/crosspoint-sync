@@ -197,7 +197,7 @@ function TabBar({ route }) {
   const cls = (active) =>
     `flex flex-1 flex-col items-center gap-0.5 pt-2 pb-1.5 text-[0.7rem] font-semibold ${active ? 'text-brand-600' : 'text-stone-500'}`
   return (
-    <nav className="fixed inset-x-0 bottom-0 border-t border-stone-200 bg-surface/90 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
+    <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-stone-200 bg-surface/90 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
       <div className="mx-auto flex max-w-xl">
         {NAV.map((n) => (
           <a key={n.href} href={n.href} className={cls(n.active(route))}>

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, Hash, Image as ImageIcon, Loader2, Merge, Search, Share2, Star, X } from 'lucide-react'
 import { api } from './api.js'
 import { renderCard } from './shareCard.js'
@@ -376,6 +376,33 @@ function Details({ book }) {
   )
 }
 
+// The book's description (from Hardcover), clamped with Read more when it's long.
+function About({ session, book }) {
+  const [data] = useLoad(() => api.about(session, book.document), [book.document], `about ${book.document}`)
+  const [open, setOpen] = useState(false)
+  const [long, setLong] = useState(false)
+  const text = useRef(null)
+  const description = data?.description
+  useEffect(() => {
+    const el = text.current
+    if (el) setLong(el.scrollHeight > el.clientHeight + 2)
+  }, [description])
+  if (!description) return null
+  return (
+    <Card className="mt-4 p-4">
+      <p className="text-xs font-medium text-stone-500">About this book</p>
+      <p ref={text} className={`mt-1.5 text-sm/6 whitespace-pre-line text-stone-700 ${open ? '' : 'line-clamp-6'}`}>
+        {description}
+      </p>
+      {(long || open) && (
+        <button type="button" onClick={() => setOpen(!open)} className="mt-1 text-sm font-semibold text-brand-600">
+          {open ? 'Show less' : 'Read more'}
+        </button>
+      )}
+    </Card>
+  )
+}
+
 // Finished (or nearly) a book in a series: show what comes next, and search the
 // Browse catalogs for it so it's a tap away from being on the reader.
 function NextInSeries({ session, book }) {
@@ -383,7 +410,9 @@ function NextInSeries({ session, book }) {
   const [data] = useLoad(() => (book.series && done ? api.next(session, book.document) : Promise.resolve(null)), [book.document, done], `next ${book.document}`)
   const next = data?.next
   if (!next) return null
-  const query = [next.title, next.author].filter(Boolean).join(' ')
+  // Title only: many OPDS catalogs (Mayberry included) match the whole query against
+  // titles, so adding the author turns a hit into no results.
+  const query = next.title
   return (
     <Card className="mt-4 p-4">
       <p className="text-xs font-medium text-stone-500">Next in {data.series ?? book.series}</p>
@@ -453,6 +482,7 @@ export default function Book({ session, book, books, activity, onChange }) {
           <div className="mt-6">
             <StatusPicker session={session} book={book} onChange={onChange} />
           </div>
+          <About session={session} book={book} />
           <NextInSeries session={session} book={book} />
           <Details book={book} />
           <Stats session={session} doc={book.document} activity={activity} />

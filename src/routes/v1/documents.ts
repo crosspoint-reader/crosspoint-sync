@@ -146,6 +146,20 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     return c.json({ url: info.cover, pages: info.pages });
   });
 
+  // The book's description (from Hardcover's catalog). Kept out of the progress
+  // list so that stays small enough to cache offline.
+  app.get('/documents/:document/about', (c) => {
+    const param = c.req.param('document');
+    if (!isValidDocument(param)) {
+      return kosyncError(c, 403, 2004, "Field 'document' not provided.");
+    }
+    const user = c.get('user');
+    const row = db
+      .prepare('SELECT description FROM documents WHERE user_id = ? AND document = ?')
+      .get(user.id, resolveDocument(db, user.id, param)) as { description: string | null } | undefined;
+    return c.json({ description: row?.description ?? null });
+  });
+
   // The next book in this book's series, from Hardcover (needs HARDCOVER_API_KEY and
   // a looked-up series). { next: null } when there is none; pending while rate-limited.
   app.get('/documents/:document/next', async (c) => {

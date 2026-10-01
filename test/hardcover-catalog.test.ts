@@ -22,6 +22,7 @@ const HIT = {
   featured_series_position: 1,
   release_year: 2018,
   image: { url: 'https://assets.hardcover.app/cover.jpeg' },
+  description: 'Sancia Grado is a thief, and a damn good one.\n\nBut unbeknownst to her...',
 };
 
 function fake(status = 200, hits = [{ document: HIT }]) {
@@ -84,6 +85,9 @@ describe('Hardcover catalog details', () => {
     expect(info.pages).toBe(512); // Hardcover fills the page count the free sources missed
 
     const list = (await (await app.request('/api/v1/progress', { headers })).json()) as { items: any[] };
+    const about = (await (await app.request(`/api/v1/documents/${DOC}/about`, { headers })).json()) as { description: string };
+    expect(about.description).toContain('Sancia Grado is a thief');
+    expect(list.items[0]).not.toHaveProperty('description'); // the list stays small
     expect(list.items[0]).toMatchObject({
       moods: ['Adventurous', 'Mysterious', 'Dark', 'Tense', 'Funny'],
       series: 'The Founders Trilogy',
