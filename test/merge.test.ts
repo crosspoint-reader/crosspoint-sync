@@ -59,6 +59,24 @@ describe('document merge', () => {
     expect(body.percentage).toBe(0.2); // CrossPoint's newer progress
   });
 
+  it('serves the highest progress even when the other copy is newer', async () => {
+    const { app, db } = makeTestApp();
+    const { headers } = await registerUser(app);
+    await putProgress(app, headers, { document: KOBO_DOC, progress: 'a', percentage: 0.8, device: 'Kobo', device_id: 'kobo-1' });
+    await putProgress(app, headers, { document: CP_DOC, progress: 'b', percentage: 0.1, device: 'Kobo', device_id: 'kobo-1' });
+    await putProgress(app, headers, { document: CP_DOC, progress: 'c', percentage: 0.3, device: 'CrossPoint', device_id: 'cp-1' });
+    db.prepare('UPDATE progress SET updated_at = updated_at - 100 WHERE document = ?').run(KOBO_DOC);
+    await app.request('/api/v1/documents/merge', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ document: KOBO_DOC, into: CP_DOC }),
+    });
+    const res = await app.request(`/syncs/progress/${CP_DOC}`, { headers });
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.percentage).toBe(0.8);
+    expect(body.progress).toBe('a');
+  });
+
   it('stores pushes to the alias hash under the canonical document', async () => {
     const { app, headers } = await setup();
     await putProgress(app, headers, {
@@ -74,7 +92,7 @@ describe('document merge', () => {
     expect(kobo?.percentage).toBe(0.5);
   });
 
-  it('keeps the newest row per device when both hashes had progress', async () => {
+  it('keeps one row per device when both hashes had progress', async () => {
     const { db, headers, app } = await setup();
     void headers;
     void app;

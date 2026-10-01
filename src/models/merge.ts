@@ -31,29 +31,36 @@ export function aliasesByDocument(db: DB, userId: number): Map<string, string[]>
 }
 
 /**
- * Merge `from` into `into`: migrate progress (newest per device wins),
+ * Merge `from` into `into`: migrate progress (furthest wins),
  * position samples, metadata (canonical's fields win, alias fills gaps),
  * bookmarks/clippings/stats, and connector matches, then record the alias.
  * Callers must pass already-resolved, distinct documents.
  */
 export function mergeDocuments(db: DB, userId: number, from: string, into: string, now: number): void {
   withTransaction(db, () => {
-    // progress PK (user, document, device_id): keep the newest row per device.
+    // progress PK (user, document, device_id): keep the furthest row per device.
     db.prepare(
       `DELETE FROM progress WHERE user_id = ? AND document = ? AND EXISTS (
          SELECT 1 FROM progress b WHERE b.user_id = progress.user_id AND b.document = ?
-           AND b.device_id = progress.device_id AND b.updated_at >= progress.updated_at)`
+           AND b.device_id = progress.device_id AND b.percentage >= progress.percentage)`
     ).run(userId, from, into);
     db.prepare(
       `DELETE FROM progress WHERE user_id = ? AND document = ? AND EXISTS (
          SELECT 1 FROM progress b WHERE b.user_id = progress.user_id AND b.document = ?
-           AND b.device_id = progress.device_id AND b.updated_at > progress.updated_at)`
+           AND b.device_id = progress.device_id AND b.percentage > progress.percentage)`
     ).run(userId, into, from);
     db.prepare('UPDATE progress SET document = ? WHERE user_id = ? AND document = ?').run(
       into,
       userId,
       from
     );
+    // Reads serve the newest row, so make the furthest one the newest.
+    db.prepare(
+      `UPDATE progress SET updated_at = MAX(?, (SELECT MAX(updated_at) + 1 FROM progress WHERE user_id = ? AND document = ?))
+       WHERE rowid = (
+         SELECT rowid FROM progress WHERE user_id = ? AND document = ?
+         ORDER BY percentage DESC, updated_at DESC LIMIT 1)`
+    ).run(now, userId, into, userId, into);
 
     // progress_samples PK (user, document, pct_bucket): newest sample per bucket.
     db.prepare(
