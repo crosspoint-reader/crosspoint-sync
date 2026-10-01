@@ -732,17 +732,17 @@ function NextInSeries({ book, data }) {
 const seriesLabel = (b) =>
   b.series ? `${b.series}${b.series_position ? ` · Book ${Number.isInteger(b.series_position) ? b.series_position : b.series_position.toFixed(1)}` : ''}` : null
 
-export default function Book({ session, book, books, activity, onChange }) {
+export default function Book({ session, book, books, activity, back = { href: '#/', label: 'Library' }, onChange }) {
   const wide = useWide()
   if (!book) return <p className="py-16 text-center text-sm text-stone-500">Book not found.</p>
   return (
     <div className="px-4 pt-4 pb-6 md:px-8 md:pt-6 lg:px-12">
       <div className="-mr-2 flex h-11 items-center">
         <a
-          href="#/"
+          href={back.href}
           className="-ml-2 flex h-11 items-center gap-1.5 rounded-full pr-4 pl-2 text-lg font-semibold text-brand-600 transition active:bg-stone-200/70 md:hover:bg-stone-100"
         >
-          <ArrowLeft className="size-6" strokeWidth={2} /> Library
+          <ArrowLeft className="size-6" strokeWidth={2} /> {back.label}
         </a>
         <BookMenu key={`${book.document}-${book.page_count}`} session={session} book={book} books={books} activity={activity} onChange={onChange} />
       </div>

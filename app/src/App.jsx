@@ -190,18 +190,27 @@ function Login({ onLogin }) {
   )
 }
 
+const isBook = (hash) => hash.startsWith('#/book/')
+
+// The current route, and the last page that wasn't a book: where a book's back
+// button returns to (library, stats tab, clippings...).
 function useHash() {
   const [hash, setHash] = useState(location.hash)
+  const from = useRef(isBook(location.hash) ? '#/' : location.hash || '#/')
   useEffect(() => {
     const on = () => {
+      if (!isBook(location.hash)) from.current = location.hash || '#/'
       setHash(location.hash)
       window.scrollTo(0, 0)
     }
     addEventListener('hashchange', on)
     return () => removeEventListener('hashchange', on)
   }, [])
-  return hash.replace(/^#\/?/, '').split('/')
+  return [hash.replace(/^#\/?/, '').split('/'), from.current]
 }
+
+const BACK_LABELS = { stats: 'Stats', clippings: 'Clippings', browse: 'Browse', settings: 'Settings' }
+const backTo = (hash) => ({ href: hash, label: BACK_LABELS[hash.replace(/^#\/?/, '').split('/')[0]] ?? 'Library' })
 
 const NAV = [
   { href: '#/', label: 'Library', icon: LibraryBig, active: (r) => !['stats', 'send', 'browse', 'clippings', 'settings'].includes(r) },
@@ -290,7 +299,7 @@ function Sidebar({ route, session }) {
 }
 
 function Home({ session, onSession, onLogout, theme }) {
-  const parts = useHash()
+  const [parts, from] = useHash()
   // Offline: api.js serves the last saved copy and says so; show a slim notice until the network is back.
   const [isOffline, setOffline] = useState(false)
   useEffect(() => {
@@ -340,6 +349,7 @@ function Home({ session, onSession, onLogout, theme }) {
         session={session}
         book={books.find((b) => b.document === id)}
         books={books}
+        back={backTo(from)}
         activity={activity?.books.find((b) => b.document === id)}
         onChange={() => {
           reloadBooks()
