@@ -17,6 +17,45 @@ export function decodeHistory(b64, anchorDay) {
   return { read, anchor, anchorRow }
 }
 
+// A tooltip for grid cells carrying data-tip: follows the mouse on hover, and on
+// touch shows while a finger is held down (sliding across cells updates it).
+function useCellTip() {
+  const box = useRef(null)
+  const [tip, setTip] = useState(null)
+  const show = (el) => {
+    const cell = el?.closest?.('[data-tip]')
+    if (!cell || !box.current?.contains(cell)) return setTip(null)
+    const outer = box.current.getBoundingClientRect()
+    const r = cell.getBoundingClientRect()
+    const x = r.left + r.width / 2 - outer.left
+    // Keep the bubble inside the card near the edges.
+    setTip({ text: cell.dataset.tip, x: Math.min(Math.max(x, 72), outer.width - 72), y: r.top - outer.top })
+  }
+  const hide = () => setTip(null)
+  const handlers = {
+    onPointerOver: (e) => e.pointerType === 'mouse' && show(e.target),
+    onPointerLeave: (e) => e.pointerType === 'mouse' && hide(),
+    onPointerDown: (e) => e.pointerType !== 'mouse' && show(e.target),
+    onPointerMove: (e) => e.pointerType !== 'mouse' && tip && show(document.elementFromPoint(e.clientX, e.clientY)),
+    onPointerUp: (e) => e.pointerType !== 'mouse' && hide(),
+    onPointerCancel: hide,
+    onContextMenu: (e) => e.nativeEvent.pointerType === 'touch' && e.preventDefault(),
+  }
+  const bubble = tip && (
+    <div
+      role="tooltip"
+      className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full rounded-md bg-stone-900 px-2 py-1 font-mono text-[0.7rem] whitespace-nowrap text-stone-50 shadow-md"
+      style={{ left: tip.x, top: tip.y - 6 }}
+    >
+      {tip.text}
+    </div>
+  )
+  return { box, handlers, bubble }
+}
+
+// Cells are pressed and held for their tooltip: no long-press text selection or callout.
+const NO_CALLOUT = { WebkitTouchCallout: 'none' }
+
 function Heatmap({ summary }) {
   const { read, anchor, anchorRow } = decodeHistory(summary.history_b64, summary.anchor_day)
   let days = 0
@@ -24,18 +63,25 @@ function Heatmap({ summary }) {
   const cols = Array.from({ length: WEEKS }, (_, c) =>
     Array.from({ length: 7 }, (_, r) => anchorRow - r + (WEEKS - 1 - c) * 7)
   )
+  const { box, handlers, bubble } = useCellTip()
+  const tipFor = (n) => {
+    const d = new Date(anchor.getTime() - n * 86400000)
+    return `${d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}: ${read(n) ? 'read' : 'no reading'}`
+  }
   return (
     <Card className="mt-4 p-4">
       <div className="flex items-baseline justify-between">
         <h2 className="font-display text-lg font-semibold text-stone-900">Reading days</h2>
         <p className="font-mono text-xs text-stone-500">{days} in the last year</p>
       </div>
-      <div className="mt-3 flex justify-between gap-[3px]">
+      <div ref={box} {...handlers} style={NO_CALLOUT} className="relative mt-3 flex justify-between gap-[3px] select-none">
+        {bubble}
         {cols.map((col, c) => (
           <div key={c} className={`flex-1 flex-col gap-[3px] ${c < WEEKS / 2 ? 'hidden md:flex' : 'flex'}`}>
             {col.map((n) => (
               <div
                 key={n}
+                data-tip={n < 0 ? undefined : tipFor(n)}
                 className={`aspect-square rounded-[2px] ${n < 0 ? 'bg-transparent' : read(n) ? 'bg-brand-500' : 'bg-stone-100'}`}
               />
             ))}
@@ -301,7 +347,7 @@ function ReadingCalendar({ days, books = [] }) {
     const pages = byDay.get(key) ?? 0
     const lv = level(key)
     const tip = `${fmt(d, { weekday: 'short', month: 'short', day: 'numeric' })}: ${pages ? `${Math.round(pages)} pages` : lv ? 'read' : 'no reading'}`
-    return <div key={d.getTime()} title={tip} aria-label={tip} className={`aspect-square ${round} ${SHADES[lv]}`} />
+    return <div key={d.getTime()} data-tip={tip} aria-label={tip} className={`aspect-square ${round} ${SHADES[lv]}`} />
   }
   // Share image: the period on screen, its reading days, pages and longest streak.
   const share = () => {
@@ -349,6 +395,7 @@ function ReadingCalendar({ days, books = [] }) {
       blocks,
     })
   }
+  const { box, handlers, bubble } = useCellTip()
   const arrow = 'grid size-9 place-items-center rounded-full text-stone-600 active:bg-stone-100 md:hover:bg-stone-100 disabled:opacity-30'
   return (
     <Card className="mt-4 p-4">
@@ -405,45 +452,48 @@ function ReadingCalendar({ days, books = [] }) {
           <ChevronRight className="size-5" strokeWidth={1.75} />
         </button>
       </div>
-      {month ? (
-        // Month: a regular calendar, weekdays across the top and one row per week.
-        <div className="mx-auto mt-3 grid max-w-sm grid-cols-7 gap-1.5">
-          {WEEKDAYS.map((w) => (
-            <p key={w} className="text-center font-mono text-[0.6rem] text-stone-400">
-              {w}
-            </p>
-          ))}
-          {weeks.map((monday) => WEEKDAYS.map((w, r) => cell(new Date(monday.getTime() + r * DAY_MS), 'rounded-md')))}
-        </div>
-      ) : (
-        <div ref={scroller} className="mt-3 overflow-x-auto">
-          <div
-            className={`grid ${year ? 'w-max min-w-full' : 'w-full'}`}
-            style={{
-              gridAutoFlow: 'column',
-              gridTemplateRows: 'repeat(7, auto) auto',
-              gridTemplateColumns: `auto repeat(${weeks.length}, minmax(${year ? '11px' : '0'}, ${year ? '1fr' : '2.25rem'}))`,
-              gap: 3,
-              justifyContent: year ? undefined : 'center',
-            }}
-          >
-            {WEEKDAYS.map((w, r) => (
-              <p key={w} className="sticky left-0 z-10 flex min-w-6 items-center self-stretch bg-surface pr-1.5 font-mono text-[0.6rem] leading-none text-stone-400 shadow-[4px_0_0_white]">
-                {!year || r % 2 === 0 ? w[0] : ''}
+      <div ref={box} {...handlers} style={NO_CALLOUT} className="relative select-none">
+        {bubble}
+        {month ? (
+          // Month: a regular calendar, weekdays across the top and one row per week.
+          <div className="mx-auto mt-3 grid max-w-sm grid-cols-7 gap-1.5">
+            {WEEKDAYS.map((w) => (
+              <p key={w} className="text-center font-mono text-[0.6rem] text-stone-400">
+                {w}
               </p>
             ))}
-            <span />
-            {weeks.map((monday) => (
-              <Fragment key={monday.getTime()}>
-                {WEEKDAYS.map((w, r) => cell(new Date(monday.getTime() + r * DAY_MS), 'rounded-[2px]'))}
-                <p className="pt-1 font-mono text-[0.6rem] whitespace-nowrap text-stone-400">
-                  {monday.getDate() <= 7 || monday.getTime() === weeks[0].getTime() ? fmt(monday, { month: 'short' }) : ''}
-                </p>
-              </Fragment>
-            ))}
+            {weeks.map((monday) => WEEKDAYS.map((w, r) => cell(new Date(monday.getTime() + r * DAY_MS), 'rounded-md')))}
           </div>
-        </div>
-      )}
+        ) : (
+          <div ref={scroller} className="mt-3 overflow-x-auto">
+            <div
+              className={`grid ${year ? 'w-max min-w-full' : 'w-full'}`}
+              style={{
+                gridAutoFlow: 'column',
+                gridTemplateRows: 'repeat(7, auto) auto',
+                gridTemplateColumns: `auto repeat(${weeks.length}, minmax(${year ? '11px' : '0'}, ${year ? '1fr' : '2.25rem'}))`,
+                gap: 3,
+                justifyContent: year ? undefined : 'center',
+              }}
+            >
+              {WEEKDAYS.map((w, r) => (
+                <p key={w} className="sticky left-0 z-10 flex min-w-6 items-center self-stretch bg-surface pr-1.5 font-mono text-[0.6rem] leading-none text-stone-400 shadow-[4px_0_0_white]">
+                  {!year || r % 2 === 0 ? w[0] : ''}
+                </p>
+              ))}
+              <span />
+              {weeks.map((monday) => (
+                <Fragment key={monday.getTime()}>
+                  {WEEKDAYS.map((w, r) => cell(new Date(monday.getTime() + r * DAY_MS), 'rounded-[2px]'))}
+                  <p className="pt-1 font-mono text-[0.6rem] whitespace-nowrap text-stone-400">
+                    {monday.getDate() <= 7 || monday.getTime() === weeks[0].getTime() ? fmt(monday, { month: 'short' }) : ''}
+                  </p>
+                </Fragment>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </Card>
   )
 }
