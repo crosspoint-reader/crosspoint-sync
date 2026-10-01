@@ -106,9 +106,89 @@ export function ClipShare({ session, book, clip, onClose }) {
   )
 }
 
+// Touch: press and hold a clipping to delete it (desktop uses ClipMenu). One press at a time, so one timer.
+let holdTimer
+export function hold(fn) {
+  const stop = () => clearTimeout(holdTimer)
+  return {
+    onPointerDown: (e) => {
+      stop()
+      if (e.pointerType !== 'mouse') holdTimer = setTimeout(fn, 500)
+    },
+    onPointerUp: stop,
+    onPointerLeave: stop,
+    onPointerCancel: stop, // fires when a touch turns into a scroll
+  }
+}
+
+// Desktop: a ⋯ button on hover with the clip's actions.
+export function ClipMenu({ onDelete }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className={`absolute top-2 right-2 hidden md:block ${open ? '' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'}`}>
+      <button
+        type="button"
+        aria-label="Clip actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className="grid size-8 place-items-center rounded-full text-stone-500 hover:bg-stone-100"
+      >
+        <MoreHorizontal className="size-5" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div role="menu" className="absolute top-9 right-0 z-30 w-44 overflow-hidden rounded-xl bg-surface shadow-lg ring-1 ring-stone-950/10">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false)
+                onDelete()
+              }}
+              className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-red-600 hover:bg-stone-50"
+            >
+              <Trash2 className="size-4" /> Delete clip
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+export function DeleteClip({ session, clip, document, onDone, onClose }) {
+  const [busy, setBusy] = useState(false)
+  async function remove() {
+    setBusy(true)
+    try {
+      await api.deleteClipping(session, document, clip.id)
+      onDone()
+    } catch (e) {
+      setBusy(false)
+      notify({ error: true, title: "Couldn't delete the clip", detail: e.message })
+    }
+  }
+  return (
+    <Sheet title="Delete this clip?" onClose={onClose}>
+      <blockquote className="mt-3 line-clamp-3 border-l-2 border-brand-300 pl-3 font-display text-[0.95rem]/relaxed text-stone-600 italic">{clip.text}</blockquote>
+      <div className="mt-5 grid gap-2">
+        <button disabled={busy} onClick={remove} className="h-12 rounded-xl bg-red-600 text-base font-semibold text-white active:bg-red-700 disabled:opacity-60">
+          Delete
+        </button>
+        <button onClick={onClose} className="h-12 rounded-xl bg-surface text-base font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100">
+          Cancel
+        </button>
+      </div>
+    </Sheet>
+  )
+}
+
 function Clippings({ session, book }) {
-  const [items, error] = useLoad(() => api.clippings(session, book.document), [session, book.document], `clips:${book.document}`)
+  const [items, error, reload] = useLoad(() => api.clippings(session, book.document), [session, book.document], `clips:${book.document}`)
   const [sharing, setSharing] = useState(null)
+  const [deleting, setDeleting] = useState(null)
   if (error) return <ErrorNote error={error} />
   if (!items) return <Spinner />
   if (!items.length) {
@@ -126,7 +206,8 @@ function Clippings({ session, book }) {
         return (
           <div key={c.id}>
             {heading && <p className="mt-5 mb-2 font-mono text-[0.65rem] font-medium tracking-wider text-stone-400 uppercase">{heading}</p>}
-            <Card className="p-4">
+            <Card className="group relative p-4 select-none [-webkit-touch-callout:none] md:select-text" {...hold(() => setDeleting(c))}>
+              <ClipMenu onDelete={() => setDeleting(c)} />
               <blockquote className="border-l-2 border-brand-300 pl-3 font-display text-[0.95rem]/relaxed text-stone-800 italic">
                 {c.text}
               </blockquote>
@@ -146,6 +227,18 @@ function Clippings({ session, book }) {
         )
       })}
       {sharing && <ClipShare session={session} book={book} clip={sharing} onClose={() => setSharing(null)} />}
+      {deleting && (
+        <DeleteClip
+          session={session}
+          clip={deleting}
+          document={book.document}
+          onDone={() => {
+            setDeleting(null)
+            reload()
+          }}
+          onClose={() => setDeleting(null)}
+        />
+      )}
     </div>
   )
 }

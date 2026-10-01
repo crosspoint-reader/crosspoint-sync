@@ -106,24 +106,23 @@ pub async fn search(auth: &Auth, root_url: &str, query: &str) -> Result<Feed> {
 }
 
 /// Download a book, reporting (downloaded, total) as it streams.
+/// Returns (bytes, Content-Type, Content-Disposition).
 pub async fn download(
   auth: &Auth,
   url: &str,
   mut on_progress: impl FnMut(u64, Option<u64>),
-) -> Result<(Vec<u8>, Option<String>)> {
+) -> Result<(Vec<u8>, Option<String>, Option<String>)> {
   let mut resp = check(apply(client(600).get(url), auth).send().await?)?;
-  let ct = resp
-    .headers()
-    .get(reqwest::header::CONTENT_TYPE)
-    .and_then(|v| v.to_str().ok())
-    .map(|s| s.to_string());
+  let header = |k| resp.headers().get(k).and_then(|v| v.to_str().ok()).map(String::from);
+  let ct = header(reqwest::header::CONTENT_TYPE);
+  let cd = header(reqwest::header::CONTENT_DISPOSITION);
   let total = resp.content_length();
   let mut bytes = Vec::new();
   while let Some(chunk) = resp.chunk().await? {
     bytes.extend_from_slice(&chunk);
     on_progress(bytes.len() as u64, total);
   }
-  Ok((bytes, ct))
+  Ok((bytes, ct, cd))
 }
 
 /// Parse an OpenSearch Description Document and return the best atom/opds

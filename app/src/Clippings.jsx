@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Copy, FileDown, Quote, Search, Share2 } from 'lucide-react'
 import { api, isApp } from './api.js'
 import { saveFile } from './shareCard.js'
-import { ClipShare } from './Book.jsx'
+import { ClipMenu, ClipShare, DeleteClip, hold } from './Book.jsx'
 import { Card, Cover, EmptyState, ErrorNote, Eyebrow, Spinner, useLoad } from './ui.jsx'
 
 const date = (unix) => new Date(unix * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
@@ -25,9 +25,10 @@ function markdown(groups) {
     .join('\n\n---\n\n')
 }
 
-function Clip({ session, clip, book, onShare, showBook }) {
+function Clip({ session, clip, book, onShare, onDelete, showBook }) {
   return (
-    <Card className="p-4">
+    <Card className="group relative p-4 select-none [-webkit-touch-callout:none] md:select-text" {...hold(() => onDelete(clip))}>
+      <ClipMenu onDelete={() => onDelete(clip)} />
       {showBook && (
         <a href={`#/book/${book.document}`} className="mb-3 flex items-center gap-3">
           <Cover session={session} book={book} small className="w-8" />
@@ -50,10 +51,11 @@ function Clip({ session, clip, book, onShare, showBook }) {
 }
 
 export default function Clippings({ session, books }) {
-  const [items, error] = useLoad(() => api.allClippings(session, books), [session], `clippings:${session.username}`)
+  const [items, error, reload] = useLoad(() => api.allClippings(session, books), [session], `clippings:${session.username}`)
   const [query, setQuery] = useState('')
   const [only, setOnly] = useState(null) // document
   const [sharing, setSharing] = useState(null)
+  const [deleting, setDeleting] = useState(null)
   const [note, setNote] = useState(null)
   const byDoc = useMemo(() => new Map(books.map((b) => [b.document, b])), [books])
 
@@ -102,7 +104,7 @@ export default function Clippings({ session, books }) {
             <section className="mt-6">
               <p className="font-mono text-[0.65rem] font-medium tracking-wider text-stone-400 uppercase">Highlight of the day</p>
               <div className="mt-2 md:max-w-2xl">
-                <Clip session={session} clip={daily} book={byDoc.get(daily.document)} onShare={setSharing} showBook />
+                <Clip session={session} clip={daily} book={byDoc.get(daily.document)} onShare={setSharing} onDelete={setDeleting} showBook />
               </div>
             </section>
           )}
@@ -165,7 +167,7 @@ export default function Clippings({ session, books }) {
               </a>
               <div className="mt-3 grid gap-3 md:grid-cols-2">
                 {clips.map((c) => (
-                  <Clip key={c.id} session={session} clip={c} book={book} onShare={setSharing} />
+                  <Clip key={c.id} session={session} clip={c} book={book} onShare={setSharing} onDelete={setDeleting} />
                 ))}
               </div>
             </section>
@@ -174,6 +176,18 @@ export default function Clippings({ session, books }) {
       )}
 
       {sharing && <ClipShare session={session} book={byDoc.get(sharing.document)} clip={sharing} onClose={() => setSharing(null)} />}
+      {deleting && (
+        <DeleteClip
+          session={session}
+          clip={deleting}
+          document={deleting.document}
+          onDone={() => {
+            setDeleting(null)
+            reload()
+          }}
+          onClose={() => setDeleting(null)}
+        />
+      )}
     </div>
   )
 }

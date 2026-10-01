@@ -18,8 +18,12 @@ export function Eyebrow({ children, className = '' }) {
   )
 }
 
-export function Card({ className = '', children }) {
-  return <div className={`rounded-xl bg-surface ring-1 ring-stone-950/5 ${className}`}>{children}</div>
+export function Card({ className = '', children, ...props }) {
+  return (
+    <div {...props} className={`rounded-xl bg-surface ring-1 ring-stone-950/5 ${className}`}>
+      {children}
+    </div>
+  )
 }
 
 export function ProgressBar({ value, className = '' }) {

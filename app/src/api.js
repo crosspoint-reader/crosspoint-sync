@@ -207,6 +207,8 @@ export const api = {
       return per.flat().sort((a, b) => b.created_at - a.created_at)
     }
   },
+  deleteClipping: (s, doc, id) =>
+    call(s, `/api/v1/clippings/${doc}`, { method: 'PUT', body: JSON.stringify({ items: [{ id, deleted: 1 }] }) }),
   setStatus: (s, doc, status) =>
     call(s, `/api/v1/documents/${doc}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
   async clippings(s, doc) {

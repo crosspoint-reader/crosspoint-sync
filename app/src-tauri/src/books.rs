@@ -93,7 +93,7 @@ pub async fn download_book(
 ) -> Res<Download> {
   // Throttle progress to every 64 KiB so fast downloads don't flood IPC.
   let mut last = 0;
-  let (bytes, ct) = opds::download(&auth.unwrap_or_default(), &url, |done, total| {
+  let (bytes, ct, cd) = opds::download(&auth.unwrap_or_default(), &url, |done, total| {
     if total.is_some_and(|t| done >= t) || done - last >= 64 * 1024 {
       last = done;
       let _ = on_progress.send(Progress::Downloading { done, total });
@@ -110,8 +110,11 @@ pub async fn download_book(
     Some(a) if !a.is_empty() => format!("{} - {}", meta.title, a),
     _ => meta.title.clone(),
   };
+  // Keep the server's filename when it sends one: kosync's filename hash
+  // only matches other devices if the name is identical.
+  let server_name = cd.as_deref().and_then(disposition_filename).and_then(|n| safe_name(&n).ok());
   let dir = books_dir(&app)?;
-  let name = unique_name(&dir, &format!("{}.{}", sanitize_filename::sanitize(&base), ext));
+  let name = unique_name(&dir, &server_name.unwrap_or_else(|| format!("{}.{}", sanitize_filename::sanitize(&base), ext)));
   fs::write(dir.join(&name), &bytes).map_err(err)?;
   let mut index = read_index(&dir);
   index.insert(name.clone(), meta.clone());
@@ -376,6 +379,17 @@ fn urlencoding_decode(s: &str) -> Option<String> {
   String::from_utf8(out).ok()
 }
 
+/// The filename from a Content-Disposition header, preferring RFC 5987 `filename*`.
+fn disposition_filename(cd: &str) -> Option<String> {
+  let params = || cd.split(';').filter_map(|p| p.split_once('=')).map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim()));
+  let star = params()
+    .find(|(k, _)| k == "filename*")
+    .and_then(|(_, v)| v.split_once("''"))
+    .and_then(|(_, v)| urlencoding_decode(v));
+  star.or_else(|| params().find(|(k, _)| k == "filename").map(|(_, v)| v.trim_matches('"').to_string()))
+    .filter(|n| !n.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -390,6 +404,9 @@ mod tests {
     assert_eq!(safe_name("a/../b.epub").unwrap(), "a..b.epub");
     assert!(safe_name(".crosspoint-sync.json").is_err());
     assert_eq!(urlencoding_decode(&urlencoding_encode("/Books/Été 1.epub")).unwrap(), "/Books/Été 1.epub");
+    assert_eq!(disposition_filename(r#"attachment; filename="Dune - Frank Herbert.epub""#).as_deref(), Some("Dune - Frank Herbert.epub"));
+    assert_eq!(disposition_filename("attachment; filename=\"x.epub\"; filename*=UTF-8''%C3%89t%C3%A9.epub").as_deref(), Some("Été.epub"));
+    assert_eq!(disposition_filename("inline"), None);
   }
 }
 
