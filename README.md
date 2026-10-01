@@ -135,3 +135,20 @@ scripts/curl-smoke.sh http://localhost:8080   # end-to-end smoke against a runni
 ## License
 
 MIT
+
+### Merged-book clipping compatibility
+
+Clipping uploads to a merged book's old hash are stored under its canonical
+hash, matching progress sync. Reads by either hash include clipping data left
+under aliases by older server versions; no database rows are deleted or rewritten
+during reads. Clipping IDs appear once, with any deletion marker taking precedence;
+live duplicates use the newest revision and retain existing canonical annotations
+when an old alias upload omitted them. The clipping hub returns canonical hashes.
+
+Clients that cached separate alias clipping cursors should reread merged books
+with `cursor=0` once after upgrading to recover older records they have not seen.
+New delta reads use the family's highest revision for each clipping ID.
+
+Per-book stats retain the existing selective merge policy: uploads remain under
+the original document hash, and only aliases merged with stats contribute to the
+canonical book's totals. Unmerging restores the original independent stats.

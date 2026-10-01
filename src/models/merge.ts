@@ -156,3 +156,47 @@ export function unmergeDocument(db: DB, userId: number, alias: string): boolean 
     .run(userId, alias);
   return res.changes > 0;
 }
+
+/** Canonical clipping hash plus its aliases, irrespective of stats merge policy. */
+export function clippingDocuments(db: DB, userId: number, document: string): string[] {
+  const rows = db.prepare('SELECT alias FROM document_aliases WHERE user_id = ? AND document = ?')
+    .all(userId, document) as unknown as { alias: string }[];
+  return [document, ...rows.map((r) => r.alias)];
+}
+
+/**
+ * Read legacy side data without moving/deleting rows. Old server versions wrote
+ * alias hashes even after a merge. Rank before filtering a delta so an older
+ * duplicate cannot reappear when the newest row is outside the requested range.
+ * A clipping tombstone anywhere in the family wins; its effective cursor includes
+ * newer alias copies so upload-only clients cannot revive a deletion.
+ */
+export function mergedClippingsCte(documentCount = 0, byId = false): string {
+  // Restrict the indexed source before ranking; keep every duplicate in the
+  // requested family so annotations, tombstones and cursors remain consistent.
+  const scope = documentCount ? ` AND c.document IN (${Array(documentCount).fill('?').join(',')})` : '';
+  return `WITH candidates AS (
+  SELECT c.*, COALESCE(a.document, c.document) AS canonical_document,
+    MAX(c.revision) OVER (PARTITION BY COALESCE(a.document, c.document), c.id) AS sync_revision,
+    MAX(c.updated_at) OVER (PARTITION BY COALESCE(a.document, c.document), c.id) AS sync_updated_at,
+    ROW_NUMBER() OVER (
+      PARTITION BY COALESCE(a.document, c.document), c.id
+      ORDER BY c.deleted DESC, c.revision DESC, c.updated_at DESC,
+               (c.document = COALESCE(a.document, c.document)) DESC, c.document
+    ) AS row_rank,
+    CASE WHEN c.document = COALESCE(a.document, c.document) THEN c.note
+         ELSE COALESCE(c.note, (SELECT own.note FROM clippings own
+           WHERE own.user_id = c.user_id AND own.document = a.document AND own.id = c.id)) END AS saved_note,
+    CASE WHEN c.document = COALESCE(a.document, c.document) THEN c.color
+         ELSE COALESCE(c.color, (SELECT own.color FROM clippings own
+           WHERE own.user_id = c.user_id AND own.document = a.document AND own.id = c.id)) END AS saved_color
+  FROM clippings c LEFT JOIN document_aliases a ON a.user_id = c.user_id AND a.alias = c.document
+  WHERE c.user_id = ?${scope}${byId ? ' AND c.id = ?' : ''}
+), merged AS (
+  SELECT canonical_document AS document, id, spine_index, start_page, end_page, page_count,
+    start_word, end_word, word_count, paragraph_index, chapter_title, text,
+    saved_note AS note, saved_color AS color, created_at, deleted,
+    sync_updated_at AS updated_at, sync_revision AS revision, layout_signature, start_offset, end_offset
+  FROM candidates WHERE row_rank = 1
+)`;
+}

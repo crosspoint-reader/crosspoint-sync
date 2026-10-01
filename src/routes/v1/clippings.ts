@@ -5,6 +5,7 @@ import { isValidDocument } from '../kosync.js';
 import { isItemId, nowSeconds, parseListParams } from '../../models/sync.js';
 import { fanOutHighlight, highlightFromRow, type ClippingHighlightRow } from '../../connectors/fanout.js';
 import { documentMeta } from '../../connectors/store.js';
+import { clippingDocuments, mergedClippingsCte, resolveDocument } from '../../models/merge.js';
 
 const MAX_BATCH = 50;
 const MAX_TEXT = 4096; // full firmware clipping, not the text-export cap
@@ -48,8 +49,9 @@ export function clippingRoutes(db: DB): Hono<AppEnv> {
     const user = c.get('user');
     const rows = db
       .prepare(
-        `SELECT document, id, spine_index, paragraph_index, start_offset, chapter_title, text, note, created_at
-         FROM clippings WHERE user_id = ? AND deleted = 0 ORDER BY created_at DESC, id LIMIT 5000`
+        `${mergedClippingsCte()}
+         SELECT document, id, spine_index, paragraph_index, start_offset, chapter_title, text, note, created_at
+         FROM merged WHERE deleted = 0 ORDER BY created_at DESC, id LIMIT 5000`
       )
       .all(user.id) as unknown as (Pick<ClippingRow, 'id' | 'spine_index' | 'paragraph_index' | 'start_offset' | 'chapter_title' | 'text' | 'note' | 'created_at'> & { document: string })[];
     return c.json({
@@ -78,15 +80,18 @@ export function clippingRoutes(db: DB): Hono<AppEnv> {
     const cursor = Number(cursorRaw ?? 0);
     if (!Number.isSafeInteger(cursor) || cursor < 0) return kosyncError(c, 403, 2003, 'Invalid cursor');
     const revisionMode = cursorRaw !== undefined;
+    const canonical = resolveDocument(db, user.id, document);
+    const documents = clippingDocuments(db, user.id, canonical);
     const rows = db
       .prepare(
-        `SELECT id, spine_index, start_page, end_page, page_count, start_word, end_word, word_count,
+        `${mergedClippingsCte(documents.length)}
+         SELECT id, spine_index, start_page, end_page, page_count, start_word, end_word, word_count,
                 paragraph_index, chapter_title, text, note, color, created_at, deleted, updated_at,
                 revision, layout_signature, start_offset, end_offset
-         FROM clippings WHERE user_id = ? AND document = ? AND ${revisionMode ? 'revision' : 'updated_at'} > ?
+         FROM merged WHERE document = ? AND ${revisionMode ? 'revision' : 'updated_at'} > ?
          ORDER BY ${revisionMode ? 'revision' : 'updated_at, id'} LIMIT ?`
       )
-      .all(user.id, document, revisionMode ? cursor : since, limit + 1) as unknown as ClippingRow[];
+      .all(user.id, ...documents, canonical, revisionMode ? cursor : since, limit + 1) as unknown as ClippingRow[];
     const more = rows.length > limit;
     const items = more ? rows.slice(0, limit) : rows;
     const until = more ? items[items.length - 1].updated_at : nowSeconds();
@@ -136,7 +141,10 @@ export function clippingRoutes(db: DB): Hono<AppEnv> {
       return kosyncError(c, 403, 2003, 'Invalid request');
     }
     const user = c.get('user');
+    const canonical = resolveDocument(db, user.id, document);
     const now = nowSeconds();
+    const documents = clippingDocuments(db, user.id, canonical);
+    const readPrevious = db.prepare(`${mergedClippingsCte(documents.length, true)} SELECT * FROM merged`);
 
     const bumpRevision = db.prepare('UPDATE clipping_sync_clock SET revision = revision + 1 WHERE id = 1');
     const upsert = db.prepare(
@@ -189,7 +197,7 @@ export function clippingRoutes(db: DB): Hono<AppEnv> {
       }
       const id = o.id;
       if (o.deleted === 1 || o.deleted === true) {
-        ops.push(() => tombstone.run(user.id, document, id, now));
+        ops.push(() => tombstone.run(user.id, canonical, id, now));
         continue;
       }
       const spine = uint(o.spine);
@@ -229,11 +237,16 @@ export function clippingRoutes(db: DB): Hono<AppEnv> {
       const color = typeof o.color === 'string' ? o.color.slice(0, 32) : null;
       const text = o.text;
       ops.push(() => {
+        // An old alias copy may carry annotations or a tombstone that the
+        // canonical row has never seen. Preserve it before any new live write.
+        const previous = readPrevious.get(user.id, ...documents, id) as ClippingRow | undefined;
+        if (previous?.deleted) return;
         const result = upsert.run(
-          user.id, document, id, spine, startPage, endPage, pages,
+          user.id, canonical, id, spine, startPage, endPage, pages,
           startWord, endWord, words, para, chapter, text,
-          note, color, createdAt, now, layoutSignature, startOffset, endOffset,
-          Number(Object.hasOwn(o, 'note')), Number(Object.hasOwn(o, 'color'))
+          Object.hasOwn(o, 'note') ? note : (previous?.note ?? null),
+          Object.hasOwn(o, 'color') ? color : (previous?.color ?? null),
+          createdAt, now, layoutSignature, startOffset, endOffset, 1, 1
         );
         if (result.changes) highlightIds.add(id);
       });
@@ -247,18 +260,18 @@ export function clippingRoutes(db: DB): Hono<AppEnv> {
     // Fan out highlights to connectors that carry them (e.g. Readwise). Best
     // effort; the document's title/author (if synced) become the Readwise book.
     if (highlightIds.size > 0) {
-      const meta = documentMeta(db, user.id, document);
+      const meta = documentMeta(db, user.id, canonical);
       const readHighlight = db.prepare(
         `SELECT text, note, created_at, spine_index, start_offset, end_offset, chapter_title
          FROM clippings WHERE user_id = ? AND document = ? AND id = ? AND deleted = 0`
       );
       for (const id of highlightIds) {
-        const h = readHighlight.get(user.id, document, id) as ClippingHighlightRow | undefined;
+        const h = readHighlight.get(user.id, canonical, id) as ClippingHighlightRow | undefined;
         if (!h) continue;
         fanOutHighlight(
           db,
           user.id,
-          document,
+          canonical,
           id,
           highlightFromRow(h, meta),
           now
