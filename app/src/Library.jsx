@@ -53,10 +53,23 @@ function Row({ session, book }) {
   )
 }
 
+// Newest first, by what each tab is about: finish date for Finished, when the
+// status was set for Paused / Did not finish, last sync for Reading.
+function sortForTab(list, tab, activity) {
+  const finishedAt = new Map((activity?.books ?? []).map((b) => [b.document, b.finished_at]))
+  const key =
+    tab === 'finished'
+      ? (b) => finishedAt.get(b.document) ?? b.status_at ?? b.timestamp ?? 0
+      : tab === 'reading'
+        ? (b) => b.timestamp ?? 0
+        : (b) => b.status_at ?? b.timestamp ?? 0
+  return [...list].sort((a, b) => key(b) - key(a))
+}
+
 export default function Library({ session, books, summary, activity }) {
   const [tab, setTab] = useState('reading')
   const counts = Object.fromEntries(STATUS.map((s) => [s.id, books.filter((b) => b.status === s.id).length]))
-  const shown = books.filter((b) => b.status === tab)
+  const shown = sortForTab(books.filter((b) => b.status === tab), tab, activity)
   // First book that looks like another synced copy of itself.
   const dupe = books.find((b) => books.some((o) => looksLikeSame(b, o)))
   const [hero, ...rest] = tab === 'reading' ? shown : [null, ...shown]

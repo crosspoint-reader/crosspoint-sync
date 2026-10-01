@@ -239,7 +239,7 @@ This is how clients/UIs discover documents without knowing hashes. `?limit=` def
 ```
 
 `title`/`author`/`filename` are `null` until some client sends metadata for that document.
-Items also carry `status`, `cover_url`, `page_count`, and book details from Hardcover's catalog
+Items also carry `status`, `status_at` (when a manual status was set, else `null`), `cover_url`, `page_count`, and book details from Hardcover's catalog
 when the server sets `HARDCOVER_API_KEY`: `hardcover_slug`, `moods`, `genres`, `content_warnings`
 (lists), `rating`, `series`, `series_position`, `release_year` (empty lists / `null` until looked
 up; lookups run in the background, a few books per list request, one per distinct book across users).

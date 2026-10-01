@@ -43,7 +43,8 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
         `SELECT p.document, p.device_id, p.device, p.percentage, p.progress, p.position, p.updated_at,
                 d.title, d.author, d.filename, d.cover_url, d.page_count,
                 d.hc_slug, d.moods, d.genres, d.content_warnings, d.rating, d.series, d.series_position, d.release_year,
-                COALESCE(d.status, CASE WHEN p.percentage >= 0.98 THEN 'finished' ELSE 'reading' END) AS status
+                COALESCE(d.status, CASE WHEN p.percentage >= 0.98 THEN 'finished' ELSE 'reading' END) AS status,
+                d.status_at
          FROM progress p
          LEFT JOIN documents d ON d.user_id = p.user_id AND d.document = p.document
          WHERE p.user_id = ?
@@ -81,6 +82,7 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
       series_position: number | null;
       release_year: number | null;
       status: string;
+      status_at: number | null;
     }[];
     const list = (v: string | null): string[] => {
       try {
@@ -106,6 +108,8 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
           author: r.author,
           filename: r.filename,
           status: r.status,
+          // When a manual status was set (null when derived from progress).
+          status_at: r.status_at ?? null,
           cover_url: r.cover_url,
           page_count: r.page_count,
           // From Hardcover's catalog (empty until looked up, or without HARDCOVER_API_KEY).
