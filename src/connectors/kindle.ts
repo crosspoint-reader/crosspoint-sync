@@ -24,12 +24,12 @@ import type {
 } from './types.js';
 
 /**
- * Amazon Kindle connector (Tier 3, experimental, READ-ONLY). Bridges Whispersync
+ * Amazon Kindle connector (Tier 3, beta, READ-ONLY). Bridges Whispersync
  * positions into canonical progress so reading on a non-jailbroken Kindle resumes
  * on CrossPoint/KOReader devices. Speaks the Fiona/CDE device protocol with a
  * scoped, registered-device credential — never the user's Amazon password or web
  * cookies. See docs/design/kindle-sync.md for the security model and the
- * live-verify checklist that gates removing the experimental badge.
+ * live-verify checklist that gates removing the beta badge.
  *
  * !!! LIVE-VERIFY GATE !!!
  * Everything here follows the protocol re-verified against a live account in
@@ -425,7 +425,7 @@ export const kindleConnector: Connector = {
   capabilities: { read: true, write: false },
   carries: ['progress'],
   credentialKind: 'token',
-  experimental: true,
+  beta: true,
   // Stealth: not listed until the user opts in via the /kindle landing page.
   revealable: true,
   validate,

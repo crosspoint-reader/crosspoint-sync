@@ -604,7 +604,7 @@ export const hardcoverConnector: Connector = {
   capabilities: { read: false, write: true },
   carries: ['progress', 'finished'],
   credentialKind: 'device_code',
-  experimental: false,
+  beta: false,
   validate,
   match,
   push,

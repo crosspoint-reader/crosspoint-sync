@@ -457,7 +457,7 @@ export default function Send() {
 
       <a
         href="#/send/wallpaper"
-        className="mt-5 flex max-w-xl items-center gap-3 rounded-2xl bg-surface px-4 py-3 shadow-sm ring-1 ring-stone-950/5 transition active:scale-[0.99] md:hover:bg-stone-50"
+        className="mt-5 flex max-w-xl items-center gap-3 rounded-xl bg-surface px-4 py-3 shadow-sm ring-1 ring-stone-950/5 transition active:scale-[0.99] md:hover:bg-stone-50"
       >
         <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600">
           <ImagePlus className="size-5" strokeWidth={1.75} />
@@ -501,7 +501,7 @@ export default function Send() {
                 setDragging(false)
                 add(e.dataTransfer.files)
               }}
-              className={`mt-6 flex w-full flex-col items-center gap-2 rounded-2xl border-2 border-dashed px-4 py-8 text-center transition active:scale-[0.99] ${
+              className={`mt-6 flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed px-4 py-8 text-center transition active:scale-[0.99] ${
                 dragging ? 'border-brand-400 bg-brand-50' : 'border-stone-300 bg-surface/60'
               }`}
             >

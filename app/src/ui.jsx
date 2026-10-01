@@ -161,7 +161,7 @@ export function Toaster() {
         role="status"
         aria-live="polite"
         onClick={() => setToast(null)}
-        className="toast-in pointer-events-auto flex w-full max-w-sm items-center gap-3 rounded-2xl bg-raised px-4 py-3 text-left shadow-lg ring-1 ring-stone-950/10"
+        className="toast-in pointer-events-auto flex w-full max-w-sm items-center gap-3 rounded-xl bg-raised px-4 py-3 text-left shadow-lg ring-1 ring-stone-950/10"
       >
         <span className={`grid size-9 shrink-0 place-items-center rounded-full ${toast.error ? 'bg-red-50 text-red-600' : 'bg-brand-50 text-brand-600'}`}>
           <Icon className="size-5" strokeWidth={2} />
@@ -218,7 +218,7 @@ export function PageSkeleton({ route }) {
             <Bone className="h-10 w-28 rounded-full" />
           </div>
           <Bone className="mt-6 h-40" />
-          <div className="mt-4 divide-y divide-stone-100 rounded-2xl bg-surface ring-1 ring-stone-950/5">
+          <div className="mt-4 divide-y divide-stone-100 rounded-xl bg-surface ring-1 ring-stone-950/5">
             <BookRowBones />
             <BookRowBones />
             <BookRowBones />
@@ -292,7 +292,7 @@ export function EmptyState({ icon: Icon, note, title, children, action, compact 
     )
   }
   return (
-    <div className="relative overflow-hidden rounded-3xl bg-surface px-6 py-10 text-center ring-1 ring-stone-950/5">
+    <div className="relative overflow-hidden rounded-xl bg-surface px-6 py-10 text-center ring-1 ring-stone-950/5">
       <div className="dot-field pointer-events-none absolute inset-0 text-stone-950/[0.06]" />
       <div className="relative">
         <div className="relative mx-auto h-24 w-36" aria-hidden="true">

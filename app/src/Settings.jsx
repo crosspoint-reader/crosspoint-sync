@@ -43,7 +43,7 @@ const HINTS = {
   bookfusion: 'Syncs reading progress with BookFusion. You approve the request on bookfusion.com.',
   audiobookshelf: 'Keeps your place between the ebook and the audiobook. Create an API key in Audiobookshelf under Settings, Users, API Keys.',
   bookorbit: 'Syncs progress both ways with your BookOrbit server, and adds your clippings as highlights.',
-  kindle: 'Experimental. Linking needs the CrossPoint Kindle Link browser extension.',
+  kindle: 'Linking needs the CrossPoint Kindle Link browser extension.',
 }
 // Where to get a token, for the services that use one.
 const TOKEN_HELP = {
@@ -260,7 +260,7 @@ function Service({ session, conn, onChange }) {
         <div className="min-w-0 flex-1">
           <p className="flex items-center gap-2 text-sm font-semibold text-stone-900">
             {conn.name}
-            {conn.experimental && <span className="rounded-full bg-stone-100 px-1.5 py-0.5 text-[0.6rem] font-medium text-stone-500">Experimental</span>}
+            {conn.beta && <span className="rounded-full bg-stone-100 px-1.5 py-0.5 text-[0.6rem] font-medium text-stone-500">Beta</span>}
           </p>
           <p className={`truncate text-xs ${needsRelink ? 'text-red-700' : 'text-stone-500'}`}>
             {needsRelink ? 'Needs to be linked again' : conn.linked ? `Linked${conn.account ? ` as ${conn.account}` : ''}` : (HINTS[conn.id] ?? 'Not linked')}

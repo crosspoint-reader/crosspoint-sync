@@ -12,7 +12,10 @@
   --font-eink: "Noto Serif", serif;
   --font-hand: "Caveat", cursive;
 
-  /* Forest green — the single accent color */
+  /* Corners: cards and floating surfaces rounded-xl, large touch controls (h-12/h-14)
+   rounded-2xl, chips and small buttons rounded-full, sheets 28px. */
+
+  /* Forest green, the single accent color */
   --color-brand-50: #f0f5f3;
   --color-brand-100: #d6e5de;
   --color-brand-200: #b3cfc2;

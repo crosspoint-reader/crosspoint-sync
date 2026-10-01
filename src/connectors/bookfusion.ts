@@ -19,7 +19,7 @@ import type {
 } from './types.js';
 
 /**
- * BookFusion connector (Tier 3, experimental). Uses BookFusion's OAuth 2.0
+ * BookFusion connector (Tier 3, beta). Uses BookFusion's OAuth 2.0
  * device-authorization grant to obtain a per-user access token, then pushes
  * reading position to /api/user/books/{id}/reading_position. Endpoints and the
  * api_version header come from BookFusion's official KOReader plugin.
@@ -287,7 +287,7 @@ export const bookfusionConnector: Connector = {
   capabilities: { read: true, write: true },
   carries: ['progress', 'finished'],
   credentialKind: 'device_code',
-  experimental: true,
+  beta: true,
   validate,
   match,
   push,

@@ -70,7 +70,7 @@ describe('GET /kindle (stealth landing page)', () => {
     expect(html).toContain('/kindle-link.zip');
     expect(html).toContain('chrome://extensions');
     expect(html).toContain('Terms of Service');
-    expect(html).toContain('Experimental');
+    expect(html).toContain('Beta');
     expect(html).toContain('/api/v1/connectors/kindle/reveal');
   });
 });
@@ -91,6 +91,6 @@ describe('Kindle connector page (dashboard)', () => {
     expect(html).toContain('Manage Your Content');
     expect(html).toContain('against Amazon');
     expect(html).toContain('Terms of Service');
-    expect(html).toContain('experimental');
+    expect(html).toContain('beta and unofficial');
   });
 });

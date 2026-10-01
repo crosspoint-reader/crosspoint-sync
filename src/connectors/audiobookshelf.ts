@@ -267,7 +267,7 @@ export const audiobookshelfConnector: Connector = {
   capabilities: { read: true, write: true },
   carries: ['progress', 'finished'],
   credentialKind: 'abs',
-  experimental: false,
+  beta: false,
   validate,
   match,
   push,

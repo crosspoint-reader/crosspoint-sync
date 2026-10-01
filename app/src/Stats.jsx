@@ -586,6 +586,11 @@ function dayEvent(entry, act, day) {
   return { icon: BookOpen, text: entry.to > entry.from ? `Read ${span}` : `Opened ${span}` }
 }
 
+// A finished book that only got opened again (no pages, no movement): a reader
+// re-syncing its last position, not reading. Leave it off the timeline.
+const idleAfterFinish = (entry, act, day) =>
+  entry.pages <= 0 && entry.to <= entry.from && act?.finished_at && localDay(new Date(act.finished_at * 1000)) < day
+
 const DAYS_PER_PAGE = 21
 
 function Timeline({ session, activity, books }) {
@@ -594,7 +599,7 @@ function Timeline({ session, activity, books }) {
   const acts = new Map(activity.books.map((b) => [b.document, b]))
   const reading = books.filter((b) => b.status === 'reading').sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
   const days = activity.days
-    .map((d) => ({ ...d, books: (d.books ?? []).filter((b) => byDoc.has(b.document)) }))
+    .map((d) => ({ ...d, books: (d.books ?? []).filter((b) => byDoc.has(b.document) && !idleAfterFinish(b, acts.get(b.document), d.day)) }))
     .filter((d) => d.books.length)
     .reverse()
 
@@ -649,7 +654,7 @@ function Timeline({ session, activity, books }) {
                     const b = byDoc.get(entry.document)
                     const ev = dayEvent(entry, acts.get(entry.document), d.day)
                     return (
-                      <a key={entry.document} href={`#/book/${entry.document}`} className="flex items-center gap-3 rounded-2xl bg-surface p-3 ring-1 ring-stone-950/5 transition active:scale-[0.99] md:hover:bg-stone-50">
+                      <a key={entry.document} href={`#/book/${entry.document}`} className="flex items-center gap-3 rounded-xl bg-surface p-3 ring-1 ring-stone-950/5 transition active:scale-[0.99] md:hover:bg-stone-50">
                         <Cover session={session} book={b} tiny className="w-11" />
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-semibold text-stone-900">{b.title || b.filename}</p>

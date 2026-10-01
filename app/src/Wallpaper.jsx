@@ -358,7 +358,7 @@ export default function Wallpaper() {
       {!img ? (
         <button
           onClick={() => input.current?.click()}
-          className="mt-6 flex w-full max-w-xl flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-stone-300 bg-surface/60 px-4 py-10 text-center transition active:scale-[0.99]"
+          className="mt-6 flex w-full max-w-xl flex-col items-center gap-2 rounded-xl border-2 border-dashed border-stone-300 bg-surface/60 px-4 py-10 text-center transition active:scale-[0.99]"
         >
           <ImagePlus className="size-8 text-brand-500" strokeWidth={1.5} />
           <span className="font-semibold text-stone-900">Choose a photo</span>

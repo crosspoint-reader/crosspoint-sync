@@ -375,7 +375,7 @@ export const microblogConnector: Connector = {
   capabilities: { read: false, write: true },
   carries: ['progress', 'finished'],
   credentialKind: 'token',
-  experimental: false,
+  beta: false,
   matchBy: 'metadata',
   shouldPush,
   validate: validateCredential,

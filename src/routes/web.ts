@@ -30,6 +30,25 @@ for (const id of ['kosync', 'hardcover', 'audiobookshelf', 'bookfusion', 'readwi
     /* icon optional */
   }
 }
+// Web fonts, self-hosted (Latin subsets copied from the app's @fontsource
+// packages) so pages make no third-party requests. Served at /fonts/:file.
+const FONTS = new Map<string, Buffer>();
+for (const f of fs.readdirSync(path.join(ASSETS_DIR, 'fonts'))) {
+  if (f.endsWith('.woff2')) FONTS.set(f, fs.readFileSync(path.join(ASSETS_DIR, 'fonts', f)));
+}
+const face = (family: string, file: string, weight: string) =>
+  `@font-face{font-family:"${family}";src:url(/fonts/${file}) format("woff2");font-weight:${weight};font-style:normal;font-display:swap}`;
+const FONT_FACES = [
+  face('InterVariable', 'inter-latin-wght-normal.woff2', '100 900'),
+  face('Lora', 'lora-latin-500-normal.woff2', '500'),
+  face('Lora', 'lora-latin-600-normal.woff2', '600'),
+  face('Lora', 'lora-latin-700-normal.woff2', '700'),
+  face('Geist Mono', 'geist-mono-latin-400-normal.woff2', '400'),
+  face('Geist Mono', 'geist-mono-latin-500-normal.woff2', '500'),
+  face('Caveat', 'caveat-latin-500-normal.woff2', '500'),
+  face('Caveat', 'caveat-latin-600-normal.woff2', '600'),
+].join('');
+
 // Readwise Reader shares the Readwise icon.
 if (SERVICE_ICONS.has('readwise')) SERVICE_ICONS.set('readwise-reader', SERVICE_ICONS.get('readwise')!);
 
@@ -190,10 +209,8 @@ function shell(title: string, body: string, wide = false): string {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title} · CrossPoint Sync</title>
 <link rel="icon" type="image/png" href="/favicon.png">
-<link rel="preconnect" href="https://rsms.me/">
-<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lora:wght@500;600;700&family=Geist+Mono:wght@400;500&family=Caveat:wght@500;600&display=swap">
-<style>${STYLE}</style></head>
+<link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<style>${FONT_FACES}${STYLE}</style></head>
 <body>
 <header class="site"><div class="bar">
   <a class="wordmark" href="https://crosspointreader.com"><img src="/logo.png" alt=""><span>CrossPoint <span class="accent">Sync</span></span></a>
@@ -240,9 +257,15 @@ const LANDING = shell(
        <span class="pill">ready</span></div>
      <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/hardcover.png" alt="" width="34" height="34"><div><div class="name">Hardcover</div>
        <div class="desc">Keep your Hardcover shelf and reading progress up to date automatically.</div></div></div>
-       <span class="pill warn">beta</span></div>
+       <span class="pill">ready</span></div>
      <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/microblog.png" alt="" width="34" height="34"><div><div class="name">Micro.blog</div>
        <div class="desc">Keep your Currently reading and Finished reading bookshelves up to date automatically.</div></div></div>
+       <span class="pill">ready</span></div>
+     <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/readwise.png" alt="" width="34" height="34"><div><div class="name">Readwise</div>
+       <div class="desc">Send the passages you highlight on your reader to Readwise.</div></div></div>
+       <span class="pill">ready</span></div>
+     <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/readwise.png" alt="" width="34" height="34"><div><div class="name">Readwise Reader</div>
+       <div class="desc">Archive books in Reader when you finish them, and bring your Reader progress back.</div></div></div>
        <span class="pill">ready</span></div>
      <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/audiobookshelf.png" alt="" width="34" height="34"><div><div class="name">Audiobookshelf</div>
        <div class="desc">Keep your place between the ebook and the audiobook, both ways. Read some, then pick up listening right where you left off.</div></div></div>
@@ -252,7 +275,7 @@ const LANDING = shell(
        <span class="pill warn">beta</span></div>
      <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/bookfusion.png" alt="" width="34" height="34"><div><div class="name">BookFusion</div>
        <div class="desc">Sync reading positions both ways for books downloaded from BookFusion.</div></div></div>
-       <span class="pill warn">experimental</span></div>
+       <span class="pill warn">beta</span></div>
      <p style="font-family:'Caveat',cursive;font-weight:600;font-size:19px;color:var(--brand-600);margin:16px 0 0;transform:rotate(-1deg)">more on the way, and it's all open source</p>
    </div>
 
@@ -501,7 +524,7 @@ async function renderConnectors() {
   el.innerHTML = data.connectors.map(c => {
     const badge = c.linked
       ? (c.status==='needs_reauth' ? '<span class="pill warn">needs reauth</span> ' : '') + '<a href="#" class="unlink-link" data-unlink="'+c.id+'">unlink</a>'
-      : (c.experimental ? '<span class="pill warn">experimental</span>' : '');
+      : (c.beta ? '<span class="pill warn">beta</span>' : '');
     const action = c.linked
       ? '<div class="row" style="justify-content:flex-end;gap:8px"><button class="ghost" data-review="'+c.id+'">Matches</button><button class="ghost" data-sync="'+c.id+'">Sync now</button></div>'
       : '<button class="primary" data-link="'+c.id+'">Link</button>';
@@ -599,7 +622,7 @@ const TOKEN_HELP = {
     + '<li>Click the extension icon: connect it to this server (the same username and password as this dashboard), then register with Amazon — Amazon emails a one-time code.</li>'
     + '<li>That\u2019s it — reading on your Kindle now syncs here. Purchased books match by title automatically; for Send-to-Kindle docs, paste the ASIN (from Manage Your Content &amp; Devices) on the match page.</li>'
     + '</ol>'
-    + '<p><b>Caution — experimental and unofficial.</b> This connector uses Amazon\u2019s private device-sync protocol. It is not an official API and is technically against Amazon\u2019s Terms of Service; use it only with your own account and books, at your own risk. Your Amazon password is used once, inside your own browser, and never reaches this server. The extension registers a new device in your Amazon account (Amazon names it something like <b>&ldquo;Android Phone&rdquo;</b>, ignoring the name we request) — deregister it in Manage Your Content &amp; Devices to revoke access instantly.</p>'
+    + '<p><b>Caution: beta and unofficial.</b> This connector uses Amazon\u2019s private device-sync protocol. It is not an official API and is technically against Amazon\u2019s Terms of Service; use it only with your own account and books, at your own risk. Your Amazon password is used once, inside your own browser, and never reaches this server. The extension registers a new device in your Amazon account (Amazon names it something like <b>&ldquo;Android Phone&rdquo;</b>, ignoring the name we request). Deregister it in Manage Your Content &amp; Devices to revoke access instantly.</p>'
     + '<p style="margin-bottom:0">Advanced: if you already hold a device credential JSON, paste it below instead of using the extension.</p></div>'
 };
 
@@ -612,7 +635,7 @@ const TOKEN_HELP = {
   $('title').textContent = 'Link ' + conn.name;
   CONN_NAME = conn.name;
   $('desc').textContent = HINTS[ID] || '';
-  if (conn.experimental) $('eyebrow').textContent = 'Experimental';
+  if (conn.beta) $('eyebrow').textContent = 'Beta';
   render(conn);
 })();
 
@@ -951,21 +974,21 @@ function bindChoose(btn) {
 // The landing page when the website is the app: every way in goes to /app/.
 const APP_LANDING = LANDING.replace('href="#get-started"', 'href="/app/"').replace(
   /<div class="narrow">[\s\S]*?<p class="foot">/,
-  `<div class="narrow" style="text-align:center"><h2 id="get-started" style="${SECTION}text-align:center">Get started</h2>
-     <a href="/app/"><button class="primary">Open CrossPoint Sync</button></a>
+  `<div class="narrow" id="get-started" style="text-align:center;margin-top:40px">
+     <a href="/app/"><button class="primary">Get started</button></a>
      <p class="muted" style="margin-top:12px">Create an account or sign in with your reader&rsquo;s sync username and password.</p></div>
    <p class="foot">`
 ).replace(/<script>[\s\S]*?<\/script>/, ''); // its sign-in forms are gone
 
 const KINDLE = shell(
   'Connect your Kindle',
-  `<div style="margin-top:16px"><span class="eyebrow">Experimental</span>
+  `<div style="margin-top:16px"><span class="eyebrow">Beta</span>
      <h1>Connect your Kindle</h1>
      <p class="sub">Sync reading progress from a non-jailbroken Kindle (or Kindle app) into CrossPoint Sync — for Send-to-Kindle documents and purchased books.</p></div>
    <div class="card" style="margin-top:18px">
-     <h3 style="margin-top:0">Caution — experimental and unofficial</h3>
+     <h3 style="margin-top:0">Caution: beta and unofficial</h3>
      <p>This connector uses Amazon&rsquo;s private device-sync protocol. It is not an official API and is technically against Amazon&rsquo;s Terms of Service; use it only with your own account and books, at your own risk.</p>
-     <p style="margin-bottom:0">Your Amazon password is used once, inside your own browser, and never reaches this server. The setup registers a new device in your Amazon account (Amazon names it something like <b>&ldquo;Android Phone&rdquo;</b>, ignoring the name we request) — deregister it in Manage Your Content &amp; Devices to revoke access instantly.</p>
+     <p style="margin-bottom:0">Your Amazon password is used once, inside your own browser, and never reaches this server. The setup registers a new device in your Amazon account (Amazon names it something like <b>&ldquo;Android Phone&rdquo;</b>, ignoring the name we request). Deregister it in Manage Your Content &amp; Devices to revoke access instantly.</p>
    </div>
    <div class="card">
      <div class="step"><div class="n">1</div><div>
@@ -1008,6 +1031,14 @@ export function webRoutes(legacy = process.env.LEGACY_WEB === '1'): Hono<AppEnv>
     c.header('cache-control', 'public, max-age=86400');
     return c.body(FAVICON);
   });
+  app.get('/fonts/:file', (c) => {
+    const font = FONTS.get(c.req.param('file'));
+    if (!font) return c.notFound();
+    c.header('content-type', 'font/woff2');
+    c.header('cache-control', 'public, max-age=31536000, immutable');
+    return c.body(new Uint8Array(font));
+  });
+
   app.get('/icons/:file', (c) => {
     const icon = SERVICE_ICONS.get(c.req.param('file').replace(/\.png$/, ''));
     if (!icon) return c.notFound();

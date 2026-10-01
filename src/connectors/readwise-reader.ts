@@ -237,7 +237,7 @@ export const readwiseReaderConnector: Connector = {
   capabilities: { read: true, write: true },
   carries: ['finished'],
   credentialKind: 'token',
-  experimental: false,
+  beta: false,
   matchBy: 'metadata',
   validate,
   shouldPush,

@@ -519,11 +519,11 @@ Lists available connectors and this account's link status.
 {
   "encryption": "enabled",
   "connectors": [
-    {"id": "hardcover", "name": "Hardcover", "tier": 1, "experimental": false,
+    {"id": "hardcover", "name": "Hardcover", "tier": 1, "beta": false,
      "carries": ["progress", "finished"], "capabilities": {"read": false, "write": true},
      "credential_kind": "token", "linked": true, "status": "ok", "account": "julia",
      "queue": {"pending": 0, "dead": 0}},
-    {"id": "readwise", "name": "Readwise", "tier": 1, "experimental": false,
+    {"id": "readwise", "name": "Readwise", "tier": 1, "beta": false,
      "carries": ["highlight"], "capabilities": {"read": true, "write": true},
      "credential_kind": "token", "linked": false, "status": null, "account": null}
   ]

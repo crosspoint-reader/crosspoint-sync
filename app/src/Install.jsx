@@ -62,7 +62,7 @@ export default function InstallPrompt() {
 
   return (
     <div className="fixed inset-x-0 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-40 px-3 md:bottom-6 md:pl-60 lg:pl-64">
-      <div className="mx-auto flex max-w-xl items-center gap-3 rounded-2xl bg-surface p-3 shadow-lg ring-1 ring-stone-950/10">
+      <div className="mx-auto flex max-w-xl items-center gap-3 rounded-xl bg-surface p-3 shadow-lg ring-1 ring-stone-950/10">
         <img src={`${import.meta.env.BASE_URL}icon-192.png`} alt="" className="size-11 shrink-0 rounded-xl" />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-stone-900">Get the app</p>

@@ -122,7 +122,7 @@ export const kosyncConnector: Connector = {
   capabilities: { read: false, write: true },
   carries: ['progress', 'finished'],
   credentialKind: 'kosync',
-  experimental: false,
+  beta: false,
   // Keyed by our document hash, not book metadata: always mirror.
   matchBy: 'document',
   validate,

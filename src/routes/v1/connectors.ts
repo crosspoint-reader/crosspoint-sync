@@ -75,7 +75,7 @@ export function connectorRoutes(
           id: conn.id,
           name: conn.displayName,
           tier: conn.tier,
-          experimental: conn.experimental,
+          beta: conn.beta,
           carries: conn.carries,
           capabilities: conn.capabilities,
           credential_kind: conn.credentialKind,

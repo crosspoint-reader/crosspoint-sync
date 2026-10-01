@@ -175,14 +175,14 @@ export interface Connector {
   /** Which data kinds this connector accepts on fan-out. */
   carries: DataKind[];
   credentialKind: CredentialKind;
-  /** Whether the connector is experimental (Tier 2/3 cookie-replay). */
-  experimental: boolean;
+  /** Beta (shown with a badge) rather than ready. There is no third state. */
+  beta: boolean;
   /** Hidden from the connector list/UI (still registered; not user-linkable via the UI). */
   hidden?: boolean;
   /**
    * Stealth: hidden from the connector list until the user reveals it (POST
    * /connectors/:id/reveal, e.g. via the /kindle landing page). A linked account
-   * is always visible. For gated, experimental connectors that shouldn't be
+   * is always visible. For gated, beta connectors that shouldn't be
    * discoverable from the main UI alone.
    */
   revealable?: boolean;

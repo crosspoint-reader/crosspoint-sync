@@ -274,7 +274,7 @@ export const bookorbitConnector: Connector = {
   capabilities: { read: true, write: true },
   carries: ['progress', 'finished', 'highlight'],
   credentialKind: 'kosync',
-  experimental: false,
+  beta: true,
   validate,
   match,
   push,
