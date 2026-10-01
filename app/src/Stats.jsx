@@ -3,6 +3,7 @@ import { BookOpen, ChevronLeft, ChevronRight, CircleCheck, Share2 } from 'lucide
 import ShareSheet from './ShareSheet.jsx'
 import { renderCalendarCard, renderStatsCard } from './shareCard.js'
 import { Card, Cover, Eyebrow, ProgressBar, duration, pct } from './ui.jsx'
+import { isPace, moodEmoji } from './moods.js'
 
 const WEEKS = 52 // phones show the newest 26
 const EPOCH = Date.UTC(2000, 0, 1)
@@ -73,53 +74,113 @@ function Bars({ title, labels, values }) {
 function tagCounts(books, field) {
   const counts = new Map()
   for (const b of books) for (const t of b[field] ?? []) counts.set(t, (counts.get(t) ?? 0) + 1)
-  return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 8)
+  return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
 }
 
 // Top moods across the given documents (most common first), for share cards.
 function topMoods(books, documents, n = 3) {
   const byDoc = new Map(books.map((b) => [b.document, b]))
   const picked = [...new Set(documents)].map((d) => byDoc.get(d)).filter((b) => b && b.status !== 'dnf')
-  return tagCounts(picked, 'moods').slice(0, n).map(([m]) => m)
+  return tagCounts(picked, 'moods').filter(([m]) => !isPace(m)).slice(0, n).map(([m]) => m)
 }
 
-function TagBars({ title, rows, total }) {
+// Moods as outlined stickers: size follows how many of your books carry the mood,
+// with a slight tilt each like they were stuck on by hand.
+const TILTS = [-4, 3, -2, 5, -3]
+function MoodStickers({ rows }) {
   const max = Math.max(...rows.map(([, n]) => n), 1)
   return (
-    <Card className="mt-4 p-4">
-      <div className="flex items-baseline justify-between">
-        <h3 className="font-display text-lg font-semibold text-stone-900">{title}</h3>
-        <p className="font-mono text-xs text-stone-500">{total} books</p>
-      </div>
-      <div className="mt-3 space-y-2">
-        {rows.map(([label, n]) => (
-          <div key={label} className="flex items-center gap-3 text-xs">
-            <span className="w-28 shrink-0 truncate text-stone-600" title={label}>
-              {label}
+    <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-4 py-2">
+      {rows.map(([mood, n], i) => {
+        const big = n / max
+        return (
+          <span
+            key={mood}
+            style={{ transform: `rotate(${TILTS[i % TILTS.length]}deg)` }}
+            className={`relative inline-flex items-center gap-1.5 rounded-full border-2 border-stone-900 bg-surface font-semibold text-stone-900 shadow-[3px_3px_0_var(--color-stone-900)] ${
+              big > 0.75 ? 'px-4 py-2 text-lg' : big > 0.4 ? 'px-3.5 py-1.5 text-base' : 'px-3 py-1 text-sm'
+            }`}
+          >
+            <span aria-hidden="true">{moodEmoji(mood)}</span>
+            {mood}
+            <span className="absolute -top-2.5 -right-2 grid size-5 place-items-center rounded-full bg-brand-500 font-mono text-[0.6rem] text-white ring-2 ring-surface">
+              {n}
             </span>
-            <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-stone-100">
-              <div className="h-full rounded-full bg-brand-500" style={{ width: `${(n / max) * 100}%` }} />
-            </div>
-            <span className="w-8 shrink-0 text-right font-mono text-stone-500">{n}</span>
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+// Genres as book spines on a shelf: taller spine, more books.
+const SPINES = [
+  'bg-brand-500 text-white',
+  'bg-brand-300 text-stone-900',
+  'bg-stone-300 text-stone-900',
+  'bg-brand-200 text-stone-900',
+  'bg-brand-400 text-white',
+]
+const SPINE_WIDTHS = ['w-14', 'w-12', 'w-16', 'w-11', 'w-13']
+function GenreShelf({ rows }) {
+  const max = Math.max(...rows.map(([, n]) => n), 1)
+  return (
+    <div>
+      <div className="flex h-48 items-end justify-center gap-1.5 px-2">
+        {rows.map(([genre, n], i) => (
+          <div
+            key={genre}
+            title={`${genre}: ${n} book${n === 1 ? '' : 's'}`}
+            style={{ height: `${45 + (n / max) * 55}%` }}
+            className={`relative flex shrink-0 flex-col items-center justify-between rounded-t-md pt-2 pb-1.5 ${SPINES[i % SPINES.length]} ${SPINE_WIDTHS[i % SPINE_WIDTHS.length]}`}
+          >
+            {/* Two thin bands near the top, like a printed spine */}
+            <span className="absolute inset-x-1.5 top-1.5 h-px bg-current opacity-30" />
+            <span className="absolute inset-x-1.5 top-2.5 h-px bg-current opacity-30" />
+            <span
+              className={`mt-2 min-h-0 flex-1 overflow-hidden font-display font-semibold text-ellipsis whitespace-nowrap [writing-mode:vertical-rl] rotate-180 ${
+                genre.length > 14 ? 'text-xs' : 'text-sm'
+              }`}
+            >
+              {genre}
+            </span>
+            <span className="mt-1 font-mono text-[0.65rem] opacity-80">{n}</span>
           </div>
         ))}
       </div>
-    </Card>
+      <div className="h-2 rounded-sm bg-stone-300 shadow-[0_2px_0_var(--color-stone-400)]" />
+    </div>
   )
 }
 
 function WhatYouRead({ books }) {
   const read = books.filter((b) => b.status !== 'dnf')
-  const moods = tagCounts(read, 'moods')
-  const genres = tagCounts(read, 'genres')
+  const all = tagCounts(read, 'moods')
+  const moods = all.filter(([m]) => !isPace(m)).slice(0, 5)
+  const pace = all.find(([m]) => isPace(m))?.[0]
+  const genres = tagCounts(read, 'genres').slice(0, 5)
   if (!moods.length && !genres.length) return null
-  const tagged = (field) => read.filter((b) => b[field]?.length).length
   return (
     <section>
       <h2 className="mt-10 font-display text-xl font-semibold text-stone-900">What you read</h2>
       <div className="md:grid md:grid-cols-2 md:gap-4">
-        {moods.length > 0 && <TagBars title="Moods" rows={moods} total={tagged('moods')} />}
-        {genres.length > 0 && <TagBars title="Genres" rows={genres} total={tagged('genres')} />}
+        {moods.length > 0 && (
+          <Card className="mt-4 p-4">
+            <h3 className="font-display text-lg font-semibold text-stone-900">Your moods</h3>
+            <MoodStickers rows={moods} />
+            {pace && (
+              <p className="mt-2 text-center text-xs text-stone-500">
+                Mostly {pace.toLowerCase()} {moodEmoji(pace)}
+              </p>
+            )}
+          </Card>
+        )}
+        {genres.length > 0 && (
+          <Card className="mt-4 p-4">
+            <h3 className="mb-3 font-display text-lg font-semibold text-stone-900">Your genres</h3>
+            <GenreShelf rows={genres} />
+          </Card>
+        )}
       </div>
       <p className="mt-3 text-xs/5 text-stone-500">From Hardcover readers&apos; tags for each book. Books you didn&apos;t finish are left out.</p>
     </section>

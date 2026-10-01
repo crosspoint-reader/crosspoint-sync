@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ArrowLeft, Hash, Image as ImageIcon, Loader2, Merge, Search, Share2, Star, X } from 'lucide-react'
 import { api } from './api.js'
 import { renderCard } from './shareCard.js'
+import { isPace, moodEmoji } from './moods.js'
 import ShareSheet from './ShareSheet.jsx'
 import { STATUS, Card, Cover, ErrorNote, ProgressBar, Spinner, ago, duration, pct, useLoad } from './ui.jsx'
 
@@ -331,26 +332,35 @@ function BookTools({ session, book, books, onChange }) {
 
 // Moods, genres and content warnings from Hardcover's catalog (when the server has them).
 function Details({ book }) {
-  const groups = [
-    ['Moods', book.moods, 'bg-brand-50 text-brand-700 ring-brand-200/60'],
-    ['Genres', book.genres, 'bg-stone-100 text-stone-700 ring-stone-950/5'],
-  ].filter(([, list]) => list?.length)
+  const moods = (book.moods ?? []).filter((m) => !isPace(m)).slice(0, 5)
+  const pace = (book.moods ?? []).find(isPace)
+  const genres = (book.genres ?? []).slice(0, 5)
   const warnings = book.content_warnings ?? []
-  if (!groups.length && !warnings.length) return null
+  if (!moods.length && !genres.length && !warnings.length) return null
   return (
-    <Card className="mt-4 space-y-3 p-4">
-      {groups.map(([label, list, tone]) => (
-        <div key={label}>
-          <p className="text-xs font-medium text-stone-500">{label}</p>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {list.map((t) => (
-              <span key={t} className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${tone}`}>
-                {t}
+    <Card className="mt-4 space-y-4 p-4">
+      {moods.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-stone-500">Moods{pace ? ` · ${pace.toLowerCase()} ${moodEmoji(pace)}` : ''}</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {moods.map((m) => (
+              <span
+                key={m}
+                className="inline-flex items-center gap-1 rounded-full border-[1.5px] border-stone-900 bg-surface px-2.5 py-1 text-xs font-semibold text-stone-900 shadow-[2px_2px_0_var(--color-stone-900)]"
+              >
+                <span aria-hidden="true">{moodEmoji(m)}</span>
+                {m}
               </span>
             ))}
           </div>
         </div>
-      ))}
+      )}
+      {genres.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-stone-500">Genres</p>
+          <p className="mt-1 font-display text-base text-stone-800">{genres.join(' · ')}</p>
+        </div>
+      )}
       {warnings.length > 0 && (
         <details className="text-xs text-stone-500">
           <summary className="cursor-pointer font-medium">Content warnings ({warnings.length})</summary>

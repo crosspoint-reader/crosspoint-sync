@@ -89,7 +89,7 @@ function toBook(doc: any): HardcoverBook | null {
     slug: typeof doc.slug === 'string' ? doc.slug : null,
     title: doc.title,
     author: authors[0] ?? null,
-    moods: tidy(doc.moods, 8),
+    moods: tidy(doc.moods, 12), // pace ("medium-paced") tends to sit near the end
     genres: tidy(doc.genres, 6),
     content_warnings: tidy(doc.content_warnings, 8),
     rating: typeof doc.rating === 'number' && doc.ratings_count > 0 ? Math.round(doc.rating * 100) / 100 : null,
