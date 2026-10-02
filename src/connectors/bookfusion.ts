@@ -19,21 +19,14 @@ import type {
 } from './types.js';
 
 /**
- * BookFusion connector (Tier 3, beta). Uses BookFusion's OAuth 2.0
+ * BookFusion connector (Tier 3). Uses BookFusion's OAuth 2.0
  * device-authorization grant to obtain a per-user access token, then pushes
  * reading position to /api/user/books/{id}/reading_position. Endpoints and the
  * api_version header come from BookFusion's official KOReader plugin.
- *
- * !!! LIVE-VERIFY GATE !!!
- * BookFusion's API is real but not formally public (a developer portal is "coming").
- * The plugin hardcodes client_id "koreader"; confirm we may reuse it or register
- * our own before shipping. Reconfirm the device-code, search, and reading_position
- * shapes against a live account. Search this file for GATE.
  */
 
 const BASE = 'https://www.bookfusion.com';
 const API_VERSION = 'application/json; api_version=10';
-// GATE: confirm we can use this client_id; BookFusion may require registration.
 const CLIENT_ID = 'koreader';
 
 interface BookFusionCred extends Credential {
@@ -71,7 +64,6 @@ function withPosition(err: unknown, label: string, value: string): never {
 async function validate(cred: Credential, http: HttpTransport): Promise<ValidateResult> {
   try {
     const token = tokenOf(cred);
-    // GATE: confirm a cheap authenticated endpoint for validation.
     const res = await http(`${BASE}/api/user/books/search`, {
       method: 'POST',
       headers: authHeaders(token),
@@ -94,7 +86,6 @@ async function match(
   if (!ta) return null;
   const token = tokenOf(cred);
   const q = `${ta.title} ${ta.author}`.trim();
-  // GATE: confirm the search request/response shape.
   const res = await http(`${BASE}/api/user/books/search`, {
     method: 'POST',
     headers: authHeaders(token),
@@ -114,7 +105,6 @@ async function match(
   return { externalId: decision.best.externalId, confidence: decision.best.score, queryUsed: q };
 }
 
-/** GATE: adapt to the real search payload. */
 export function extractBooks(body: any): Candidate[] {
   const arr = Array.isArray(body) ? body : (body?.books ?? body?.results ?? []);
   const out: Candidate[] = [];
@@ -287,7 +277,7 @@ export const bookfusionConnector: Connector = {
   capabilities: { read: true, write: true },
   carries: ['progress', 'finished'],
   credentialKind: 'device_code',
-  beta: true,
+  beta: false,
   validate,
   match,
   push,
