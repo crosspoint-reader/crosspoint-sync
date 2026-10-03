@@ -1,14 +1,16 @@
 import { decideMatch, extractTitleAuthor, type Candidate } from './matching.js';
 import { baseUrl } from './audiobookshelf.js';
-import { cachedEpub, epubRangeCfi } from './bookfusion-epub.js';
+import { cachedEpub, epubPosition, epubRangeCfi, epubRangeOffsets, epubXPath, withEpubMap, type Epub } from './bookfusion-epub.js';
 import {
   ConnectorOperationError,
   type Connector,
+  type ConnectorContext,
   type Credential,
   type DocumentMeta,
   type ExternalBook,
   type HttpTransport,
   type InboundChange,
+  type InboundHighlight,
   type Match,
   type OutboundEvent,
   type PushResult,
@@ -21,9 +23,10 @@ import {
  *
  * BookOrbit's own KOReader endpoint only resolves KOReader's binary partial-MD5,
  * and CrossPoint hashes by filename by default, so a plain kosync mirror 404s.
- * Instead we match by title/author against the user's libraries and write
- * progress (and clippings, as highlights) to the book's file through the same
- * REST API its web reader uses.
+ * Instead we match by title/author against the user's libraries and sync
+ * progress and highlights with the book's file through the same REST API its
+ * web reader uses. Positions are exact both ways: XPath <-> CFI against
+ * BookOrbit's own copy of the EPUB.
  *
  * Auth is the BookOrbit account (password login, "native" client so we get a
  * refresh token). Access tokens are short-lived (15m default) and cached in
@@ -182,7 +185,9 @@ async function resolveEdition(cred: Credential, externalId: string, http: HttpTr
   return c ? fileId(http, c, externalId) : null;
 }
 
-async function pullProgress(cred: Credential, m: Match, http: HttpTransport, sinceMs: number): Promise<InboundChange | null> {
+async function pullProgress(
+  cred: Credential, m: Match, http: HttpTransport, sinceMs: number, ctx?: ConnectorContext
+): Promise<InboundChange | null> {
   const c = parseCred(cred);
   if (!c) return null;
   const rows = await getJson(http, c, `/books/${encodeURIComponent(m.externalId)}/progress`);
@@ -192,7 +197,59 @@ async function pullProgress(cred: Credential, m: Match, http: HttpTransport, sin
   const updatedAtMs = row.updatedAt ? Date.parse(row.updatedAt) : NaN;
   if (!Number.isFinite(updatedAtMs) || updatedAtMs <= sinceMs) return null;
   const pct = Math.max(0, Math.min(1, row.percentage / 100));
-  return { externalId: m.externalId, percentage: pct, finished: pct >= 0.999, updatedAtMs };
+  // Every BookOrbit save replaces both fields, so whichever is set is current:
+  // koreaderProgress is ours (or a KOReader's), cfi is its web reader's.
+  let progress: string | undefined;
+  if (typeof row.koreaderProgress === 'string' && row.koreaderProgress.startsWith('/body/')) {
+    progress = row.koreaderProgress;
+  } else if (typeof row.cfi === 'string' && row.cfi && m.externalEdition && String(row.fileId) === m.externalEdition) {
+    // The stored map is of the matched file; progress on another file stays a percentage.
+    progress = await positionMap(http, c, m, m.externalEdition, ctx, (b) => epubXPath(b, row.cfi)).catch(() => undefined);
+  }
+  return { externalId: m.externalId, percentage: pct, finished: pct >= 0.999, updatedAtMs, ...(progress ? { progress } : {}) };
+}
+
+/** Position lookups run on the book's stored redacted map, keyed by book like the match. */
+function positionMap<T>(
+  http: HttpTransport, c: OrbitCred, m: Match, file: string, ctx: ConnectorContext | undefined, use: (b: Epub) => Promise<T>
+): Promise<T> {
+  return withEpubMap(ctx, 'bookorbit', m.externalId, () => epub(http, c, file), use);
+}
+
+/** BookOrbit's copy of the book, briefly cached (text entries only). Highlights need its real text. */
+function epub(http: HttpTransport, c: OrbitCred, file: string) {
+  return cachedEpub(['bookorbit', api(c), c.username, file], async () => {
+    const res = await call(http, c, 'GET', `/books/files/${encodeURIComponent(file)}/serve`);
+    if (res.status < 200 || res.status >= 300) {
+      throw new ConnectorOperationError(`BookOrbit EPUB download failed (${res.status})`, res.status === 429 || res.status >= 500);
+    }
+    return res;
+  });
+}
+
+async function pullHighlights(
+  cred: Credential, m: Match, http: HttpTransport, skip: (text: string) => boolean
+): Promise<InboundHighlight[]> {
+  const c = parseCred(cred);
+  if (!c) return [];
+  const rows = await getJson(http, c, `/books/${encodeURIComponent(m.externalId)}/annotations`);
+  const out: InboundHighlight[] = [];
+  for (const a of Array.isArray(rows) ? rows : []) {
+    if (typeof a?.cfi !== 'string' || typeof a.text !== 'string' || skip(a.text)) continue;
+    const file = a.jumpFileId != null ? String(a.jumpFileId) : m.externalEdition ?? (await fileId(http, c, m.externalId));
+    if (!file) continue;
+    // A CFI we can't place, or one that doesn't hold the quote, is skipped rather than guessed.
+    const at = await epub(http, c, file).then((b) => epubRangeOffsets(b, a.cfi)).catch(() => null);
+    if (!at || !squash(at.text).startsWith(squash(a.text).slice(0, 40))) continue;
+    const created = Date.parse(a.highlightedAt ?? a.createdAt);
+    out.push({
+      text: at.text, note: typeof a.note === 'string' && a.note ? a.note : null,
+      chapter: typeof a.chapterTitle === 'string' ? a.chapterTitle : null,
+      spine: at.spine, startOffset: at.start, endOffset: at.end,
+      createdAt: Number.isFinite(created) ? Math.floor(created / 1000) : 0,
+    });
+  }
+  return out;
 }
 
 function result(status: number): PushResult {
@@ -215,14 +272,7 @@ async function pushHighlight(http: HttpTransport, c: OrbitCred, m: Match, file: 
   if (h.spine == null || h.startOffset == null || h.endOffset == null) {
     return { ok: false, retryable: false, error: 'clipping has no position (update the reader firmware)' };
   }
-  const epub = await cachedEpub(['bookorbit', api(c), c.username, file], async () => {
-    const res = await call(http, c, 'GET', `/books/files/${encodeURIComponent(file)}/serve`);
-    if (res.status < 200 || res.status >= 300) {
-      throw new ConnectorOperationError(`BookOrbit EPUB download failed (${res.status})`, res.status === 429 || res.status >= 500);
-    }
-    return res;
-  });
-  const { cfi, text } = await epubRangeCfi(epub, h.spine, h.startOffset, h.endOffset);
+  const { cfi, text } = await epubRangeCfi(await epub(http, c, file), h.spine, h.startOffset, h.endOffset);
   if (!squash(text).startsWith(squash(h.text).slice(0, 40))) {
     return { ok: false, retryable: false, error: 'clipping text not found at its position in the BookOrbit copy of the book' };
   }
@@ -239,7 +289,9 @@ async function pushHighlight(http: HttpTransport, c: OrbitCred, m: Match, file: 
   return result((await call(http, c, 'POST', `/books/${book}/annotations`, body)).status);
 }
 
-async function push(cred: Credential, m: Match, ev: OutboundEvent, http: HttpTransport): Promise<PushResult> {
+async function push(
+  cred: Credential, m: Match, ev: OutboundEvent, http: HttpTransport, ctx?: ConnectorContext
+): Promise<PushResult> {
   const c = parseCred(cred);
   if (!c) return { ok: false, retryable: false, needsReauth: true, error: 'bad credential' };
   try {
@@ -253,9 +305,16 @@ async function push(cred: Credential, m: Match, ev: OutboundEvent, http: HttpTra
     const file = m.externalEdition ?? (await fileId(http, c, m.externalId));
     if (!file) return { ok: false, retryable: false, error: 'book has no EPUB file in BookOrbit' };
 
-    const body: Record<string, unknown> = { percentage: Math.round((finished ? 1 : pct) * 10000) / 100 };
-    // KOReader-style XPointers are what BookOrbit stores for its KOReader devices.
-    if (ev.progress?.startsWith('/body')) body.koreaderProgress = ev.progress;
+    // Enough precision that pulling our own write back reads as the same position, not an edit.
+    const body: Record<string, unknown> = { percentage: Math.round((finished ? 1 : pct) * 1_000_000) / 10_000 };
+    // KOReader-style XPointers are what BookOrbit stores for its KOReader devices;
+    // the CFI is what its web reader resumes from. A CFI miss still saves the rest.
+    if (ev.progress?.startsWith('/body')) {
+      const xpath = ev.progress;
+      body.koreaderProgress = xpath;
+      const at = await positionMap(http, c, m, file, ctx, (b) => epubPosition(b, xpath)).catch(() => null);
+      if (at) body.cfi = at.cfi;
+    }
     const saved = result((await call(http, c, 'POST', `/books/files/${encodeURIComponent(file)}/progress`, body)).status);
     if (!saved.ok || !finished) return saved;
     return result((await call(http, c, 'PATCH', `/books/${encodeURIComponent(m.externalId)}/status`, { status: 'read' })).status);
@@ -281,4 +340,5 @@ export const bookorbitConnector: Connector = {
   search,
   resolveEdition,
   pullProgress,
+  pullHighlights,
 };

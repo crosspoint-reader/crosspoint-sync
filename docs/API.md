@@ -597,6 +597,9 @@ to highlight-connectors (Readwise). A background worker delivers them with retry
 **Fan-in** (read connectors: Audiobookshelf, BookOrbit, Readwise Reader, BookFusion) is pulled on a
 background interval for library-wide providers, and on-demand — when a device asks for progress on a
 matched book — for per-book providers.
+BookOrbit also pulls highlights on that refresh: each one is placed by its CFI in BookOrbit's copy of
+the EPUB and stored as a clipping (chapter codepoint offsets, firmware-style id), skipped when the same
+quote is already a clipping on the book, live or deleted.
 
 ### GET /healthz
 

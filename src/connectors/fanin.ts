@@ -1,10 +1,13 @@
-import type { DB } from '../db/db.js';
+import { createHash } from 'node:crypto';
+import { withTransaction, type DB } from '../db/db.js';
 import { nowSeconds } from '../models/sync.js';
 import { getConnector, fetchTransport } from './registry.js';
-import { fanOutProgress } from './fanout.js';
+import { fanOutHighlight, fanOutProgress } from './fanout.js';
+import { clippingDocuments } from '../models/merge.js';
 import { nearestProgressSample, recordProgressSample, upsertProgress } from '../routes/kosync.js';
 import {
   decryptCredential,
+  documentMeta,
   documentForExternal,
   getAccount,
   getPullCursor,
@@ -15,7 +18,7 @@ import {
   listAllEnabledAccounts,
   setPullCursor,
 } from './store.js';
-import { ConnectorOperationError, type InboundChange, type HttpTransport } from './types.js';
+import { ConnectorOperationError, type InboundChange, type InboundHighlight, type HttpTransport } from './types.js';
 
 // Skip an inbound change whose percentage already matches our stored progress
 // (within this window). This suppresses the echo of a value we just pushed OUT
@@ -89,6 +92,14 @@ export async function pollConnector(
         if (change && freshMatch?.external_id === match.external_id && freshMatch.source === match.source) {
           applied += apply(change, match.document);
         }
+        if (conn.pullHighlights && freshMatch?.external_id === match.external_id) {
+          const known = clippingTexts(db, userId, match.document);
+          const highlights = await conn.pullHighlights(credential, {
+            externalId: match.external_id, externalEdition: match.external_edition, confidence: match.confidence,
+          }, http, (t) => known.has(squash(t)));
+          options.signal?.throwIfAborted();
+          importHighlights(db, userId, match.document, highlights, connectorId);
+        }
       } catch (err) {
         console.error(JSON.stringify({ msg: 'connector pull failed', connector: connectorId, user_id: userId,
           document: match.document, error: err instanceof Error ? err.message : 'pull failed' }));
@@ -120,6 +131,61 @@ export async function pollConnector(
 
   if (maxCursor > since) setPullCursor(db, userId, connectorId, maxCursor);
   return applied;
+}
+
+// Whitespace and soft hyphens differ between device clipping text and provider quotes.
+const squash = (t: string) => t.replace(/[\s\u00ad]+/g, '');
+const MAX_TEXT = 4096;
+
+/** Every quote ever clipped on this book (tombstones too, so deletions stay deleted). */
+function clippingTexts(db: DB, userId: number, document: string): Set<string> {
+  const docs = clippingDocuments(db, userId, document);
+  const rows = db.prepare(
+    `SELECT text FROM clippings WHERE user_id = ? AND document IN (${docs.map(() => '?').join(',')}) AND text IS NOT NULL`
+  ).all(userId, ...docs) as { text: string }[];
+  return new Set(rows.map((r) => squash(r.text)));
+}
+
+/**
+ * Store provider highlights as clippings so devices pick them up on their next
+ * clippings sync, then fan them out to the other highlight services. Ids follow
+ * the clipping rule (SHA-256 of created_at + text); an existing id, live or
+ * tombstoned, is left alone.
+ */
+function importHighlights(db: DB, userId: number, document: string, items: InboundHighlight[], source: string): void {
+  const known = clippingTexts(db, userId, document);
+  const fresh = items.filter((h) => Buffer.byteLength(h.text) <= MAX_TEXT);
+  if (!fresh.length) return;
+  const now = nowSeconds();
+  const bump = db.prepare('UPDATE clipping_sync_clock SET revision = revision + 1 WHERE id = 1');
+  const insert = db.prepare(
+    `INSERT INTO clippings (user_id, document, id, spine_index, start_page, end_page, page_count,
+                            start_word, end_word, word_count, paragraph_index, chapter_title, text,
+                            note, color, created_at, deleted, updated_at, layout_signature, start_offset, end_offset, revision)
+     VALUES (?, ?, ?, ?, 0, 0, 1, 0, 0, 0, NULL, ?, ?, ?, NULL, ?, 0, ?, 0, ?, ?,
+             (SELECT revision FROM clipping_sync_clock WHERE id = 1))
+     ON CONFLICT(user_id, document, id) DO NOTHING`
+  );
+  const added: { id: string; h: InboundHighlight }[] = [];
+  withTransaction(db, () => {
+    for (const h of fresh) {
+      if (known.has(squash(h.text))) continue;
+      const id = createHash('sha256').update(`${h.createdAt}${h.text}`).digest('hex').slice(0, 16);
+      const note = h.note && Buffer.byteLength(h.note) <= 4096 ? h.note : null;
+      bump.run();
+      const r = insert.run(userId, document, id, h.spine, (h.chapter ?? '').slice(0, 64), h.text, note,
+        h.createdAt, now, h.startOffset, h.endOffset);
+      if (r.changes) { added.push({ id, h }); known.add(squash(h.text)); }
+    }
+  });
+  const meta = documentMeta(db, userId, document);
+  for (const { id, h } of added) {
+    fanOutHighlight(db, userId, document, id, {
+      text: h.text, note: h.note, title: meta.title, author: meta.author,
+      highlightedAt: h.createdAt || null, spine: h.spine, startOffset: h.startOffset,
+      endOffset: h.endOffset, chapter: h.chapter,
+    }, now, source);
+  }
 }
 
 /** Poll library-wide providers; per-book providers refresh on progress requests. */

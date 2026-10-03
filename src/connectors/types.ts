@@ -84,6 +84,18 @@ export interface InboundChange {
   furthestReadOnly?: boolean;
 }
 
+/** A highlight pulled FROM a connector, positioned in chapter codepoints like a clipping. */
+export interface InboundHighlight {
+  text: string;
+  note: string | null;
+  chapter: string | null;
+  spine: number;
+  startOffset: number;
+  endOffset: number;
+  /** unix seconds the highlight was made. */
+  createdAt: number;
+}
+
 /** A canonical reading event to fan out to a connector. */
 export interface OutboundEvent {
   kind: DataKind;
@@ -268,6 +280,15 @@ export interface Connector {
   pullProgress?(
     cred: Credential, match: Match, http: HttpTransport, sinceMs: number, ctx?: ConnectorContext
   ): Promise<InboundChange | null>;
+
+  /**
+   * Highlights on a known book, for import as clippings. `skip` says whether a
+   * quote is already a clipping on this book, so connectors avoid resolving
+   * known ones (which can mean downloading the EPUB). Optional.
+   */
+  pullHighlights?(
+    cred: Credential, match: Match, http: HttpTransport, skip: (text: string) => boolean
+  ): Promise<InboundHighlight[]>;
 
   /** Begin an interactive device-code link (OAuth device grant). Optional. */
   beginLink?(http: HttpTransport): Promise<DeviceLinkStart>;

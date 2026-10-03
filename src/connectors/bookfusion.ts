@@ -1,6 +1,6 @@
 import { decideMatch, extractTitleAuthor, type Candidate } from './matching.js';
 import {
-  bookFusionEpub, epubPosition, epubXPath, loadEpubMap, redactEpub, saveEpubMap, type Epub,
+  bookFusionEpub, epubPosition, epubXPath, withEpubMap, type Epub,
 } from './bookfusion-epub.js';
 import { ConnectorOperationError } from './types.js';
 import type {
@@ -136,21 +136,11 @@ async function readingPosition(token: string, bookId: string, http: HttpTranspor
   return { updatedAtMs, percentage: body.percentage / 100, cfi: body.cfi };
 }
 
-/**
- * Run a position lookup against the book's stored redacted map, downloading the
- * EPUB only when there is none or the lookup fails (the book may have changed).
- */
-async function withBookMap<T>(
+function withBookMap<T>(
   token: string, bookId: string, http: HttpTransport, ctx: ConnectorContext | undefined,
   use: (epub: Epub) => Promise<T>
 ): Promise<T> {
-  const stored = ctx && loadEpubMap(ctx, 'bookfusion', bookId);
-  if (stored) {
-    try { return await use(stored); } catch { /* rebuild from a fresh download below */ }
-  }
-  const map = redactEpub(await bookFusionEpub(token, bookId, authHeaders(token), http));
-  if (ctx) saveEpubMap(ctx, 'bookfusion', bookId, map);
-  return use(map);
+  return withEpubMap(ctx, 'bookfusion', bookId, () => bookFusionEpub(token, bookId, authHeaders(token), http), use);
 }
 
 async function pullProgress(

@@ -122,10 +122,11 @@ export function fanOutHighlight(
   document: string,
   clippingId: string,
   h: NonNullable<OutboundEvent['highlight']>,
-  timestamp: number
+  timestamp: number,
+  exceptConnectorId?: string
 ): void {
   // Per-clipping coalesce key so distinct highlights on one book each queue.
-  fanOut(db, userId, { kind: 'highlight', document, timestamp, highlight: h }, `highlight:${clippingId}`);
+  fanOut(db, userId, { kind: 'highlight', document, timestamp, highlight: h }, `highlight:${clippingId}`, exceptConnectorId);
 }
 
 /**

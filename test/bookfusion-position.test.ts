@@ -1,7 +1,7 @@
 import { crc32, gunzipSync } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  bookFusionEpub, clearBookFusionEpubCache, epubPosition, epubRangeCfi, epubXPath, loadEpubMap, redactEpub,
+  bookFusionEpub, clearBookFusionEpubCache, epubPosition, epubRangeCfi, epubRangeOffsets, epubXPath, loadEpubMap, redactEpub,
 } from '../src/connectors/bookfusion-epub.js';
 import { bookfusionConnector } from '../src/connectors/bookfusion.js';
 import { bookorbitConnector } from '../src/connectors/bookorbit.js';
@@ -624,6 +624,82 @@ describe('bookorbit highlights', () => {
     const r = await bookorbitConnector.push(CRED, MATCH, ev('something else'), o.http);
     expect(r).toMatchObject({ ok: false, retryable: false });
     expect(o.calls.some((c) => c.url.includes('/annotations'))).toBe(false);
+  });
+
+  it('maps a range CFI back to the clipping\'s chapter offsets', async () => {
+    const want = { spine: 1, start: 9, end: 18, cfi: 'epubcfi(/8/4!/6/4,/2/1:0,/3:5)', text: 'bold tail' };
+    expect(await epubRangeOffsets(epub(), 'epubcfi(/8/4!/6/4,/2/1:0,/3:5)')).toEqual(want);
+    // Another reader's split of the same range, with a spine ID assertion.
+    expect(await epubRangeOffsets(epub(), 'epubcfi(/8/4[b]!/6,/4/2/1:0,/4/3:5)')).toEqual(want);
+    // UTF-16 offsets around an astral character become codepoints.
+    expect(await epubRangeOffsets(epub(), 'epubcfi(/8/4!/6/4,/1:3,/1:5)')).toMatchObject({ start: 8, end: 9, text: '😀' });
+    await expect(epubRangeOffsets(epub(), 'epubcfi(/8/4!/6/4/1:3)')).rejects.toThrow('range');
+  });
+
+  it('pushes the CFI with the XPath so its web reader resumes at the same spot', async () => {
+    const o = orbit();
+    const r = await bookorbitConnector.push(CRED, MATCH, { kind: 'progress', document: 'd', percentage: 0.423712, progress: XPATH, timestamp: 1 }, o.http);
+    expect(r.ok).toBe(true);
+    const save = o.calls.find((c) => c.url.endsWith('/books/files/71/progress'))!;
+    expect(JSON.parse(save.body!)).toEqual({ percentage: 42.3712, koreaderProgress: XPATH, cfi: (await epubPosition(epub(), XPATH)).cfi });
+  });
+
+  it('keeps a redacted map so later pushes skip the download', async () => {
+    const { app, db } = makeTestApp();
+    await registerUser(app);
+    saveMatch(db, 1, 'bookorbit', DOC, MATCH, 'manual');
+    const ctx = { db, userId: 1 };
+    const o = orbit();
+    const ev = { kind: 'progress' as const, document: DOC, percentage: 0.5, progress: XPATH, timestamp: 1 };
+    await bookorbitConnector.push(CRED, MATCH, ev, o.http, ctx);
+    clearBookFusionEpubCache();
+    await bookorbitConnector.push(CRED, MATCH, ev, o.http, ctx);
+    expect(o.calls.filter((c) => c.url.endsWith('/serve'))).toHaveLength(1);
+    const saves = o.calls.filter((c) => c.url.endsWith('/books/files/71/progress'));
+    expect(JSON.parse(saves[1].body!).cfi).toBe((await epubPosition(epub(), XPATH)).cfi);
+  });
+
+  it('pulls an exact position from the web reader\'s CFI or a KOReader XPath', async () => {
+    const row = (extra: object) => [{ fileId: 71, percentage: 60, updatedAt: '2026-09-02T00:00:00Z', ...extra }];
+    const pull = (rows: unknown) => {
+      const o = orbit();
+      const http: HttpTransport = async (url, init) => url.endsWith('/books/12/progress')
+        ? { status: 200, text: async () => '', json: async () => rows } : o.http(url, init);
+      return bookorbitConnector.pullProgress!(CRED, MATCH, http, 0);
+    };
+    const cfi = (await epubPosition(epub(), XPATH)).cfi;
+    expect(await pull(row({ cfi, koreaderProgress: null }))).toMatchObject({ percentage: 0.6, progress: XPATH });
+    expect(await pull(row({ cfi: null, koreaderProgress: '/body/DocFragment[2]/body/p[1]' }))).toMatchObject({ progress: '/body/DocFragment[2]/body/p[1]' });
+    // An unresolvable CFI still syncs the percentage.
+    const loose = await pull(row({ cfi: 'epubcfi(/8/4!/99)', koreaderProgress: null }));
+    expect(loose).toMatchObject({ percentage: 0.6 });
+    expect(loose).not.toHaveProperty('progress');
+  });
+
+  it('imports its highlights as clippings once, without echoing them back', async () => {
+    const { app, db } = makeTestApp();
+    const { headers } = await registerUser(app);
+    upsertAccount(db, 1, 'bookorbit', CRED, null);
+    saveMatch(db, 1, 'bookorbit', DOC, MATCH, 'manual');
+    const o = orbit([
+      { id: 5, cfi: 'epubcfi(/8/4!/6/4,/2/1:0,/3:5)', text: 'bold tail', note: 'web note', chapterTitle: 'Two', highlightedAt: '2026-09-01T00:00:00Z' },
+      { id: 6, cfi: 'epubcfi(/8/4!/6/4,/2/1:0,/3:5)', text: 'not what is there' },
+      { id: 7, cfi: null, text: 'pdf highlight' },
+    ]);
+    await pollConnector(db, 1, 'bookorbit', o.http);
+    await pollConnector(db, 1, 'bookorbit', o.http);
+    const got = await (await app.request(`/api/v1/clippings/${DOC}`, { headers })).json();
+    expect(got.items).toHaveLength(1);
+    expect(got.items[0]).toMatchObject({
+      spine: 1, start_offset: 9, end_offset: 18, text: 'bold tail', note: 'web note', chapter: 'Two', created_at: 1788220800, deleted: 0,
+    });
+    const queued = db.prepare("SELECT 1 FROM connector_queue WHERE connector_id = 'bookorbit'").all();
+    expect(queued).toHaveLength(0);
+    // Deleting it on a device sticks even though BookOrbit still has it.
+    await app.request(`/api/v1/clippings/${DOC}`, { method: 'PUT', headers, body: JSON.stringify({ items: [{ id: got.items[0].id, deleted: 1 }] }) });
+    await pollConnector(db, 1, 'bookorbit', o.http);
+    const after = await (await app.request(`/api/v1/clippings/${DOC}`, { headers })).json();
+    expect(after.items.map((i: { deleted: number }) => i.deleted)).toEqual([1]);
   });
 });
 

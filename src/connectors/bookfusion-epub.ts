@@ -216,6 +216,24 @@ export function saveEpubMap(ctx: EpubMapContext, connectorId: string, externalId
     .run(ctx.userId, connectorId, externalId, gzipSync(json), now);
 }
 
+/**
+ * Run a position lookup against the book's stored redacted map, downloading the
+ * EPUB only when there is none or the lookup fails (the book may have changed).
+ * Redacted text is filler, so this suits positions only, never quote checks.
+ */
+export async function withEpubMap<T>(
+  ctx: EpubMapContext | undefined, connectorId: string, externalId: string,
+  download: () => Promise<TextEpub>, use: (epub: Epub) => Promise<T>
+): Promise<T> {
+  const stored = ctx && loadEpubMap(ctx, connectorId, externalId);
+  if (stored) {
+    try { return await use(stored); } catch { /* rebuild from a fresh download below */ }
+  }
+  const map = redactEpub(await download());
+  if (ctx) saveEpubMap(ctx, connectorId, externalId, map);
+  return use(map);
+}
+
 export interface BookFusionPosition {
   chapter_index: number;
   page_position_in_book: number;
@@ -485,4 +503,63 @@ export async function epubRangeCfi(
       text: covered,
     };
   });
+}
+
+/**
+ * Chapter codepoint offsets for a range CFI: the inverse of epubRangeCfi, so a
+ * provider's highlight becomes a CrossPoint clipping. Returns the canonical CFI
+ * and covered text too, so callers can check it against the provider's quote.
+ */
+export async function epubRangeOffsets(
+  bytes: Epub, cfi: string
+): Promise<{ spine: number; start: number; end: number; cfi: string; text: string }> {
+  if (cfi.length > 4096 || !cfi.startsWith('epubcfi(') || !cfi.endsWith(')')) invalid('expected an EPUB CFI');
+  // Commas inside [assertions] are not range separators.
+  const parts = cfi.slice(8, -1).split(/,(?![^[]*\])/);
+  if (parts.length !== 3) invalid('expected a range CFI');
+  const [startPaths, endPaths] = [parts[1], parts[2]].map(tail => cfiPaths(`epubcfi(${parts[0]}${tail})`));
+  const found = await withChapter(bytes, (opf, spine, items) => {
+    if (cfiElement(opf, startPaths[0][0]) !== spine) invalid('CFI does not reference the spine');
+    return items.indexOf(cfiElement(spine, startPaths[0][1]));
+  }, ({ index, html, body }) => {
+    const offset = (steps: CfiStep[]): number => {
+      if (cfiElement(html, steps[0]) !== body) invalid('CFI does not reference the body');
+      let node: Node = body, utf16 = 0;
+      for (const [i, step] of steps.slice(1).entries()) {
+        if (step.number % 2 === 0) { node = cfiElement(node, step); continue; }
+        if (i !== steps.length - 2) invalid('text must end the CFI');
+        let slot = 1, remaining = step.offset ?? 0, hit: Node | undefined;
+        for (const c of children(node)) {
+          if (c.nodeType === 1) { slot += 2; continue; }
+          if (!text(c) || slot !== step.number) continue;
+          const length = c.nodeValue?.length ?? 0;
+          if (remaining <= length) { hit = c; break; }
+          remaining -= length;
+        }
+        if (!hit) invalid('CFI text offset out of range');
+        node = hit; utf16 = remaining;
+      }
+      // Count visible codepoints before the point, as the firmware does.
+      let count = 0, result = node === body ? 0 : -1;
+      const visit = (parent: Node): boolean => {
+        for (const c of children(parent)) {
+          if (c === node && c.nodeType === 1) { result = count; return true; }
+          if (c.nodeType === 1) {
+            if (!NON_VISIBLE.has(((c as Element).localName ?? '').toLowerCase()) && visit(c)) return true;
+          } else if (text(c)) {
+            const value = c.nodeValue ?? '';
+            if (c === node) { result = count + Array.from(value.slice(0, utf16)).length; return true; }
+            count += Array.from(value).length;
+          }
+        }
+        return false;
+      };
+      if (result < 0) visit(body);
+      if (result < 0) invalid('CFI is not in visible text');
+      return result;
+    };
+    return { spine: index, start: offset(startPaths[1]), end: offset(endPaths[1]) };
+  });
+  const range = await epubRangeCfi(bytes, found.spine, found.start, found.end);
+  return { ...found, ...range };
 }
