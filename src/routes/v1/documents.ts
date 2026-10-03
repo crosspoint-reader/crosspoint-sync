@@ -145,9 +145,10 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     const document = resolveDocument(db, user.id, param);
     const now = nowSeconds();
     db.prepare(
-      `INSERT INTO documents (user_id, document, status, status_at, updated_at) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(user_id, document) DO UPDATE SET status = excluded.status, status_at = excluded.status_at`
-    ).run(user.id, document, status as string | null, now, now);
+      `INSERT INTO documents (user_id, document, status, status_at, pause_reason, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id, document) DO UPDATE SET
+         status = excluded.status, status_at = excluded.status_at, pause_reason = excluded.pause_reason`
+    ).run(user.id, document, status as string | null, now, status === 'paused' ? 'manual' : null, now);
     if (status === 'finished') fanOutProgress(db, user.id, document, 1, now);
     return c.json({ document, status, status_at: now });
   });
@@ -193,7 +194,8 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
          start_date = excluded.start_date,
          finished_date = excluded.finished_date,
          status = CASE WHEN ? THEN 'finished' ELSE documents.status END,
-         status_at = CASE WHEN ? THEN excluded.status_at ELSE documents.status_at END`
+         status_at = CASE WHEN ? THEN excluded.status_at ELSE documents.status_at END,
+         pause_reason = CASE WHEN ? THEN NULL ELSE documents.pause_reason END`
     ).run(
       user.id,
       document,
@@ -202,6 +204,7 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
       markFinished ? 'finished' : null,
       markFinished ? now : null,
       now,
+      markFinished ? 1 : 0,
       markFinished ? 1 : 0,
       markFinished ? 1 : 0
     );
@@ -304,7 +307,7 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     const user = c.get('user');
     const rows = db
       .prepare(
-        'SELECT document, title, author, filename, filesize, status, status_at, cover_url, page_count, updated_at FROM documents WHERE user_id = ? ORDER BY updated_at DESC LIMIT 500'
+        'SELECT document, title, author, filename, filesize, status, status_at, pause_reason, cover_url, page_count, updated_at FROM documents WHERE user_id = ? ORDER BY updated_at DESC LIMIT 500'
       )
       .all(user.id);
     return c.json({ items: rows });

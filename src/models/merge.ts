@@ -108,8 +108,8 @@ export function mergeDocuments(
 
     // documents: canonical metadata wins, alias fills the gaps.
     db.prepare(
-      `INSERT INTO documents (user_id, document, title, author, filename, filesize, status, status_at, start_date, finished_date, cover_url, page_count, updated_at)
-       SELECT user_id, ?, title, author, filename, filesize, status, status_at, start_date, finished_date, cover_url, page_count, ? FROM documents WHERE user_id = ? AND document = ?
+      `INSERT INTO documents (user_id, document, title, author, filename, filesize, status, status_at, pause_reason, start_date, finished_date, cover_url, page_count, updated_at)
+       SELECT user_id, ?, title, author, filename, filesize, status, status_at, pause_reason, start_date, finished_date, cover_url, page_count, ? FROM documents WHERE user_id = ? AND document = ?
        ON CONFLICT(user_id, document) DO UPDATE SET
          title = COALESCE(documents.title, excluded.title),
          author = COALESCE(documents.author, excluded.author),
@@ -117,6 +117,7 @@ export function mergeDocuments(
          filesize = COALESCE(documents.filesize, excluded.filesize),
          status = COALESCE(documents.status, excluded.status),
          status_at = COALESCE(documents.status_at, excluded.status_at),
+         pause_reason = CASE WHEN documents.status IS NULL THEN excluded.pause_reason ELSE documents.pause_reason END,
          start_date = COALESCE(documents.start_date, excluded.start_date),
          finished_date = COALESCE(documents.finished_date, excluded.finished_date),
          cover_url = COALESCE(documents.cover_url, excluded.cover_url),

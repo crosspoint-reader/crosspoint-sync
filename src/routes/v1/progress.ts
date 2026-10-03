@@ -7,6 +7,7 @@ import { deleteDocumentData, hasDocumentData } from '../../models/document.js';
 import { fanOutProgress } from '../../connectors/fanout.js';
 import { aliasesByDocument, resolveDocument } from '../../models/merge.js';
 import { enrichSoon } from '../../models/cover.js';
+import { autoPause } from '../../models/pause.js';
 
 export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async () => {}): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -35,6 +36,7 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
   app.get('/progress', (c) => {
     const user = c.get('user');
     enrichSoon(db, user.id); // Hardcover details for new books, in the background
+    autoPause(db, { userId: user.id });
     const limitRaw = Number(c.req.query('limit') ?? 100);
     const limit =
       Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 500) : 100;
@@ -44,7 +46,7 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
                 d.title, d.author, d.filename, d.cover_url, d.page_count,
                 d.hc_slug, d.moods, d.genres, d.content_warnings, d.rating, d.series, d.series_position, d.release_year,
                 COALESCE(d.status, CASE WHEN p.percentage >= 0.98 THEN 'finished' ELSE 'reading' END) AS status,
-                d.status_at
+                d.status_at, d.pause_reason
          FROM progress p
          LEFT JOIN documents d ON d.user_id = p.user_id AND d.document = p.document
          WHERE p.user_id = ?
@@ -83,6 +85,7 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
       release_year: number | null;
       status: string;
       status_at: number | null;
+      pause_reason: string | null;
     }[];
     const list = (v: string | null): string[] => {
       try {
@@ -110,6 +113,7 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
           status: r.status,
           // When a manual status was set (null when derived from progress).
           status_at: r.status_at ?? null,
+          pause_reason: r.pause_reason ?? null, // 'auto' | 'manual' while paused
           cover_url: r.cover_url,
           page_count: r.page_count,
           // From Hardcover's catalog (empty until looked up, or without HARDCOVER_API_KEY).
@@ -147,6 +151,7 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
       const status = error instanceof Error && error.name === 'TimeoutError' ? 504 : 502;
       return c.json({ code: 2003, message: 'BookFusion progress refresh failed' }, status);
     }
+    autoPause(db, { userId: user.id, document: canonical });
     const rows = db
       .prepare(
         `SELECT device_id, device, percentage, progress, position, updated_at

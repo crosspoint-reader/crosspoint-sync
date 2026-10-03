@@ -2,6 +2,7 @@ import type { ProgressRefresh } from '../connectors/refresh.js';
 import { Hono } from 'hono';
 import type { DB } from '../db/db.js';
 import type { Config } from '../config.js';
+import { autoPause, autoUnpause } from '../models/pause.js';
 import {
   authMiddleware,
   invalidateAuthCache,
@@ -172,6 +173,7 @@ export function upsertProgress(db: DB, p: ProgressUpsert): void {
       p.percentage,
       p.updatedAt
     );
+    autoUnpause(db, p.userId, p.document, p.updatedAt);
   }
   db.prepare(
     `INSERT INTO progress (user_id, document, device_id, device, percentage, progress, position, updated_at)
@@ -340,6 +342,7 @@ export function kosyncRoutes(db: DB, config: Config, refreshProgress: ProgressRe
       const status = error instanceof Error && error.name === 'TimeoutError' ? 504 : 502;
       return c.json({ code: 2003, message: 'BookFusion progress refresh failed' }, status);
     }
+    autoPause(db, { userId: user.id, document: canonical });
     const row = db
       .prepare(
         `SELECT document, progress, percentage, device, device_id, updated_at
