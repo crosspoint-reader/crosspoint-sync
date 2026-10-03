@@ -28,6 +28,7 @@ export type ProgressRefresh = (userId: number, document: string) => Promise<void
 const PER_BOOK_PULLERS: { id: string; strict: boolean; sidecarOnly: boolean; matchOnDemand?: boolean }[] = [
   { id: 'bookfusion', strict: true, sidecarOnly: true },
   { id: 'kindle', strict: false, sidecarOnly: false, matchOnDemand: true },
+  { id: 'bookorbit', strict: false, sidecarOnly: false, matchOnDemand: true },
 ];
 
 /** Shared by both progress endpoints; only overlapping requests share a refresh. */

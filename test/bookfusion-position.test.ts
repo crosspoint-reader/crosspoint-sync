@@ -676,6 +676,22 @@ describe('bookorbit highlights', () => {
     expect(loose).not.toHaveProperty('progress');
   });
 
+  it('is pulled when a reader asks for progress', async () => {
+    const o = orbit([{ id: 5, cfi: 'epubcfi(/8/4!/6/4,/2/1:0,/3:5)', text: 'bold tail' }]);
+    const cfi = (await epubPosition(epub(), XPATH)).cfi;
+    const http: HttpTransport = async (url, init) => url.endsWith('/books/12/progress')
+      ? { status: 200, text: async () => '', json: async () => [{ fileId: 71, percentage: 60, cfi, updatedAt: new Date().toISOString() }] }
+      : o.http(url, init);
+    const { app, db } = makeTestApp({}, { connectorTransport: http });
+    const { headers } = await registerUser(app);
+    upsertAccount(db, 1, 'bookorbit', CRED, null);
+    saveMatch(db, 1, 'bookorbit', DOC, MATCH, 'manual');
+    const got = await (await app.request(`/syncs/progress/${DOC}`, { headers })).json();
+    expect(got).toMatchObject({ device_id: 'bookorbit', progress: XPATH, percentage: 0.6 });
+    const clips = await (await app.request(`/api/v1/clippings/${DOC}`, { headers })).json();
+    expect(clips.items.map((i: { text: string }) => i.text)).toEqual(['bold tail']);
+  });
+
   it('imports its highlights as clippings once, without echoing them back', async () => {
     const { app, db } = makeTestApp();
     const { headers } = await registerUser(app);
