@@ -518,7 +518,7 @@ describe('spotify sign-in (server-run PKCE, one https redirect)', () => {
     expect(await linked()).toBe(true);
   });
 
-  it('app with an app link: the app completes it, once', async () => {
+  it('app with an app link: the app completes it, and repeats share the result', async () => {
     const { app, headers, linked } = await setup();
     const { state } = await begin(app, headers, 'app');
     const complete = () => app.request('/api/v1/connectors/spotify/oauth/complete', {
@@ -526,8 +526,9 @@ describe('spotify sign-in (server-run PKCE, one https redirect)', () => {
     });
     expect((await complete()).status).toBe(200);
     expect(await linked()).toBe(true);
-    expect((await complete()).status).toBe(400); // single-use
-    expect((await callback(app, state)).status).toBe(400);
+    // A repeat (or the browser page too) shares that result; the code is exchanged once.
+    expect((await complete()).status).toBe(200);
+    expect((await callback(app, state)).status).toBe(200);
   });
 
   it("another user can't complete someone else's sign-in", async () => {
@@ -598,5 +599,85 @@ describe('app links and icons', () => {
     const png = Buffer.from(await res.arrayBuffer());
     expect(png.subarray(1, 4).toString()).toBe('PNG');
     expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([128, 128]);
+  });
+});
+
+describe('spotify connect follow-ups', () => {
+  const DOC2 = 'b'.repeat(32);
+  const DOC3 = 'c'.repeat(32);
+
+  async function reader(routes: Record<string, [number, unknown]> = {}) {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const f = fakeSpotify({
+      'POST /api/token': [200, { access_token: 'at', refresh_token: 'rt', expires_in: 3600 }],
+      'GET /me': [200, { display_name: 'Julia', country: 'US' }],
+      'GET /me/player': [204, null],
+      ...routes,
+    });
+    const { app, db } = makeTestApp({}, { connectorTransport: f.transport });
+    const { headers } = await registerUser(app);
+    await app.request('/api/v1/connectors/spotify/reveal', { method: 'POST', headers });
+    return { app, db, f, headers };
+  }
+  const tokenCalls = (f: any) => f.calls.filter((c: any) => c.url.endsWith('/api/token')).length;
+
+  it('a repeated callback shows the first one\'s result instead of "expired"', async () => {
+    const { app, f, headers } = await reader();
+    const { state } = await begin(app, headers);
+    const [a, b] = await Promise.all([callback(app, state), callback(app, state)]);
+    expect([a.status, b.status]).toEqual([302, 302]);
+    expect((await callback(app, state)).status).toBe(302);
+    expect(tokenCalls(f)).toBe(1);
+  });
+
+  it('first connect matches books in progress and takes Spotify\'s position where it is ahead', async () => {
+    const { app, db, f, headers } = await reader({
+      'GET /me/audiobooks': [200, { items: [{ id: 'a1', name: 'Dune', authors: [{ name: 'Frank Herbert' }] }], next: null }],
+      'GET /search': [200, { audiobooks: { items: [] } }],
+      'GET /audiobooks/a1/chapters': [200, book(2, 1)], // 22% in
+    });
+    const push = (document: string, percentage: number) => app.request('/syncs/progress', {
+      method: 'PUT', headers, body: JSON.stringify({ document, progress: '/x', percentage, device_id: 'reader', device: 'r' }),
+    });
+    await push(DOC, 0.1);
+    await push(DOC2, 0.99);
+    await push(DOC3, 0.2);
+    await app.request('/api/v1/documents', {
+      method: 'PUT', headers, body: JSON.stringify({ items: [
+        { document: DOC, title: 'Dune', author: 'Frank Herbert' },
+        { document: DOC2, title: 'Finished Book', author: 'Someone' },
+        { document: DOC3, title: 'Not On Spotify', author: 'Nobody' },
+      ] }),
+    });
+
+    vi.setSystemTime(Date.now() + 60_000); // connecting comes later than the last read
+    await callback(app, (await begin(app, headers)).state);
+    const latest = () => db.prepare('SELECT device_id, percentage FROM progress WHERE document = ? ORDER BY updated_at DESC LIMIT 1').get(DOC) as any;
+    await vi.waitFor(() => expect(latest()).toEqual({ device_id: 'spotify', percentage: 0.22 }));
+    const matches = db.prepare("SELECT document, external_id FROM connector_matches WHERE connector_id = 'spotify' ORDER BY document").all();
+    expect(matches).toEqual([{ document: DOC, external_id: 'a1' }, { document: DOC3, external_id: null }]); // finished book skipped
+
+    // Re-linking isn't a first connect: no second sweep.
+    const before = f.calls.length;
+    await callback(app, (await begin(app, headers)).state);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(f.calls.slice(before).some((c: any) => c.url.includes('/me/audiobooks'))).toBe(false);
+  });
+
+  it('first connect leaves progress alone when the reader is ahead', async () => {
+    const { app, db, headers } = await reader({
+      'GET /me/audiobooks': [200, { items: [{ id: 'a1', name: 'Dune', authors: [{ name: 'Frank Herbert' }] }], next: null }],
+      'GET /audiobooks/a1/chapters': [200, book(2, 1)],
+    });
+    await app.request('/syncs/progress', {
+      method: 'PUT', headers, body: JSON.stringify({ document: DOC, progress: '/x', percentage: 0.6, device_id: 'reader', device: 'r' }),
+    });
+    await app.request('/api/v1/documents', {
+      method: 'PUT', headers, body: JSON.stringify({ items: [{ document: DOC, title: 'Dune', author: 'Frank Herbert' }] }),
+    });
+    await callback(app, (await begin(app, headers)).state);
+    await vi.waitFor(() => expect(db.prepare("SELECT snapshot FROM connector_matches WHERE document = ?").get(DOC)).toBeTruthy());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(db.prepare('SELECT device_id FROM progress WHERE document = ? ORDER BY updated_at DESC LIMIT 1').get(DOC)).toEqual({ device_id: 'reader' });
   });
 });

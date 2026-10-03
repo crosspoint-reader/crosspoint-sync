@@ -42,7 +42,7 @@ export default function SpotifyCard({ session, book }) {
   return (
     <Card className="mt-4 p-4">
       <p className="flex items-center gap-1.5 text-xs font-medium text-stone-500">
-        <Headphones className="size-3.5" strokeWidth={2} /> Spotify audiobook
+        <Headphones className="size-3.5" strokeWidth={2} /> Spotify Audiobook
         {p.live && <span className="ml-auto rounded-full bg-brand-50 px-2 py-0.5 text-brand-700">Playing now</span>}
       </p>
       <dl className="mt-3 grid grid-cols-2 gap-3">

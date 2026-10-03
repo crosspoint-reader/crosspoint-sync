@@ -6,6 +6,7 @@ import { secretsEnabled } from '../../crypto/secrets.js';
 import { fetchTransport, getConnector, listConnectors } from '../../connectors/registry.js';
 import { purgeConnector, queueDepth } from '../../connectors/queue.js';
 import { backfillConnector } from '../../connectors/fanout.js';
+import { spotifyFirstSync } from '../../connectors/fanin.js';
 import { resolveMatch } from '../../connectors/runner.js';
 import { spotifyPosition, spotifyResume } from '../../connectors/spotify.js';
 import {
@@ -34,6 +35,7 @@ interface PendingOAuth {
   redirectUri: string;
   client: 'app' | 'web';
   expires: number;
+  outcome?: Promise<{ error?: string }>;
 }
 // Browser sign-ins in flight, by state.
 // ponytail: in memory, so one server instance; a restart mid-sign-in means signing in again.
@@ -47,20 +49,36 @@ function publicOrigin(c: Context<AppEnv>, trustProxy: boolean): string {
   return `${https ? 'https:' : url.protocol}//${url.host}`;
 }
 
-/** Finish a sign-in from whoever got the redirect (the app via its app link, or the callback page). State is single-use. */
+/**
+ * Finish a sign-in from whoever got the redirect (the app via its app link, or
+ * the callback page). The code is exchanged once; browsers can send the
+ * redirect twice, so a repeat waits for and shares the first one's result.
+ */
 async function completeOAuth(
   db: DB, transport: HttpTransport, state: string, code: string | undefined, error: string | undefined
 ): Promise<{ entry?: PendingOAuth; error?: string }> {
   const entry = pendingOAuth.get(state);
-  pendingOAuth.delete(state);
   if (!entry || entry.expires < Date.now()) return { error: 'This sign-in expired. Start again from Settings.' };
+  entry.outcome ??= exchangeOAuth(db, transport, entry, code, error);
+  return { entry, ...(await entry.outcome) };
+}
+
+async function exchangeOAuth(
+  db: DB, transport: HttpTransport, entry: PendingOAuth, code: string | undefined, error: string | undefined
+): Promise<{ error?: string }> {
   const conn = getConnector(entry.connectorId)!;
-  if (!code) return { entry, error: error === 'access_denied' ? `You declined on ${conn.displayName}.` : 'Sign-in failed. Start again.' };
+  if (!code) return { error: error === 'access_denied' ? `You declined on ${conn.displayName}.` : 'Sign-in failed. Start again.' };
   const cred: Record<string, unknown> = { code, code_verifier: entry.verifier, redirect_uri: entry.redirectUri };
   const result = await conn.validate(cred, transport);
-  if (!result.ok) return { entry, error: result.error ?? 'Sign-in failed. Start again.' };
+  if (!result.ok) return { error: result.error ?? 'Sign-in failed. Start again.' };
+  const first = !getAccount(db, entry.userId, conn.id);
   upsertAccount(db, entry.userId, conn.id, cred, result.accountLabel ?? null);
-  return { entry };
+  if (first && conn.id === 'spotify') {
+    spotifyFirstSync(db, entry.userId, transport).catch((err) =>
+      console.error(JSON.stringify({ msg: 'first sync failed', connector: conn.id, user_id: entry.userId,
+        error: err instanceof Error ? err.message : String(err) })));
+  }
+  return {};
 }
 
 const escapeHtml = (s: string) =>

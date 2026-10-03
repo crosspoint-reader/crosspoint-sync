@@ -224,6 +224,25 @@ export function setMatchSnapshot(db: DB, userId: number, connectorId: string, ex
     .run(JSON.stringify(snapshot), userId, connectorId, externalId);
 }
 
+/** Give every matched book without a snapshot this one (a first-sync baseline). */
+export function seedMatchSnapshots(db: DB, userId: number, connectorId: string, snapshot: unknown): void {
+  db.prepare(
+    `UPDATE connector_matches SET snapshot = ?
+      WHERE user_id = ? AND connector_id = ? AND external_id IS NOT NULL AND snapshot IS NULL`
+  ).run(JSON.stringify(snapshot), userId, connectorId);
+}
+
+/** Books in progress: not finished or did-not-finish, and under 98%. */
+export function inProgressDocuments(db: DB, userId: number): string[] {
+  return (db.prepare(
+    `SELECT DISTINCT p.document FROM progress p
+       LEFT JOIN documents d ON d.user_id = p.user_id AND d.document = p.document
+      WHERE p.user_id = ? AND COALESCE(d.status, 'reading') IN ('reading', 'paused')
+        AND (SELECT p2.percentage FROM progress p2 WHERE p2.user_id = p.user_id AND p2.document = p.document
+              ORDER BY p2.updated_at DESC, p2.device_id LIMIT 1) < 0.98`
+  ).all(userId) as { document: string }[]).map((r) => r.document);
+}
+
 /** Users with this connector enabled, linked and healthy, and at least one matched book. */
 export function usersWithMatches(db: DB, connectorId: string): number[] {
   return (db.prepare(

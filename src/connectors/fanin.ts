@@ -18,7 +18,10 @@ import {
   listAllEnabledAccounts,
   setPullCursor,
   usersWithMatches,
+  inProgressDocuments,
+  seedMatchSnapshots,
 } from './store.js';
+import { resolveMatch } from './runner.js';
 import { spotifyPaused } from './spotify.js';
 import { ConnectorOperationError, type InboundChange, type InboundHighlight, type HttpTransport } from './types.js';
 
@@ -213,6 +216,21 @@ export async function pollSpotify(db: DB, http: HttpTransport = fetchTransport):
     total += await pollConnector(db, userId, 'spotify', http);
   }
   return total;
+}
+
+/**
+ * Right after Spotify is first linked: match every book in progress, then take
+ * Spotify's position wherever it's ahead. Matching from a zero snapshot makes
+ * any real listening (past the threshold) count as a change seen now.
+ */
+export async function spotifyFirstSync(db: DB, userId: number, http: HttpTransport = fetchTransport): Promise<number> {
+  // ponytail: sequential, about two calls per book; batch if libraries get large.
+  for (const document of inProgressDocuments(db, userId)) {
+    if (spotifyPaused()) break;
+    await resolveMatch(db, 'spotify', userId, document, http).catch(() => null);
+  }
+  seedMatchSnapshots(db, userId, 'spotify', { chapterIndex: 0, offsetMs: 0, finished: false });
+  return pollConnector(db, userId, 'spotify', http);
 }
 
 /** Start a periodic fan-in poller (pollAll by default); returns a stop function. */
