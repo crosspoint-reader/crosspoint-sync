@@ -13,6 +13,8 @@ pub fn run() {
     .plugin(tauri_plugin_http::init())
     // Opens share-intent links (X, Bluesky...) in the user's browser.
     .plugin(tauri_plugin_opener::init())
+    // crosspointsync:// redirects back from browser sign-in (Spotify OAuth).
+    .plugin(tauri_plugin_deep_link::init())
     .invoke_handler(tauri::generate_handler![
       mdns::resolve_local,
       books::opds_feed,

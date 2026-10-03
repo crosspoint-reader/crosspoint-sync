@@ -6,6 +6,7 @@ import { fetchTransport, getConnector, listConnectors } from '../../connectors/r
 import { purgeConnector, queueDepth } from '../../connectors/queue.js';
 import { backfillConnector } from '../../connectors/fanout.js';
 import { resolveMatch } from '../../connectors/runner.js';
+import { spotifyPosition, spotifyResume } from '../../connectors/spotify.js';
 import {
   backfillDocumentMeta,
   decryptCredential,
@@ -16,10 +17,14 @@ import {
   listReveals,
   revealConnector,
   saveMatch,
+  setAccountStatus,
   upsertAccount,
 } from '../../connectors/store.js';
 import { isValidDocument } from '../kosync.js';
-import type { HttpTransport } from '../../connectors/types.js';
+import { ConnectorOperationError, type HttpTransport, type OAuthConfig } from '../../connectors/types.js';
+
+const oauthJson = (o: OAuthConfig | null) =>
+  o && { authorize_url: o.authorizeUrl, client_id: o.clientId, scopes: o.scopes, redirect_uri: o.redirectUri };
 
 function loopbackHostname(hostname: string): boolean {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
@@ -63,6 +68,8 @@ export function connectorRoutes(
     const enabled = secretsEnabled();
     const revealed = new Set(listReveals(db, user.id));
     const visible = listConnectors().filter((conn) => {
+      // OAuth services need the server's client id (e.g. SPOTIFY_CLIENT_ID) to be linkable at all.
+      if (conn.oauth && !conn.oauth() && !getAccount(db, user.id, conn.id)) return false;
       if (!conn.revealable) return true;
       if (revealed.has(conn.id)) return true;
       return !!getAccount(db, user.id, conn.id);
@@ -79,6 +86,7 @@ export function connectorRoutes(
           carries: conn.carries,
           capabilities: conn.capabilities,
           credential_kind: conn.credentialKind,
+          ...(conn.oauth ? { oauth: oauthJson(conn.oauth()) } : {}),
           library_refresh: !!conn.refreshLibrary,
           asin_lookup: !!conn.lookup,
           matches: conn.matchBy !== 'document',
@@ -95,6 +103,11 @@ export function connectorRoutes(
   app.put('/connectors/:id', async (c) => {
     const conn = getConnector(c.req.param('id'));
     if (!conn) return c.json({ code: 2003, message: 'Unknown connector' }, 404);
+    // Browser sign-in only starts from a visible connector.
+    const userId = c.get('user').id;
+    if (conn.revealable && conn.oauth && !listReveals(db, userId).includes(conn.id) && !getAccount(db, userId, conn.id)) {
+      return c.json({ code: 2003, message: 'Unknown connector' }, 404);
+    }
     if (!credentialRequestIsSecure(c, trustProxy)) {
       return c.json({ code: 2003, message: 'Connector credentials require HTTPS' }, 400);
     }
@@ -278,6 +291,53 @@ export function connectorRoutes(
         updated_at: m.updated_at,
       })),
     });
+  });
+
+  // Spotify listening position for a book, matched on demand (Spotify never
+  // syncs in the background). { matched: false } hides the book-page card.
+  async function spotifyBook(c: Context<AppEnv>) {
+    const document = c.req.param('document') ?? '';
+    if (!isValidDocument(document)) return { error: kosyncError(c, 403, 2004, "Field 'document' not provided.") };
+    const user = c.get('user');
+    const account = getAccount(db, user.id, 'spotify');
+    if (!account) return { error: c.json({ code: 2003, message: 'Spotify not linked' }, 400) };
+    let m = getMatch(db, user.id, 'spotify', document);
+    // Search once per book, again only after a re-link, like refresh.ts's matchOnDemand.
+    if (!m || (!m.external_id && m.source !== 'manual' && m.updated_at < account.updated_at)) {
+      await resolveMatch(db, 'spotify', user.id, document, transport).catch(() => null);
+      m = getMatch(db, user.id, 'spotify', document);
+    }
+    return { user, cred: decryptCredential(account, db), externalId: m?.external_id ?? null };
+  }
+
+  function spotifyFailed(c: Context<AppEnv>, userId: number, err: unknown) {
+    if (err instanceof ConnectorOperationError && err.needsReauth) setAccountStatus(db, userId, 'spotify', 'needs_reauth', err.message);
+    return c.json({ code: 2003, message: err instanceof Error ? err.message : 'Spotify failed' }, 502);
+  }
+
+  app.get('/connectors/spotify/position/:document', async (c) => {
+    const b = await spotifyBook(c);
+    if (b.error) return b.error;
+    if (!b.externalId) return c.json({ matched: false, position: null });
+    try {
+      return c.json({ matched: true, external_id: b.externalId, position: await spotifyPosition(b.cred, b.externalId, transport) });
+    } catch (err) {
+      return spotifyFailed(c, b.user.id, err);
+    }
+  });
+
+  // "Resume in Spotify": a user tap. On 403/404 the app opens fallback_url instead.
+  app.post('/connectors/spotify/resume/:document', async (c) => {
+    const b = await spotifyBook(c);
+    if (b.error) return b.error;
+    if (!b.externalId) return c.json({ code: 2003, message: 'Book is not matched on Spotify' }, 404);
+    try {
+      const r = await spotifyResume(b.cred, b.externalId, transport);
+      if (!r) return c.json({ code: 2003, message: 'Spotify has no position for this audiobook' }, 404);
+      return c.json(r.ok ? { ok: true, position: r.position } : { ok: false, position: r.position, reason: r.reason, fallback_url: r.fallbackUrl });
+    } catch (err) {
+      return spotifyFailed(c, b.user.id, err);
+    }
   });
 
   // One book's match at each linked service (the app's book page).

@@ -1020,6 +1020,20 @@ const KINDLE = shell(
    </script>`
 );
 
+const SPOTIFY = shell(
+  'Audio progress',
+  `<p class="muted" id="reveal" style="margin-top:24px">Enabling…</p>
+   <script>
+     fetch('/api/v1/connectors/spotify/reveal', { method: 'POST' })
+       .then(function (r) {
+         document.getElementById('reveal').innerHTML = r.ok
+           ? 'Enabled. Link it in <a href="/app/#/settings">Settings</a>.'
+           : 'Could not enable it. Try again.';
+       })
+       .catch(function () { document.getElementById('reveal').textContent = 'Could not enable it. Try again.'; });
+   </script>`
+);
+
 export function webRoutes(legacy = process.env.LEGACY_WEB === '1'): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
@@ -1074,6 +1088,10 @@ export function webRoutes(legacy = process.env.LEGACY_WEB === '1'): Hono<AppEnv>
       if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect('/signin?next=/kindle#get-started');
       return c.html(KINDLE);
     });
+    app.get('/spotify', (c) => {
+      if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect('/signin?next=/spotify');
+      return c.html(SPOTIFY);
+    });
     return app;
   }
 
@@ -1097,6 +1115,11 @@ export function webRoutes(legacy = process.env.LEGACY_WEB === '1'): Hono<AppEnv>
   app.get('/kindle', (c) => {
     if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect('/');
     return c.html(KINDLE);
+  });
+
+  app.get('/spotify', (c) => {
+    if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect('/');
+    return c.html(SPOTIFY);
   });
 
   app.get('/link/:id', (c) => {

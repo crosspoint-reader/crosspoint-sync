@@ -4,6 +4,7 @@ import { api, isApp } from './api.js'
 import { renderCard } from './shareCard.js'
 import { isPace, moodEmoji } from './moods.js'
 import ShareSheet from './ShareSheet.jsx'
+import SpotifyCard from './SpotifyCard.jsx'
 import { Picker } from './Settings.jsx'
 import { STATUS, Card, Cover, EmptyState, ErrorNote, ProgressBar, Spinner, ViaHardcover, ago, duration, notify, pct, useLoad } from './ui.jsx'
 
@@ -780,6 +781,7 @@ export default function Book({ session, book, books, activity, back = { href: '#
           <div className="md:mt-4 md:columns-2 md:gap-4 md:[&>*]:mt-0 md:[&>*]:mb-4 [&>*]:break-inside-avoid">
             <Details book={book} />
             {!wide && <Stats session={session} doc={book.document} aliases={book.aliases} activity={activity} />}
+            <SpotifyCard session={session} book={book} />
             <Services session={session} book={book} />
           </div>
         </div>

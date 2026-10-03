@@ -26,6 +26,8 @@ zip = { version = "8.6", default-features = false, features = ["deflate"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp"] }
 tokio = { version = "1", features = ["time"] }
 tauri-plugin-opener = "2"
+# crosspointsync:// redirects (Spotify sign-in).
+tauri-plugin-deep-link = "2"
 
 [target.'cfg(target_os = "ios")'.dependencies]
 objc2-foundation = { version = "0.3", features = ["NSData", "NSFileManager", "NSString", "NSURL"] }

@@ -4,7 +4,7 @@ import { fromEnv } from './config.js';
 import { migrate, openDatabase } from './db/db.js';
 import { secretsEnabled } from './crypto/secrets.js';
 import { startQueueWorker } from './connectors/runner.js';
-import { startFanInWorker } from './connectors/fanin.js';
+import { pollSpotify, startFanInWorker } from './connectors/fanin.js';
 
 const DATABASE_PATH = process.env.DATABASE_PATH ?? '/data/crosspoint.db';
 const PORT = Number(process.env.PORT ?? 8080);
@@ -22,6 +22,7 @@ if (connectorsEnabled) {
   // Fan-in: pull position changes back from bidirectional connectors (e.g.
   // Audiobookshelf audiobook -> ebook).
   startFanInWorker(db, Number(process.env.FANIN_INTERVAL_MS ?? 5 * 60_000));
+  startFanInWorker(db, 60 * 60_000, pollSpotify);
 }
 
 serve({ fetch: app.fetch, port: PORT }, (info) => {

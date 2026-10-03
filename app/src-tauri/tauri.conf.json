@@ -39,5 +39,22 @@
     "iOS": {
       "minimumSystemVersion": "15.0"
     }
+  },
+  "plugins": {
+    "deep-link": {
+      "mobile": [
+        {
+          "scheme": [
+            "crosspointsync"
+          ],
+          "appLink": false
+        }
+      ],
+      "desktop": {
+        "schemes": [
+          "crosspointsync"
+        ]
+      }
+    }
   }
 }

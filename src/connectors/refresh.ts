@@ -9,8 +9,8 @@ export type ProgressRefresh = (userId: number, document: string) => Promise<void
 
 /**
  * Per-book fan-in pullers consulted when a device asks for progress. This is the
- * ONLY time these services hear from us — there is no background polling — so
- * request rates stay at human reading cadence.
+ * ONLY time these services hear from us (plus Spotify's hourly pollSpotify; there
+ * is no other background polling), so request rates stay at human reading cadence.
  *
  * strict:        a puller whose failure fails the progress GET (BookFusion: its
  *                sidecar matches are treated as authoritative for the position).
@@ -29,6 +29,7 @@ const PER_BOOK_PULLERS: { id: string; strict: boolean; sidecarOnly: boolean; mat
   { id: 'bookfusion', strict: true, sidecarOnly: true },
   { id: 'kindle', strict: false, sidecarOnly: false, matchOnDemand: true },
   { id: 'bookorbit', strict: false, sidecarOnly: false, matchOnDemand: true },
+  { id: 'spotify', strict: false, sidecarOnly: false, matchOnDemand: true },
 ];
 
 /** Shared by both progress endpoints; only overlapping requests share a refresh. */

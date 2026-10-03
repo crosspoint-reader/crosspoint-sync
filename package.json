@@ -6,10 +6,10 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
     "start": "node dist/index.js",
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run",
+    "test": "vitest run --dir test",
     "test:watch": "vitest"
   },
   "engines": {

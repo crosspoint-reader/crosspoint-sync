@@ -32,6 +32,14 @@ export interface DeviceLinkPoll {
   error?: string;
 }
 
+/** Browser OAuth (Authorization Code + PKCE) run by the app; it PUTs { code, code_verifier }. */
+export interface OAuthConfig {
+  authorizeUrl: string;
+  clientId: string;
+  scopes: string[];
+  redirectUri: string;
+}
+
 /** Feasibility/trust tier from the design doc. */
 export type Tier = 1 | 2 | 3;
 
@@ -165,6 +173,7 @@ export interface HttpTransport {
     text(): Promise<string>;
     json(): Promise<unknown>;
     body?: ReadableStream<Uint8Array> | null;
+    headers?: { get(name: string): string | null };
   }>;
 }
 
@@ -206,6 +215,9 @@ export interface Connector {
    *    always applies regardless of metadata.
    */
   matchBy?: 'document' | 'metadata';
+
+  /** PKCE sign-in details for the app; null when the server isn't configured for it. */
+  oauth?(): OAuthConfig | null;
 
   /** Validate a credential and return the account label if possible. */
   validate(cred: Credential, http: HttpTransport): Promise<ValidateResult>;

@@ -17,7 +17,9 @@ import {
   setAccountStatus,
   listAllEnabledAccounts,
   setPullCursor,
+  usersWithMatches,
 } from './store.js';
+import { spotifyPaused } from './spotify.js';
 import { ConnectorOperationError, type InboundChange, type InboundHighlight, type HttpTransport } from './types.js';
 
 // Skip an inbound change whose percentage already matches our stored progress
@@ -199,14 +201,28 @@ export async function pollAll(db: DB, http: HttpTransport = fetchTransport): Pro
   return total;
 }
 
-/** Start the periodic fan-in poller; returns a stop function. */
-export function startFanInWorker(db: DB, intervalMs = 5 * 60_000): () => void {
+/**
+ * Spotify's hourly pull, for every healthy account with a matched book: the same
+ * per-book pull as a progress request. Revoked tokens mark the account
+ * needs_reauth (pollConnector), and a 429 stops the run until next time.
+ */
+export async function pollSpotify(db: DB, http: HttpTransport = fetchTransport): Promise<number> {
+  let total = 0;
+  for (const userId of usersWithMatches(db, 'spotify')) {
+    if (spotifyPaused()) break;
+    total += await pollConnector(db, userId, 'spotify', http);
+  }
+  return total;
+}
+
+/** Start a periodic fan-in poller (pollAll by default); returns a stop function. */
+export function startFanInWorker(db: DB, intervalMs = 5 * 60_000, poll = pollAll): () => void {
   let running = false;
   const timer = setInterval(async () => {
     if (running) return;
     running = true;
     try {
-      await pollAll(db);
+      await poll(db);
     } catch (err) {
       console.error(
         JSON.stringify({ msg: 'fan-in poll error', error: err instanceof Error ? err.message : String(err) })

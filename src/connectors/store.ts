@@ -151,6 +151,7 @@ export function saveMatch(
        source = excluded.source,
        query_used = excluded.query_used,
        push_note = NULL,
+       snapshot = NULL,
        updated_at = excluded.updated_at`
   ).run(
     userId,
@@ -208,6 +209,29 @@ export function setMatchNote(
   db.prepare(
     'UPDATE connector_matches SET push_note = ? WHERE user_id = ? AND connector_id = ? AND document = ?'
   ).run(note, userId, connectorId, document);
+}
+
+/** A connector's last-seen remote position on a matched book (Spotify), or null. */
+export function getMatchSnapshot<T>(db: DB, userId: number, connectorId: string, externalId: string): T | null {
+  const row = db.prepare(
+    'SELECT snapshot FROM connector_matches WHERE user_id = ? AND connector_id = ? AND external_id = ? AND snapshot IS NOT NULL LIMIT 1'
+  ).get(userId, connectorId, externalId) as { snapshot: string } | undefined;
+  return row ? (JSON.parse(row.snapshot) as T) : null;
+}
+
+export function setMatchSnapshot(db: DB, userId: number, connectorId: string, externalId: string, snapshot: unknown): void {
+  db.prepare('UPDATE connector_matches SET snapshot = ? WHERE user_id = ? AND connector_id = ? AND external_id = ?')
+    .run(JSON.stringify(snapshot), userId, connectorId, externalId);
+}
+
+/** Users with this connector enabled, linked and healthy, and at least one matched book. */
+export function usersWithMatches(db: DB, connectorId: string): number[] {
+  return (db.prepare(
+    `SELECT DISTINCT a.user_id FROM connector_accounts a
+       JOIN connector_reveals r ON r.user_id = a.user_id AND r.connector_id = a.connector_id
+       JOIN connector_matches m ON m.user_id = a.user_id AND m.connector_id = a.connector_id
+      WHERE a.connector_id = ? AND a.enabled = 1 AND a.status = 'ok' AND m.external_id IS NOT NULL ORDER BY a.user_id`
+  ).all(connectorId) as { user_id: number }[]).map((r) => r.user_id);
 }
 
 export function listMatches(db: DB, userId: number, connectorId: string): MatchRow[] {

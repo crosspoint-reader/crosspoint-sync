@@ -186,6 +186,9 @@ export const api = {
   candidates: (s, id) => call(s, `/api/v1/connectors/${id}/candidates`).then((r) => r.books ?? []),
   searchConnector: (s, id, q) => call(s, `/api/v1/connectors/${id}/search?q=${encodeURIComponent(q)}`).then((r) => r.books ?? []),
   bookMatches: (s, doc) => call(s, `/api/v1/documents/${doc}/matches`).then((r) => r.services),
+  // Spotify audiobook position, and "Resume in Spotify" (a user tap; never background sync).
+  spotifyPosition: (s, doc) => call(s, `/api/v1/connectors/spotify/position/${doc}`),
+  spotifyResume: (s, doc) => call(s, `/api/v1/connectors/spotify/resume/${doc}`, { method: 'POST' }),
   // pick: a search/candidate row, or null for "don't sync this book".
   setMatch: (s, id, doc, pick) =>
     call(s, `/api/v1/connectors/${id}/matches/${doc}`, {

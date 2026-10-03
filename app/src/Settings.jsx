@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { openUrl } from '@tauri-apps/plugin-opener'
+import { onOpenUrl } from '@tauri-apps/plugin-deep-link'
 import { ArrowLeft, ChevronRight, KeyRound, ListChecks, Loader2, LogOut, Monitor, Moon, RefreshCw, Search, Server, Sun, Trash2, UserX } from 'lucide-react'
 import SparkMD5 from 'spark-md5'
 import { api, isApp } from './api.js'
@@ -43,6 +44,7 @@ const HINTS = {
   bookfusion: 'Syncs reading progress with BookFusion. You approve the request on bookfusion.com.',
   audiobookshelf: 'Keeps your place between the ebook and the audiobook. Create an API key in Audiobookshelf under Settings, Users, API Keys.',
   bookorbit: 'Syncs progress both ways with your BookOrbit server, and adds your clippings as highlights.',
+  spotify: 'Moves your progress forward when you listen ahead in the Spotify audiobook, and resumes it there. Audiobooks are in the US, UK, Canada, Ireland, Australia and New Zealand.',
   kindle: 'Linking needs the CrossPoint Kindle Link browser extension.',
 }
 // Where to get a token, for the services that use one.
@@ -55,6 +57,8 @@ const TOKEN_HELP = {
 
 const open = (url) => (isApp ? openUrl(url) : window.open(url, '_blank', 'noopener'))
 
+const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+
 const field =
   'h-11 w-full rounded-xl bg-stone-50 px-3 text-sm text-stone-900 ring-1 ring-stone-950/10 outline-none placeholder:text-stone-400 focus:ring-2 focus:ring-brand-500/60'
 
@@ -65,7 +69,11 @@ function LinkForm({ session, conn, onLinked }) {
   const [error, setError] = useState(null)
   const [device, setDevice] = useState(null) // device-code sign-in in progress
   const live = useRef(true)
-  useEffect(() => () => (live.current = false), [])
+  const unlisten = useRef(null)
+  useEffect(() => () => {
+    live.current = false
+    unlisten.current?.()
+  }, [])
   const set = (k) => (e) => setV({ ...v, [k]: e.target.value })
 
   async function link(credential) {
@@ -105,6 +113,45 @@ function LinkForm({ session, conn, onLinked }) {
     }
   }
 
+  // OAuth with PKCE (Spotify): the browser signs in, the provider redirects to
+  // the app's custom scheme, and the server swaps { code, code_verifier } for tokens.
+  async function startOAuth() {
+    const o = conn.oauth
+    setBusy(true)
+    setError(null)
+    try {
+      const verifier = b64url(crypto.getRandomValues(new Uint8Array(48)))
+      const challenge = b64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))))
+      const state = b64url(crypto.getRandomValues(new Uint8Array(16)))
+      unlisten.current?.()
+      unlisten.current = await onOpenUrl((urls) => {
+        const u = urls.filter((x) => x.startsWith(o.redirect_uri)).map((x) => new URL(x))[0]
+        if (!u || !live.current) return
+        unlisten.current?.()
+        unlisten.current = null
+        const code = u.searchParams.get('code')
+        if (u.searchParams.get('state') !== state || !code) {
+          setBusy(false)
+          return setError(u.searchParams.get('error') === 'access_denied' ? `You declined on ${conn.name}.` : 'Sign-in failed. Start again.')
+        }
+        link({ code, code_verifier: verifier })
+      })
+      const q = new URLSearchParams({
+        client_id: o.client_id,
+        response_type: 'code',
+        redirect_uri: o.redirect_uri,
+        scope: o.scopes.join(' '),
+        code_challenge_method: 'S256',
+        code_challenge: challenge,
+        state,
+      })
+      await open(`${o.authorize_url}?${q}`)
+    } catch (e) {
+      setError(e.message)
+      setBusy(false)
+    }
+  }
+
   const submit = (label, credential) => (
     <button
       type="submit"
@@ -136,6 +183,19 @@ function LinkForm({ session, conn, onLinked }) {
   let body
   if (conn.id === 'kindle') {
     body = <p className="text-sm text-stone-600">Link Kindle from the CrossPoint Sync website with the browser extension.</p>
+  } else if (conn.credential_kind === 'oauth') {
+    // The redirect lands on the app's crosspointsync:// scheme, which a browser tab can't receive.
+    body = !isApp ? (
+      <p className="text-sm text-stone-600">Link {conn.name} from the CrossPoint Sync app.</p>
+    ) : (
+      <button
+        type="button"
+        onClick={startOAuth} // stays tappable: an abandoned browser sign-in just starts over
+        className="flex h-11 w-full items-center justify-center gap-1.5 rounded-xl bg-brand-500 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-50"
+      >
+        {busy ? <><Loader2 className="size-4 animate-spin" /> Waiting for {conn.name}…</> : `Sign in with ${conn.name}`}
+      </button>
+    )
   } else if (conn.credential_kind === 'device_code') {
     body = device ? (
       <div className="space-y-2 rounded-xl bg-stone-50 p-3 text-center">
