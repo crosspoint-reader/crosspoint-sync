@@ -534,18 +534,6 @@ export default function Settings({ session, theme, onSession, onLogout }) {
         </div>
       </Card>
 
-      <h2 className={section}>Account</h2>
-      <Account session={session} onSession={onSession} onLogout={onLogout} />
-
-      <h2 className={section}>Appearance</h2>
-      <div className="mt-3">
-        <Appearance theme={theme} />
-      </div>
-
-      <h2 className={section}>Connected services</h2>
-      <p className="mt-1 text-sm text-stone-500">Your reading syncs out to these as you go.</p>
-      <Services session={session} />
-
       {isApp && (
         <>
           <h2 className={section}>Library</h2>
@@ -558,6 +546,18 @@ export default function Settings({ session, theme, onSession, onLogout }) {
           </Card>
         </>
       )}
+
+      <h2 className={section}>Appearance</h2>
+      <div className="mt-3">
+        <Appearance theme={theme} />
+      </div>
+
+      <h2 className={section}>Connected services</h2>
+      <p className="mt-1 text-sm text-stone-500">Your reading syncs out to these as you go.</p>
+      <Services session={session} />
+
+      <h2 className={section}>Account</h2>
+      <Account session={session} onSession={onSession} onLogout={onLogout} />
 
       <button
         type="button"
