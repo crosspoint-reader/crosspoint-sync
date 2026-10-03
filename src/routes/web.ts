@@ -7,6 +7,7 @@ import type { AppEnv } from '../auth/middleware.js';
 import { SESSION_COOKIE, verifySession } from '../auth/session.js';
 import { extensionZip } from '../kindle-zip.js';
 import { HARDCOVER_NEW_KEY_URL, HARDCOVER_SCOPES } from '../connectors/hardcover.js';
+import { landingPage } from './landing.js';
 
 /**
  * Minimal server-rendered web UI (no framework, no build step, no deps). Styled
@@ -48,6 +49,13 @@ const FONT_FACES = [
   face('Caveat', 'caveat-latin-500-normal.woff2', '500'),
   face('Caveat', 'caveat-latin-600-normal.woff2', '600'),
 ].join('');
+const LANDING_PAGE = landingPage(FONT_FACES);
+
+// Landing page screenshots (the real app with a demo account), served at /landing/:file.
+const LANDING_IMAGES = new Map<string, Buffer>();
+for (const f of fs.readdirSync(path.join(ASSETS_DIR, 'landing'))) {
+  if (f.endsWith('.webp')) LANDING_IMAGES.set(f, fs.readFileSync(path.join(ASSETS_DIR, 'landing', f)));
+}
 
 // Readwise Reader shares the Readwise icon.
 if (SERVICE_ICONS.has('readwise')) SERVICE_ICONS.set('readwise-reader', SERVICE_ICONS.get('readwise')!);
@@ -973,15 +981,6 @@ function bindChoose(btn) {
 </script>`
 );
 
-// The landing page when the website is the app: every way in goes to /app/.
-const APP_LANDING = LANDING.replace('href="#get-started"', 'href="/app/"').replace(
-  /<div class="narrow">[\s\S]*?<p class="foot">/,
-  `<div class="narrow" id="get-started" style="text-align:center;margin-top:40px">
-     <a href="/app/"><button class="primary">Get started</button></a>
-     <p class="muted" style="margin-top:12px">Create an account or sign in with your reader&rsquo;s sync username and password.</p></div>
-   <p class="foot">`
-).replace(/<script>[\s\S]*?<\/script>/, ''); // its sign-in forms are gone
-
 const KINDLE = shell(
   'Connect your Kindle',
   `<div style="margin-top:16px"><span class="eyebrow">Beta</span>
@@ -1065,6 +1064,14 @@ export function webRoutes(legacy = process.env.LEGACY_WEB === '1'): Hono<AppEnv>
     c.header('cache-control', 'public, max-age=86400');
     return c.body(FAVICON);
   });
+  app.get('/landing/:file', (c) => {
+    const img = LANDING_IMAGES.get(c.req.param('file'));
+    if (!img) return c.notFound();
+    c.header('content-type', 'image/webp');
+    c.header('cache-control', 'public, max-age=86400');
+    return c.body(new Uint8Array(img));
+  });
+
   app.get('/fonts/:file', (c) => {
     const font = FONTS.get(c.req.param('file'));
     if (!font) return c.notFound();
@@ -1096,7 +1103,7 @@ export function webRoutes(legacy = process.env.LEGACY_WEB === '1'): Hono<AppEnv>
   // Kindle connector (its browser-extension link flow). LEGACY_WEB=1 keeps the
   // whole old site for self-hosters who prefer it.
   if (!legacy) {
-    app.get('/', (c) => c.html(APP_LANDING));
+    app.get('/', (c) => c.html(LANDING_PAGE));
     app.get('/signin', (c) => c.html(LANDING));
     app.get('/account', (c) => c.redirect('/app/#/settings'));
     app.get('/progress', (c) => c.redirect('/app/'));
