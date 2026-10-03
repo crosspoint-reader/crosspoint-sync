@@ -6,10 +6,17 @@ import WidgetKit
 // `update_widget`); the widget re-reads them on each timeline refresh.
 
 private let appGroup = "group.com.crosspointreader.sync"
-private let paper = Color(red: 0.98, green: 0.98, blue: 0.976)
-private let ink = Color(red: 0.11, green: 0.098, blue: 0.09)
-private let soft = Color(red: 0.47, green: 0.443, blue: 0.424)
-private let brand = Color(red: 0.29, green: 0.478, blue: 0.384)
+// Light and dark (the app's dark theme), following the system appearance.
+private func hex(_ v: UInt32) -> UIColor {
+  UIColor(red: CGFloat(v >> 16 & 0xFF) / 255, green: CGFloat(v >> 8 & 0xFF) / 255, blue: CGFloat(v & 0xFF) / 255, alpha: 1)
+}
+private func adaptive(_ light: UInt32, _ dark: UInt32) -> Color {
+  Color(UIColor { $0.userInterfaceStyle == .dark ? hex(dark) : hex(light) })
+}
+private let paper = adaptive(0xFAFAF9, 0x121110)
+private let ink = adaptive(0x1C1917, 0xF3F0ED)
+private let soft = adaptive(0x78716C, 0xA09993)
+private let brand = adaptive(0x4A7A62, 0x8FB9A6)
 
 struct ReadingData: Codable {
   let label: String

@@ -29,7 +29,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="CONTINUE READING"
-            android:textColor="#A8A29E"
+            android:textColor="@color/widget_label"
             android:textSize="10sp"
             android:letterSpacing="0.08"
             android:fontFamily="monospace" />
@@ -41,7 +41,7 @@
             android:layout_marginTop="2dp"
             android:ellipsize="end"
             android:maxLines="2"
-            android:textColor="#1C1917"
+            android:textColor="@color/widget_ink"
             android:textSize="16sp"
             android:textStyle="bold"
             android:fontFamily="serif" />
@@ -52,7 +52,7 @@
             android:layout_height="wrap_content"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#78716C"
+            android:textColor="@color/widget_soft"
             android:textSize="12sp" />
 
         <LinearLayout
@@ -76,7 +76,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
-                android:textColor="#3D6652"
+                android:textColor="@color/widget_brand_text"
                 android:textSize="12sp"
                 android:textStyle="bold" />
         </LinearLayout>
@@ -88,7 +88,7 @@
             android:layout_marginTop="6dp"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#78716C"
+            android:textColor="@color/widget_soft"
             android:textSize="11sp" />
     </LinearLayout>
 </LinearLayout>

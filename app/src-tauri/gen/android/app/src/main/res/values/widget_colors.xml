@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Home screen widget colors (light). Dark versions live in values-night. -->
+<resources>
+    <color name="widget_bg">#FFFAFAF9</color>
+    <color name="widget_stroke">#14000000</color>
+    <color name="widget_ink">#FF1C1917</color>
+    <color name="widget_soft">#FF78716C</color>
+    <color name="widget_label">#FF78716C</color>
+    <color name="widget_brand_text">#FF3D6652</color>
+    <color name="widget_track">#FFE7E5E4</color>
+    <color name="widget_fill">#FF4A7A62</color>
+</resources>

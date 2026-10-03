@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Home screen widget colors (dark), matching the app's dark theme. -->
+<resources>
+    <color name="widget_bg">#FF121110</color>
+    <color name="widget_stroke">#1AFFFFFF</color>
+    <color name="widget_ink">#FFF3F0ED</color>
+    <color name="widget_soft">#FFA09993</color>
+    <color name="widget_label">#FFA09993</color>
+    <color name="widget_brand_text">#FF8FB9A6</color>
+    <color name="widget_track">#FF2E2A27</color>
+    <color name="widget_fill">#FF4F8268</color>
+</resources>
