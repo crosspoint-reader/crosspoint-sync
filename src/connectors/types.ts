@@ -32,12 +32,11 @@ export interface DeviceLinkPoll {
   error?: string;
 }
 
-/** Browser OAuth (Authorization Code + PKCE) run by the app; it PUTs { code, code_verifier }. */
+/** Browser OAuth (Authorization Code + PKCE), run by the server; validate() gets { code, code_verifier, redirect_uri }. */
 export interface OAuthConfig {
   authorizeUrl: string;
   clientId: string;
   scopes: string[];
-  redirectUri: string;
 }
 
 /** Feasibility/trust tier from the design doc. */

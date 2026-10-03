@@ -20,11 +20,11 @@ import {
 /**
  * Spotify connector (Tier 2): audiobook listening position, read-only.
  *
- * Linking is OAuth Authorization Code with PKCE. The app runs the browser leg
- * (it holds the code verifier and catches the crosspointsync:// redirect), then
- * PUTs { code, code_verifier } as the credential; validate() swaps that for
- * tokens in place, so only tokens are ever stored. No client secret exists
- * anywhere: SPOTIFY_CLIENT_ID is a public PKCE client.
+ * Linking is OAuth Authorization Code with PKCE, run by the server (routes/v1/
+ * connectors.ts, oauth/begin + /connectors/:id/callback) so one https redirect
+ * serves the web and the native app. validate() swaps { code, code_verifier,
+ * redirect_uri } for tokens in place, so only tokens are ever stored. No client
+ * secret exists anywhere: SPOTIFY_CLIENT_ID is a public PKCE client.
  *
  * Spotify has no way to write a resume point silently, so this connector never
  * pushes on fan-out. Its position is shown next to the reader's on the book
@@ -42,7 +42,6 @@ const AUTHORIZE_URL = 'https://accounts.spotify.com/authorize';
 const TOKEN_URL = 'https://accounts.spotify.com/api/token';
 const API = 'https://api.spotify.com/v1';
 
-export const SPOTIFY_REDIRECT_URI = 'crosspointsync://spotify-callback';
 export const SPOTIFY_SCOPES = [
   'user-library-read',
   'user-read-playback-position',
@@ -64,7 +63,7 @@ const clientId = () => process.env.SPOTIFY_CLIENT_ID?.trim() || null;
 
 function oauth(): OAuthConfig | null {
   const id = clientId();
-  return id ? { authorizeUrl: AUTHORIZE_URL, clientId: id, scopes: SPOTIFY_SCOPES, redirectUri: SPOTIFY_REDIRECT_URI } : null;
+  return id ? { authorizeUrl: AUTHORIZE_URL, clientId: id, scopes: SPOTIFY_SCOPES } : null;
 }
 
 interface TokenSet {
@@ -97,13 +96,13 @@ const tokenSet = (body: any, refreshToken?: string): TokenSet | null =>
 async function exchangeCode(cred: Credential, http: HttpTransport): Promise<void> {
   const id = clientId();
   if (!id) throw new ConnectorOperationError('This server has no SPOTIFY_CLIENT_ID set.', false);
-  if (typeof cred.code !== 'string' || typeof cred.code_verifier !== 'string') {
+  if (typeof cred.code !== 'string' || typeof cred.code_verifier !== 'string' || typeof cred.redirect_uri !== 'string') {
     throw new ConnectorOperationError('Spotify sign-in was incomplete. Start again.', false);
   }
   const { status, body } = await tokenPost(http, {
     grant_type: 'authorization_code',
     code: cred.code,
-    redirect_uri: SPOTIFY_REDIRECT_URI,
+    redirect_uri: cred.redirect_uri,
     client_id: id,
     code_verifier: cred.code_verifier,
   });

@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { withTransaction, type DB } from '../../db/db.js';
 import { kosyncError, type AppEnv } from '../../auth/middleware.js';
@@ -21,10 +22,72 @@ import {
   upsertAccount,
 } from '../../connectors/store.js';
 import { isValidDocument } from '../kosync.js';
-import { ConnectorOperationError, type HttpTransport, type OAuthConfig } from '../../connectors/types.js';
+import { ConnectorOperationError, type HttpTransport } from '../../connectors/types.js';
 
-const oauthJson = (o: OAuthConfig | null) =>
-  o && { authorize_url: o.authorizeUrl, client_id: o.clientId, scopes: o.scopes, redirect_uri: o.redirectUri };
+/** Where a provider sends the browser back: one https URL for web and native (an app link there). */
+export const oauthCallbackPath = (id: string) => `/connectors/${id}/callback`;
+
+interface PendingOAuth {
+  userId: number;
+  connectorId: string;
+  verifier: string;
+  redirectUri: string;
+  client: 'app' | 'web';
+  expires: number;
+}
+// Browser sign-ins in flight, by state.
+// ponytail: in memory, so one server instance; a restart mid-sign-in means signing in again.
+const pendingOAuth = new Map<string, PendingOAuth>();
+const OAUTH_TTL_MS = 10 * 60_000;
+const b64url = (b: Buffer) => b.toString('base64url');
+
+function publicOrigin(c: Context<AppEnv>, trustProxy: boolean): string {
+  const url = new URL(c.req.url);
+  const https = trustProxy && c.req.header('x-forwarded-proto')?.split(',')[0].trim().toLowerCase() === 'https';
+  return `${https ? 'https:' : url.protocol}//${url.host}`;
+}
+
+/** Finish a sign-in from whoever got the redirect (the app via its app link, or the callback page). State is single-use. */
+async function completeOAuth(
+  db: DB, transport: HttpTransport, state: string, code: string | undefined, error: string | undefined
+): Promise<{ entry?: PendingOAuth; error?: string }> {
+  const entry = pendingOAuth.get(state);
+  pendingOAuth.delete(state);
+  if (!entry || entry.expires < Date.now()) return { error: 'This sign-in expired. Start again from Settings.' };
+  const conn = getConnector(entry.connectorId)!;
+  if (!code) return { entry, error: error === 'access_denied' ? `You declined on ${conn.displayName}.` : 'Sign-in failed. Start again.' };
+  const cred: Record<string, unknown> = { code, code_verifier: entry.verifier, redirect_uri: entry.redirectUri };
+  const result = await conn.validate(cred, transport);
+  if (!result.ok) return { entry, error: result.error ?? 'Sign-in failed. Start again.' };
+  upsertAccount(db, entry.userId, conn.id, cred, result.accountLabel ?? null);
+  return { entry };
+}
+
+const escapeHtml = (s: string) =>
+  s.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
+const page = (title: string, body: string) =>
+  `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${title}</title><style>body{font:16px system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#1c1917}a{color:#b45309}</style></head>
+<body><h1 style="font-size:1.25rem">${title}</h1><p>${body}</p></body></html>`;
+
+/**
+ * The provider's redirect when no app intercepted it: completes the link right
+ * here, then returns a web sign-in to the app's Settings. Unauthenticated; the
+ * single-use state is what ties it to the user who began.
+ */
+export function oauthCallbackRoutes(db: DB, transport: HttpTransport = fetchTransport): Hono<AppEnv> {
+  const app = new Hono<AppEnv>();
+  app.get('/connectors/:id/callback', async (c) => {
+    const { entry, error } = await completeOAuth(db, transport, c.req.query('state') ?? '', c.req.query('code'), c.req.query('error'));
+    const name = escapeHtml(getConnector(c.req.param('id'))?.displayName ?? 'Service');
+    if (error) {
+      return c.html(page(`${name} not linked`, `${escapeHtml(error)} <a href="/app/#/settings">Back to Settings</a>`), 400);
+    }
+    if (entry!.client === 'web') return c.redirect(`/app/#/settings/${encodeURIComponent(entry!.connectorId)}`);
+    return c.html(page(`${name} linked`, 'You can go back to the CrossPoint Sync app.'));
+  });
+  return app;
+}
 
 function loopbackHostname(hostname: string): boolean {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
@@ -86,7 +149,6 @@ export function connectorRoutes(
           carries: conn.carries,
           capabilities: conn.capabilities,
           credential_kind: conn.credentialKind,
-          ...(conn.oauth ? { oauth: oauthJson(conn.oauth()) } : {}),
           library_refresh: !!conn.refreshLibrary,
           asin_lookup: !!conn.lookup,
           matches: conn.matchBy !== 'document',
@@ -107,6 +169,10 @@ export function connectorRoutes(
     const userId = c.get('user').id;
     if (conn.revealable && conn.oauth && !listReveals(db, userId).includes(conn.id) && !getAccount(db, userId, conn.id)) {
       return c.json({ code: 2003, message: 'Unknown connector' }, 404);
+    }
+    // Sign-in goes through oauth/begin; older apps would send a pasted token here.
+    if (conn.oauth) {
+      return c.json({ code: 2003, message: `Update the CrossPoint Sync app to sign in with ${conn.displayName}.` }, 400);
     }
     if (!credentialRequestIsSecure(c, trustProxy)) {
       return c.json({ code: 2003, message: 'Connector credentials require HTTPS' }, 400);
@@ -191,6 +257,57 @@ export function connectorRoutes(
     } catch (err) {
       return c.json({ status: 'error', error: err instanceof Error ? err.message : 'poll failed' }, 502);
     }
+  });
+
+  // Start a browser sign-in: the server keeps the PKCE verifier, so whichever
+  // side receives the redirect (app link or callback page) can finish it.
+  app.post('/connectors/:id/oauth/begin', async (c) => {
+    const conn = getConnector(c.req.param('id'));
+    const user = c.get('user');
+    const config = conn?.oauth?.();
+    if (!conn || !config || (conn.revealable && !listReveals(db, user.id).includes(conn.id) && !getAccount(db, user.id, conn.id))) {
+      return c.json({ code: 2003, message: 'Unknown connector' }, 404);
+    }
+    if (!credentialRequestIsSecure(c, trustProxy)) {
+      return c.json({ code: 2003, message: 'Connector credentials require HTTPS' }, 400);
+    }
+    if (!secretsEnabled()) {
+      return c.json({ code: 2003, message: 'Server has no TOKEN_ENC_KEY; connector storage disabled' }, 403);
+    }
+    const body = (await c.req.json().catch(() => null)) as { client?: string } | null;
+    const now = Date.now();
+    for (const [k, v] of pendingOAuth) if (v.expires < now) pendingOAuth.delete(k);
+    const verifier = b64url(randomBytes(48));
+    const state = b64url(randomBytes(16));
+    const redirectUri = publicOrigin(c, trustProxy) + oauthCallbackPath(conn.id);
+    pendingOAuth.set(state, {
+      userId: user.id, connectorId: conn.id, verifier, redirectUri,
+      client: body?.client === 'app' ? 'app' : 'web', expires: now + OAUTH_TTL_MS,
+    });
+    const q = new URLSearchParams({
+      client_id: config.clientId,
+      response_type: 'code',
+      redirect_uri: redirectUri,
+      scope: config.scopes.join(' '),
+      code_challenge_method: 'S256',
+      code_challenge: b64url(createHash('sha256').update(verifier).digest()),
+      state,
+    });
+    return c.json({ authorize_url: `${config.authorizeUrl}?${q}`, redirect_uri: redirectUri });
+  });
+
+  // The app caught the redirect through its app link.
+  app.post('/connectors/:id/oauth/complete', async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { state?: string; code?: string; error?: string } | null;
+    const state = typeof body?.state === 'string' ? body.state : '';
+    const user = c.get('user');
+    const entry = pendingOAuth.get(state);
+    if (entry?.userId !== user.id || entry.connectorId !== c.req.param('id')) {
+      return c.json({ code: 2003, message: 'This sign-in expired. Start again from Settings.' }, 400);
+    }
+    const { error } = await completeOAuth(db, transport, state, body?.code, body?.error);
+    if (error) return c.json({ code: 2003, message: error }, 400);
+    return c.json({ id: c.req.param('id'), linked: true });
   });
 
   // Reveal a stealth connector (the /kindle landing page calls this). Idempotent.

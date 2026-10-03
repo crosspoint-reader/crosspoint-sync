@@ -23,7 +23,7 @@ const FAVICON = fs.readFileSync(path.join(ASSETS_DIR, 'favicon.png'));
 // Service app icons, served at /icons/:id.png. Loaded once at boot; a missing
 // file just means no icon for that service (the UI falls back gracefully).
 const SERVICE_ICONS = new Map<string, Buffer>();
-for (const id of ['kosync', 'hardcover', 'audiobookshelf', 'bookfusion', 'readwise', 'microblog', 'bookorbit']) {
+for (const id of ['kosync', 'hardcover', 'audiobookshelf', 'bookfusion', 'readwise', 'microblog', 'bookorbit', 'spotify', 'kindle']) {
   try {
     SERVICE_ICONS.set(id, fs.readFileSync(path.join(ASSETS_DIR, 'icons', `${id}.png`)));
   } catch {
@@ -1034,8 +1034,26 @@ const SPOTIFY = shell(
    </script>`
 );
 
+const APP_ID = 'com.crosspointreader.sync';
+
 export function webRoutes(legacy = process.env.LEGACY_WEB === '1'): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
+
+  // App links, so the native app can catch /connectors/:id/callback sign-in
+  // redirects. Each needs the app's signing identity; unset = not served.
+  app.get('/.well-known/apple-app-site-association', (c) => {
+    const team = process.env.APPLE_TEAM_ID?.trim();
+    if (!team) return c.notFound();
+    return c.json({ applinks: { details: [{ appIDs: [`${team}.${APP_ID}`], components: [{ '/': '/connectors/*/callback' }] }] } });
+  });
+  app.get('/.well-known/assetlinks.json', (c) => {
+    const prints = (process.env.ANDROID_CERT_SHA256 ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+    if (!prints.length) return c.notFound();
+    return c.json([{
+      relation: ['delegate_permission/common.handle_all_urls'],
+      target: { namespace: 'android_app', package_name: APP_ID, sha256_cert_fingerprints: prints },
+    }]);
+  });
 
   app.get('/logo.png', (c) => {
     c.header('content-type', 'image/png');

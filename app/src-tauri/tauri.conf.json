@@ -45,16 +45,15 @@
       "mobile": [
         {
           "scheme": [
-            "crosspointsync"
+            "https"
           ],
-          "appLink": false
+          "host": "sync.crosspointreader.com",
+          "pathPrefix": [
+            "/connectors/spotify/callback"
+          ],
+          "appLink": true
         }
-      ],
-      "desktop": {
-        "schemes": [
-          "crosspointsync"
-        ]
-      }
+      ]
     }
   }
 }

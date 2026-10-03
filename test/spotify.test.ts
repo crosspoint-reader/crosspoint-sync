@@ -12,7 +12,6 @@ import {
   spotifyConnector,
   spotifyPosition,
   spotifyResume,
-  SPOTIFY_REDIRECT_URI,
   type SpotifyChapter,
 } from '../src/connectors/spotify.js';
 
@@ -41,6 +40,18 @@ const ch = (id: string, duration_ms: number, fully_played = false, resume_positi
   id, uri: `spotify:episode:${id}`, name: `Chapter ${id}`, duration_ms, resume_point: { fully_played, resume_position_ms },
 });
 const CHAPTERS = [ch('c1', 1000, true), ch('c2', 2000, false, 500), ch('c3', 1000)];
+
+const REDIRECT = 'http://localhost/connectors/spotify/callback';
+
+/** Begin a server-run sign-in; returns the state and the authorize URL's params. */
+async function begin(app: any, headers: Record<string, string>, client = 'web') {
+  const res = await app.request('/api/v1/connectors/spotify/oauth/begin', { method: 'POST', headers, body: JSON.stringify({ client }) });
+  const body = await res.json();
+  const q = res.status === 200 ? new URL(body.authorize_url).searchParams : null;
+  return { res, body, q, state: q?.get('state') ?? '' };
+}
+/** Spotify sending the browser back to the callback page. */
+const callback = (app: any, state: string, extra = 'code=c') => app.request(`/connectors/spotify/callback?state=${state}&${extra}`);
 
 const KEY = { TOKEN_ENC_KEY: 'a'.repeat(64), SPOTIFY_CLIENT_ID: 'client-123' };
 beforeEach(() => { Object.assign(process.env, KEY); resetEncryptionKeyCache(); });
@@ -75,12 +86,11 @@ describe('positionFromChapters', () => {
 });
 
 describe('spotify connector', () => {
-  it('advertises PKCE sign-in with the custom-scheme redirect, only when a client id is set', () => {
+  it('offers PKCE sign-in only when a client id is set', () => {
     expect(spotifyConnector.oauth!()).toEqual({
       authorizeUrl: 'https://accounts.spotify.com/authorize',
       clientId: 'client-123',
       scopes: ['user-library-read', 'user-read-playback-position', 'user-read-playback-state', 'user-modify-playback-state'],
-      redirectUri: 'crosspointsync://spotify-callback',
     });
     delete process.env.SPOTIFY_CLIENT_ID;
     expect(spotifyConnector.oauth!()).toBeNull();
@@ -91,11 +101,11 @@ describe('spotify connector', () => {
       'POST /api/token': [200, { access_token: 'at', refresh_token: 'rt', expires_in: 3600 }],
       'GET /me': [200, { display_name: 'Julia', country: 'US' }],
     });
-    const cred: Record<string, unknown> = { code: 'the-code', code_verifier: 'v'.repeat(64) };
+    const cred: Record<string, unknown> = { code: 'the-code', code_verifier: 'v'.repeat(64), redirect_uri: REDIRECT };
     expect(await spotifyConnector.validate(cred, f.transport)).toEqual({ ok: true, accountLabel: 'Julia' });
     const sent = new URLSearchParams(f.calls[0].body);
     expect(Object.fromEntries(sent)).toEqual({
-      grant_type: 'authorization_code', code: 'the-code', redirect_uri: SPOTIFY_REDIRECT_URI,
+      grant_type: 'authorization_code', code: 'the-code', redirect_uri: REDIRECT,
       client_id: 'client-123', code_verifier: 'v'.repeat(64),
     });
     expect(Object.keys(cred).sort()).toEqual(['access_token', 'expires_at', 'refresh_token']);
@@ -107,7 +117,7 @@ describe('spotify connector', () => {
       'POST /api/token': [200, { access_token: 'at', refresh_token: 'rt', expires_in: 3600 }],
       'GET /me': [403, 'User not registered in the Developer Dashboard'],
     });
-    const v = await spotifyConnector.validate({ code: 'c', code_verifier: 'v' }, f.transport);
+    const v = await spotifyConnector.validate({ code: 'c', code_verifier: 'v', redirect_uri: REDIRECT }, f.transport);
     expect(v.ok).toBe(false);
     expect(v.error).toMatch(/developer dashboard/i);
   });
@@ -201,25 +211,19 @@ describe('spotify routes', () => {
     const { app } = makeTestApp({}, { connectorTransport: f.transport });
     const { headers } = await registerUser(app);
     await app.request('/api/v1/connectors/spotify/reveal', { method: 'POST', headers });
-    const link = await app.request('/api/v1/connectors/spotify', {
-      method: 'PUT', headers, body: JSON.stringify({ credential: { code: 'c', code_verifier: 'v' } }),
-    });
-    expect(link.status).toBe(200);
+    expect((await callback(app, (await begin(app, headers)).state)).status).toBe(302);
     await app.request('/api/v1/documents', {
       method: 'PUT', headers, body: JSON.stringify({ items: [{ document: DOC, title: 'Dune', author: 'Frank Herbert' }] }),
     });
     return { app, headers, f };
   }
 
-  it('lists the oauth config, matches on demand from saved audiobooks, and returns the position', async () => {
+  it('matches on demand from saved audiobooks, and returns the position', async () => {
     const { app, headers, f } = await linked({
       'GET /me/audiobooks': [200, { items: [{ id: 'a1', name: 'Dune', authors: [{ name: 'Frank Herbert' }] }], next: null }],
       'GET /audiobooks/a1/chapters': [200, { items: CHAPTERS, next: null }],
       'GET /me/player': [204, null],
     });
-    const list = await (await app.request('/api/v1/connectors', { headers })).json();
-    expect(list.connectors.find((c: { id: string }) => c.id === 'spotify').oauth.redirect_uri).toBe(SPOTIFY_REDIRECT_URI);
-
     const res = await app.request(`/api/v1/connectors/spotify/position/${DOC}`, { headers });
     expect(await res.json()).toMatchObject({ matched: true, external_id: 'a1', position: { chapterId: 'c2', positionMs: 500 } });
     // Never plays on its own.
@@ -409,17 +413,13 @@ describe('spotify per-account flag', () => {
     });
     const { app } = makeTestApp({}, { connectorTransport: f.transport });
     const { headers } = await registerUser(app);
-    const link = () => app.request('/api/v1/connectors/spotify', {
-      method: 'PUT', headers, body: JSON.stringify({ credential: { code: 'c', code_verifier: 'v' } }),
-    });
-
     expect(await list(app, headers)).not.toContain('spotify');
-    expect((await link()).status).toBe(404);
+    expect((await begin(app, headers)).res.status).toBe(404);
     expect(f.calls).toEqual([]);
 
     expect((await app.request('/api/v1/connectors/spotify/reveal', { method: 'POST', headers })).status).toBe(200);
     expect(await list(app, headers)).toContain('spotify');
-    expect((await link()).status).toBe(200);
+    expect((await callback(app, (await begin(app, headers)).state)).status).toBe(302);
 
     // Per account: another user still sees nothing.
     const { headers: other } = await registerUser(app);
@@ -457,5 +457,146 @@ describe('spotify per-account flag', () => {
     const res = await app.request('/spotify', { headers: { cookie } });
     expect(res.status).toBe(200);
     expect(await res.text()).toContain('/api/v1/connectors/spotify/reveal');
+  });
+});
+
+describe('spotify sign-in (server-run PKCE, one https redirect)', () => {
+  async function setup(routes: Record<string, [number, unknown]> = {}) {
+    const f = fakeSpotify({
+      'POST /api/token': [200, { access_token: 'at', refresh_token: 'rt', expires_in: 3600 }],
+      'GET /me': [200, { display_name: 'Julia', country: 'US' }],
+      ...routes,
+    });
+    const { app, db } = makeTestApp({}, { connectorTransport: f.transport });
+    const { headers } = await registerUser(app);
+    await app.request('/api/v1/connectors/spotify/reveal', { method: 'POST', headers });
+    const linked = async () => ((await (await app.request('/api/v1/connectors', { headers })).json()).connectors as any[])
+      .find((c) => c.id === 'spotify').linked;
+    return { app, db, f, headers, linked };
+  }
+
+  it('sends the browser to Spotify with S256 PKCE and the server callback as redirect', async () => {
+    const { app, headers } = await setup();
+    const { body, q } = await begin(app, headers);
+    expect(body.redirect_uri).toBe(REDIRECT);
+    expect(Object.fromEntries(q!)).toMatchObject({
+      client_id: 'client-123', response_type: 'code', redirect_uri: REDIRECT, code_challenge_method: 'S256',
+      scope: 'user-library-read user-read-playback-position user-read-playback-state user-modify-playback-state',
+    });
+    expect(q!.get('code_challenge')).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  });
+
+  it('uses the public https origin behind a trusted proxy', async () => {
+    const f = fakeSpotify();
+    const { app } = makeTestApp({ trustProxy: true }, { connectorTransport: f.transport });
+    const { headers } = await registerUser(app);
+    await app.request('/api/v1/connectors/spotify/reveal', { method: 'POST', headers });
+    const res = await app.request('https://sync.example.com/api/v1/connectors/spotify/oauth/begin', {
+      method: 'POST', headers: { ...headers, 'x-forwarded-proto': 'https' }, body: '{}',
+    });
+    expect((await res.json()).redirect_uri).toBe('https://sync.example.com/connectors/spotify/callback');
+  });
+
+  it('web: the callback page exchanges the code with the stored verifier and returns to Settings', async () => {
+    const { app, f, headers, linked } = await setup();
+    const { state, q } = await begin(app, headers, 'web');
+    const res = await callback(app, state);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/app/#/settings/spotify');
+    const sent = Object.fromEntries(new URLSearchParams(f.calls[0].body));
+    expect(sent).toMatchObject({ grant_type: 'authorization_code', code: 'c', redirect_uri: REDIRECT });
+    const { createHash } = await import('node:crypto');
+    expect(createHash('sha256').update(sent.code_verifier).digest('base64url')).toBe(q!.get('code_challenge'));
+    expect(await linked()).toBe(true);
+  });
+
+  it('app without an app link: the callback page still links, and says to go back to the app', async () => {
+    const { app, headers, linked } = await setup();
+    const res = await callback(app, (await begin(app, headers, 'app')).state);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('go back to the CrossPoint Sync app');
+    expect(await linked()).toBe(true);
+  });
+
+  it('app with an app link: the app completes it, once', async () => {
+    const { app, headers, linked } = await setup();
+    const { state } = await begin(app, headers, 'app');
+    const complete = () => app.request('/api/v1/connectors/spotify/oauth/complete', {
+      method: 'POST', headers, body: JSON.stringify({ state, code: 'c' }),
+    });
+    expect((await complete()).status).toBe(200);
+    expect(await linked()).toBe(true);
+    expect((await complete()).status).toBe(400); // single-use
+    expect((await callback(app, state)).status).toBe(400);
+  });
+
+  it("another user can't complete someone else's sign-in", async () => {
+    const { app, headers } = await setup();
+    const { state } = await begin(app, headers, 'app');
+    const { headers: other } = await registerUser(app);
+    const res = await app.request('/api/v1/connectors/spotify/oauth/complete', {
+      method: 'POST', headers: other, body: JSON.stringify({ state, code: 'c' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('shows declines, unknown states and Spotify errors on the callback page, escaped', async () => {
+    const { app, headers, linked } = await setup({ 'GET /me': [403, 'nope'] });
+    const declined = await callback(app, (await begin(app, headers)).state, 'error=access_denied');
+    expect(await declined.text()).toContain('You declined on Spotify.');
+    expect(await (await callback(app, 'made-up')).text()).toContain('This sign-in expired');
+    const off = await callback(app, (await begin(app, headers)).state);
+    expect(off.status).toBe(400);
+    expect(await off.text()).toContain('Spotify developer dashboard');
+    expect(await linked()).toBe(false);
+  });
+
+  it('a pasted token (an older app) gets "update the app", never a link', async () => {
+    const { app, f, headers } = await setup();
+    const res = await app.request('/api/v1/connectors/spotify', {
+      method: 'PUT', headers, body: JSON.stringify({ credential: { token: 'pasted' } }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).message).toBe('Update the CrossPoint Sync app to sign in with Spotify.');
+    expect(f.calls).toEqual([]);
+  });
+
+  it('expires abandoned sign-ins after 10 minutes', async () => {
+    const { app, headers } = await setup();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const { state } = await begin(app, headers);
+    vi.setSystemTime(Date.now() + 10 * 60_000 + 1);
+    expect((await callback(app, state)).status).toBe(400);
+  });
+});
+
+describe('app links and icons', () => {
+  afterEach(() => { delete process.env.APPLE_TEAM_ID; delete process.env.ANDROID_CERT_SHA256; });
+
+  it('serves the app-link files only once the signing identity is configured', async () => {
+    const { app } = makeTestApp();
+    expect((await app.request('/.well-known/apple-app-site-association')).status).toBe(404);
+    expect((await app.request('/.well-known/assetlinks.json')).status).toBe(404);
+    process.env.APPLE_TEAM_ID = 'ABCDE12345';
+    process.env.ANDROID_CERT_SHA256 = 'AA:BB, CC:DD';
+    const aasa = await app.request('/.well-known/apple-app-site-association');
+    expect(aasa.headers.get('content-type')).toContain('application/json');
+    expect(await aasa.json()).toEqual({
+      applinks: { details: [{ appIDs: ['ABCDE12345.com.crosspointreader.sync'], components: [{ '/': '/connectors/*/callback' }] }] },
+    });
+    expect(await (await app.request('/.well-known/assetlinks.json')).json()).toEqual([{
+      relation: ['delegate_permission/common.handle_all_urls'],
+      target: { namespace: 'android_app', package_name: 'com.crosspointreader.sync', sha256_cert_fingerprints: ['AA:BB', 'CC:DD'] },
+    }]);
+  });
+
+  it.each(['spotify', 'kindle'])('serves the %s icon as a 128px PNG', async (id) => {
+    const { app } = makeTestApp();
+    const res = await app.request(`/icons/${id}.png`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('image/png');
+    const png = Buffer.from(await res.arrayBuffer());
+    expect(png.subarray(1, 4).toString()).toBe('PNG');
+    expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([128, 128]);
   });
 });

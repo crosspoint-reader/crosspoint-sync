@@ -179,6 +179,9 @@ export const api = {
   unlinkConnector: (s, id) => call(s, `/api/v1/connectors/${id}`, { method: 'DELETE' }),
   syncConnector: (s, id) => call(s, `/api/v1/connectors/${id}/sync`, { method: 'POST' }),
   beginLink: (s, id) => call(s, `/api/v1/connectors/${id}/link/begin`, { method: 'POST' }),
+  // Browser sign-in (OAuth): the server holds PKCE; the app finishes it only when its app link catches the redirect.
+  oauthBegin: (s, id, client) => call(s, `/api/v1/connectors/${id}/oauth/begin`, { method: 'POST', body: JSON.stringify({ client }) }),
+  oauthComplete: (s, id, params) => call(s, `/api/v1/connectors/${id}/oauth/complete`, { method: 'POST', body: JSON.stringify(params) }),
   pollLink: (s, id, deviceCode) =>
     call(s, `/api/v1/connectors/${id}/link/poll`, { method: 'POST', body: JSON.stringify({ device_code: deviceCode }) }),
   // Matches review (which book at the service each synced title maps to).

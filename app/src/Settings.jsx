@@ -57,22 +57,22 @@ const TOKEN_HELP = {
 
 const open = (url) => (isApp ? openUrl(url) : window.open(url, '_blank', 'noopener'))
 
-const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-
 const field =
   'h-11 w-full rounded-xl bg-stone-50 px-3 text-sm text-stone-900 ring-1 ring-stone-950/10 outline-none placeholder:text-stone-400 focus:ring-2 focus:ring-brand-500/60'
 
 // The link form for one service, by credential kind (same shapes as the web).
-function LinkForm({ session, conn, onLinked }) {
+export function LinkForm({ session, conn, onLinked }) {
   const [v, setV] = useState({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [device, setDevice] = useState(null) // device-code sign-in in progress
   const live = useRef(true)
   const unlisten = useRef(null)
+  const poll = useRef(null)
   useEffect(() => () => {
     live.current = false
     unlisten.current?.()
+    clearTimeout(poll.current)
   }, [])
   const set = (k) => (e) => setV({ ...v, [k]: e.target.value })
 
@@ -113,43 +113,54 @@ function LinkForm({ session, conn, onLinked }) {
     }
   }
 
-  // OAuth with PKCE (Spotify): the browser signs in, the provider redirects to
-  // the app's custom scheme, and the server swaps { code, code_verifier } for tokens.
+  // OAuth (Spotify): the server keeps the PKCE verifier and owns the https
+  // redirect. On the web this tab goes there and comes back linked. The app
+  // opens the browser, then finishes through its app link, or, when no app
+  // link fires, notices the callback page linked it.
   async function startOAuth() {
-    const o = conn.oauth
     setBusy(true)
     setError(null)
     try {
-      const verifier = b64url(crypto.getRandomValues(new Uint8Array(48)))
-      const challenge = b64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))))
-      const state = b64url(crypto.getRandomValues(new Uint8Array(16)))
+      const { authorize_url } = await api.oauthBegin(session, conn.id, isApp ? 'app' : 'web')
+      if (!isApp) return window.location.assign(authorize_url)
       unlisten.current?.()
       unlisten.current = await onOpenUrl((urls) => {
-        const u = urls.filter((x) => x.startsWith(o.redirect_uri)).map((x) => new URL(x))[0]
+        const u = urls.map((x) => new URL(x)).find((x) => x.pathname === `/connectors/${conn.id}/callback`)
         if (!u || !live.current) return
-        unlisten.current?.()
-        unlisten.current = null
-        const code = u.searchParams.get('code')
-        if (u.searchParams.get('state') !== state || !code) {
+        stop()
+        const q = Object.fromEntries(u.searchParams)
+        api.oauthComplete(session, conn.id, { state: q.state, code: q.code, error: q.error }).then(onLinked, (e) => {
+          setError(e.message)
           setBusy(false)
-          return setError(u.searchParams.get('error') === 'access_denied' ? `You declined on ${conn.name}.` : 'Sign-in failed. Start again.')
+        })
+      })
+      const deadline = Date.now() + 10 * 60_000
+      const tick = async () => {
+        if (!live.current || !unlisten.current) return
+        const list = await api.connectors(session).catch(() => null)
+        if (list?.connectors?.some((c) => c.id === conn.id && c.linked)) {
+          stop()
+          return onLinked()
         }
-        link({ code, code_verifier: verifier })
-      })
-      const q = new URLSearchParams({
-        client_id: o.client_id,
-        response_type: 'code',
-        redirect_uri: o.redirect_uri,
-        scope: o.scopes.join(' '),
-        code_challenge_method: 'S256',
-        code_challenge: challenge,
-        state,
-      })
-      await open(`${o.authorize_url}?${q}`)
+        if (Date.now() < deadline) {
+          poll.current = setTimeout(tick, 3000)
+        } else {
+          stop()
+          setBusy(false)
+        }
+      }
+      poll.current = setTimeout(tick, 3000)
+      await open(authorize_url)
     } catch (e) {
+      stop()
       setError(e.message)
       setBusy(false)
     }
+  }
+  function stop() {
+    unlisten.current?.()
+    unlisten.current = null
+    clearTimeout(poll.current)
   }
 
   const submit = (label, credential) => (
@@ -184,10 +195,7 @@ function LinkForm({ session, conn, onLinked }) {
   if (conn.id === 'kindle') {
     body = <p className="text-sm text-stone-600">Link Kindle from the CrossPoint Sync website with the browser extension.</p>
   } else if (conn.credential_kind === 'oauth') {
-    // The redirect lands on the app's crosspointsync:// scheme, which a browser tab can't receive.
-    body = !isApp ? (
-      <p className="text-sm text-stone-600">Link {conn.name} from the CrossPoint Sync app.</p>
-    ) : (
+    body = (
       <button
         type="button"
         onClick={startOAuth} // stays tappable: an abandoned browser sign-in just starts over
@@ -271,8 +279,11 @@ function LinkForm({ session, conn, onLinked }) {
         }))}
       </form>
     )
-  } else {
+  } else if (conn.credential_kind === 'token') {
     body = tokenForm
+  } else {
+    // A sign-in this build doesn't know: never guess a token form for it.
+    body = <p className="text-sm text-stone-600">Update the CrossPoint Sync app to link {conn.name}.</p>
   }
   return (
     <div className="mt-3 space-y-2">
