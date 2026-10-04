@@ -200,7 +200,7 @@ const STYLE = `
   .svc .desc { color:var(--stone-600); font-size:13px; margin-top:2px; line-height:1.5; }
   .lead { display:flex; gap:12px; align-items:flex-start; min-width:0; }
   .svc-icon { width:34px; height:34px; border-radius:8px; flex:0 0 auto; object-fit:cover;
-    box-shadow:0 1px 2px rgba(0,0,0,0.12); background:#fff; }
+    box-shadow:0 1px 2px rgba(0,0,0,0.12); }
   .sync-book { padding:14px 0; border-top:1px solid var(--stone-200); }
   .sync-book:first-child { border-top:0; padding-top:0; }
   .sync-book:last-child { padding-bottom:0; }

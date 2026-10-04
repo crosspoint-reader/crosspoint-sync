@@ -144,7 +144,7 @@ section.tight{padding-top:24px}
 .services{display:grid;gap:12px;margin-top:40px}
 @media (min-width:760px){.services{grid-template-columns:1fr 1fr}}
 .svc{display:flex;gap:14px;align-items:flex-start;padding:18px;border-radius:12px;background:var(--surface);box-shadow:0 0 0 1px var(--line)}
-.svc img{width:40px;height:40px;border-radius:10px;flex:0 0 auto;background:#fff}
+.svc img{width:40px;height:40px;border-radius:10px;flex:0 0 auto}
 .svc .name{display:flex;align-items:center;gap:8px;font-weight:600;color:var(--ink)}
 .svc .desc{font-size:14px;color:var(--soft);margin-top:2px;line-height:1.5}
 .pill{font-size:11px;font-weight:600;padding:1px 8px;border-radius:999px;text-transform:uppercase;letter-spacing:.04em;

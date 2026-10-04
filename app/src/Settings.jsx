@@ -327,7 +327,7 @@ function Service({ session, conn, onChange }) {
   return (
     <div className="px-4 py-3">
       <div className="flex items-center gap-3">
-        <img src={icon} alt="" className="size-9 shrink-0 rounded-lg bg-stone-100" onError={(e) => (e.currentTarget.style.visibility = 'hidden')} />
+        <img src={icon} alt="" className="size-9 shrink-0 rounded-lg" onError={(e) => (e.currentTarget.style.visibility = 'hidden')} />
         <div className="min-w-0 flex-1">
           <p className="flex items-center gap-2 text-sm font-semibold text-stone-900">
             {conn.name}

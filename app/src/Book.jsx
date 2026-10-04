@@ -631,7 +631,7 @@ function Services({ session, book }) {
           {data.map((m) => (
             <div key={m.id} className="px-4 py-2">
               <div className="flex items-center gap-3">
-                <img src={`${session.server}/icons/${m.id}.png`} alt="" className="size-7 shrink-0 rounded-md bg-stone-100" onError={(e) => (e.currentTarget.style.visibility = 'hidden')} />
+                <img src={`${session.server}/icons/${m.id}.png`} alt="" className="size-7 shrink-0 rounded-md" onError={(e) => (e.currentTarget.style.visibility = 'hidden')} />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-stone-900">{m.name}</p>
                   <p className={`truncate text-xs ${m.matched ? 'text-stone-500' : m.source === 'manual' ? 'text-stone-500' : 'text-amber-700'}`}>
