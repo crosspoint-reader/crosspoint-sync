@@ -34,3 +34,15 @@ export function autoUnpause(db: DB, userId: number, document: string, at: number
       WHERE user_id = ? AND document = ? AND status = 'paused' AND status_at <= ?`
   ).run(at, userId, document, at);
 }
+
+/** Reaching the end finishes a book the user had marked Reading: the manual
+ *  Reading is cleared so the status derives from progress (finished at FINISHED).
+ *  Paused, DNF and Finished are left alone. Only called when the position moved,
+ *  so a re-read marked Reading isn't flipped back by a re-sync of the old 100%. */
+export function autoFinish(db: DB, userId: number, document: string, percentage: number, at: number): void {
+  if (percentage < FINISHED) return;
+  db.prepare(
+    `UPDATE documents SET status = NULL, status_at = ?
+      WHERE user_id = ? AND document = ? AND status = 'reading' AND status_at <= ?`
+  ).run(at, userId, document, at);
+}

@@ -2,7 +2,7 @@ import type { ProgressRefresh } from '../connectors/refresh.js';
 import { Hono } from 'hono';
 import type { DB } from '../db/db.js';
 import type { Config } from '../config.js';
-import { autoPause, autoUnpause } from '../models/pause.js';
+import { autoFinish, autoPause, autoUnpause } from '../models/pause.js';
 import {
   authMiddleware,
   invalidateAuthCache,
@@ -174,6 +174,7 @@ export function upsertProgress(db: DB, p: ProgressUpsert): void {
       p.updatedAt
     );
     autoUnpause(db, p.userId, p.document, p.updatedAt);
+    autoFinish(db, p.userId, p.document, p.percentage, p.updatedAt);
   }
   db.prepare(
     `INSERT INTO progress (user_id, document, device_id, device, percentage, progress, position, updated_at)

@@ -142,3 +142,36 @@ describe('auto-unpause', () => {
     expect((await book()).status).toBe('paused');
   });
 });
+
+describe('auto-finish', () => {
+  it('a book marked Reading finishes when a sync reaches the end', async () => {
+    const { push, book, setStatus } = await reader();
+    await push(0.5);
+    at(1000);
+    await setStatus('reading');
+    at(2000);
+    await push(0.9);
+    expect((await book()).status).toBe('reading');
+    at(3000);
+    await push(1);
+    expect((await book()).status).toBe('finished');
+  });
+
+  it('leaves paused and did-not-finish books alone, and a re-read is not flipped back by the old 100%', async () => {
+    const r = await reader();
+    await r.push(0.5);
+    at(1000);
+    await r.setStatus('dnf');
+    at(2000);
+    await r.push(1);
+    expect((await r.book()).status).toBe('dnf');
+
+    const re = await reader();
+    await re.push(1);
+    at(1000);
+    await re.setStatus('reading'); // starting it again
+    at(2000);
+    await re.push(1); // the device re-sends its last position
+    expect((await re.book()).status).toBe('reading');
+  });
+});
