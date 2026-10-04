@@ -8,7 +8,7 @@ import { purgeConnector, queueDepth } from '../../connectors/queue.js';
 import { backfillConnector } from '../../connectors/fanout.js';
 import { spotifyFirstSync } from '../../connectors/fanin.js';
 import { resolveMatch } from '../../connectors/runner.js';
-import { CLIENT_ID_RE, CLIENT_ID_REJECTED, spotifyPosition, spotifyResume } from '../../connectors/spotify.js';
+import { CLIENT_ID_RE, CLIENT_ID_REJECTED, spotifyPlan, spotifyResume, spotifyTracks } from '../../connectors/spotify.js';
 import {
   backfillDocumentMeta,
   decryptCredential,
@@ -16,11 +16,14 @@ import {
   getAccount,
   getClientId,
   getMatch,
+  getMatchAnchor,
+  latestPercentage,
   listMatches,
   listReveals,
   revealConnector,
   saveMatch,
   setAccountStatus,
+  setMatchAnchor,
   setClientId,
   upsertAccount,
 } from '../../connectors/store.js';
@@ -483,7 +486,12 @@ export function connectorRoutes(
       await resolveMatch(db, 'spotify', user.id, document, transport).catch(() => null);
       m = getMatch(db, user.id, 'spotify', document);
     }
-    return { user, cred: decryptCredential(account, db), externalId: m?.external_id ?? null };
+    const externalId = m?.external_id ?? null;
+    return {
+      user, document, cred: decryptCredential(account, db), externalId,
+      readerPct: latestPercentage(db, user.id, document),
+      anchor: externalId ? getMatchAnchor(db, user.id, 'spotify', externalId) : null,
+    };
   }
 
   function spotifyFailed(c: Context<AppEnv>, userId: number, err: unknown) {
@@ -496,7 +504,12 @@ export function connectorRoutes(
     if (b.error) return b.error;
     if (!b.externalId) return c.json({ matched: false, position: null });
     try {
-      return c.json({ matched: true, external_id: b.externalId, position: await spotifyPosition(b.cred, b.externalId, transport) });
+      const plan = await spotifyPlan(b.cred, b.externalId, transport, b.readerPct, b.anchor);
+      // position: Spotify's own place; target: where Resume goes (the reader's place when it's ahead).
+      return c.json({
+        matched: true, external_id: b.externalId, position: plan?.position ?? null, target: plan?.target ?? null,
+        reader_pct: b.readerPct, anchor: b.anchor,
+      });
     } catch (err) {
       return spotifyFailed(c, b.user.id, err);
     }
@@ -508,12 +521,56 @@ export function connectorRoutes(
     if (b.error) return b.error;
     if (!b.externalId) return c.json({ code: 2003, message: 'Book is not matched on Spotify' }, 404);
     try {
-      const r = await spotifyResume(b.cred, b.externalId, transport);
+      const r = await spotifyResume(b.cred, b.externalId, transport, b.readerPct, b.anchor);
       if (!r) return c.json({ code: 2003, message: 'Spotify has no position for this audiobook' }, 404);
       return c.json(r.ok ? { ok: true, position: r.position } : { ok: false, position: r.position, reason: r.reason, fallback_url: r.fallbackUrl, app_url: r.appUrl });
     } catch (err) {
       return spotifyFailed(c, b.user.id, err);
     }
+  });
+
+  // Calibration ("Not the right spot?"): the audiobook's tracks to pick from, and
+  // saving "where my reader is now = this track at this time" for the book.
+  app.get('/connectors/spotify/tracks/:document', async (c) => {
+    const b = await spotifyBook(c);
+    if (b.error) return b.error;
+    if (!b.externalId) return c.json({ code: 2003, message: 'Book is not matched on Spotify' }, 404);
+    try {
+      return c.json({ ...(await spotifyTracks(b.cred, b.externalId, transport)), reader_pct: b.readerPct, anchor: b.anchor });
+    } catch (err) {
+      return spotifyFailed(c, b.user.id, err);
+    }
+  });
+
+  app.put('/connectors/spotify/anchor/:document', async (c) => {
+    const b = await spotifyBook(c);
+    if (b.error) return b.error;
+    if (!b.externalId) return c.json({ code: 2003, message: 'Book is not matched on Spotify' }, 404);
+    if (b.readerPct == null || !(b.readerPct > 0 && b.readerPct < 1)) {
+      return c.json({ code: 2003, message: 'Sync your reader from somewhere inside the book first' }, 400);
+    }
+    const body = (await c.req.json().catch(() => null)) as { track?: unknown; position_ms?: unknown } | null;
+    const index = Number(body?.track);
+    const offset = Math.max(0, Number(body?.position_ms ?? 0) || 0);
+    try {
+      const { tracks, total_ms } = await spotifyTracks(b.cred, b.externalId, transport);
+      const t = tracks[index];
+      if (!Number.isInteger(index) || !t || !total_ms) return kosyncError(c, 403, 2003, 'Invalid request');
+      const audio = (t.start_ms + Math.min(offset, t.duration_ms)) / total_ms;
+      if (!(audio > 0 && audio < 1)) return c.json({ code: 2003, message: 'Pick a track inside the book, not its very start or end' }, 400);
+      const anchor = { text: b.readerPct, audio };
+      setMatchAnchor(db, b.user.id, 'spotify', b.document, anchor);
+      return c.json({ anchor });
+    } catch (err) {
+      return spotifyFailed(c, b.user.id, err);
+    }
+  });
+
+  app.delete('/connectors/spotify/anchor/:document', async (c) => {
+    const b = await spotifyBook(c);
+    if (b.error) return b.error;
+    setMatchAnchor(db, b.user.id, 'spotify', b.document, null);
+    return c.json({ anchor: null });
   });
 
   // One book's match at each linked service (the app's book page).

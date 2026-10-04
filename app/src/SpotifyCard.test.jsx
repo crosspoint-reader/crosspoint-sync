@@ -4,13 +4,13 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 
 vi.mock('./api.js', () => ({
   isApp: true,
-  api: { bookMatches: vi.fn(), spotifyPosition: vi.fn(), spotifyResume: vi.fn() },
+  api: { bookMatches: vi.fn(), spotifyPosition: vi.fn(), spotifyResume: vi.fn(), spotifyTracks: vi.fn(), setSpotifyAnchor: vi.fn(), clearSpotifyAnchor: vi.fn() },
 }))
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }))
 
 const { api } = await import('./api.js')
 const { openUrl } = await import('@tauri-apps/plugin-opener')
-const { default: SpotifyCard, clock } = await import('./SpotifyCard.jsx')
+const { default: SpotifyCard, clock, parseClock } = await import('./SpotifyCard.jsx')
 
 const session = { server: 'https://sync.test' }
 const POSITION = {
@@ -72,27 +72,27 @@ describe('SpotifyCard', () => {
     expect(openUrl).not.toHaveBeenCalled()
   })
 
-  it('opens the audiobook in the Spotify app when Spotify cannot play (no device or no Premium)', async () => {
+  it('opens the track in the Spotify app when Spotify cannot play (no device or no Premium)', async () => {
     api.bookMatches.mockResolvedValue([{ id: 'spotify' }])
     api.spotifyPosition.mockResolvedValue({ matched: true, position: POSITION })
     api.spotifyResume.mockResolvedValue({
-      ok: false, reason: 'NO_ACTIVE_DEVICE', fallback_url: 'https://open.spotify.com/audiobook/a1', app_url: 'spotify:audiobook:a1',
+      ok: false, reason: 'NO_ACTIVE_DEVICE', fallback_url: 'https://open.spotify.com/episode/c2', app_url: 'spotify:episode:c2',
     })
     render(<SpotifyCard session={session} book={book()} />)
     fireEvent.click(await screen.findByRole('button'))
-    await waitFor(() => expect(openUrl).toHaveBeenCalledWith('spotify:audiobook:a1'))
+    await waitFor(() => expect(openUrl).toHaveBeenCalledWith('spotify:episode:c2'))
   })
 
   it('falls back to the web page when the Spotify app link fails', async () => {
     api.bookMatches.mockResolvedValue([{ id: 'spotify' }])
     api.spotifyPosition.mockResolvedValue({ matched: true, position: POSITION })
     api.spotifyResume.mockResolvedValue({
-      ok: false, reason: 'NO_ACTIVE_DEVICE', fallback_url: 'https://open.spotify.com/audiobook/a1', app_url: 'spotify:audiobook:a1',
+      ok: false, reason: 'NO_ACTIVE_DEVICE', fallback_url: 'https://open.spotify.com/episode/c2', app_url: 'spotify:episode:c2',
     })
     openUrl.mockRejectedValueOnce(new Error('no handler'))
     render(<SpotifyCard session={session} book={book()} />)
     fireEvent.click(await screen.findByRole('button'))
-    await waitFor(() => expect(openUrl).toHaveBeenCalledWith('https://open.spotify.com/audiobook/a1'))
+    await waitFor(() => expect(openUrl).toHaveBeenCalledWith('https://open.spotify.com/episode/c2'))
   })
 
   it('marks a live session', async () => {
@@ -100,5 +100,37 @@ describe('SpotifyCard', () => {
     api.spotifyPosition.mockResolvedValue({ matched: true, position: { ...POSITION, live: true } })
     render(<SpotifyCard session={session} book={book()} />)
     expect(await screen.findByText('Playing now')).toBeTruthy()
+  })
+})
+
+describe('calibration', () => {
+  it('parses a time in the track', () => {
+    expect(parseClock('')).toBe(0)
+    expect(parseClock('3:01')).toBe(181_000)
+    expect(parseClock('1:02:03')).toBe(3_723_000)
+    expect(parseClock('soon')).toBeNull()
+  })
+
+  it('lines Spotify up with the reader: pick the track and time, save', async () => {
+    api.bookMatches.mockResolvedValue([{ id: 'spotify' }])
+    api.spotifyPosition.mockResolvedValue({ matched: true, position: POSITION, target: POSITION, reader_pct: 0.4, anchor: null })
+    api.spotifyTracks.mockResolvedValue({
+      total_ms: 3000,
+      tracks: [
+        { index: 0, name: 'Chapter 1', start_ms: 0, duration_ms: 1000 },
+        { index: 1, name: 'Chapter 2', start_ms: 1000, duration_ms: 1000 },
+        { index: 2, name: 'Chapter 3', start_ms: 2000, duration_ms: 1000 },
+      ],
+    })
+    api.setSpotifyAnchor.mockResolvedValue({ anchor: { text: 0.4, audio: 0.7 } })
+    const b = book()
+    render(<SpotifyCard session={session} book={b} />)
+    fireEvent.click(await screen.findByText('Not the right spot?'))
+    const select = await screen.findByLabelText('Spotify track')
+    expect(select.value).toBe('1') // starts on the current guess
+    fireEvent.change(select, { target: { value: '2' } })
+    fireEvent.change(screen.getByLabelText('Time in track'), { target: { value: '0:00' } })
+    fireEvent.click(screen.getByText('Save'))
+    await waitFor(() => expect(api.setSpotifyAnchor).toHaveBeenCalledWith(session, b.document, 2, 0))
   })
 })

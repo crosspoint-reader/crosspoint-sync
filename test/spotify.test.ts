@@ -3,13 +3,16 @@ import { DOC, makeTestApp, registerUser } from './helpers.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
 import type { HttpTransport } from '../src/connectors/types.js';
 import { pollConnector, pollSpotify } from '../src/connectors/fanin.js';
-import { decryptCredential, getAccount, revealConnector, saveMatch, upsertAccount } from '../src/connectors/store.js';
+import { decryptCredential, getAccount, getMatchAnchor, revealConnector, saveMatch, setMatchAnchor, upsertAccount } from '../src/connectors/store.js';
 import {
   advance,
   CLIENT_ID_REJECTED,
   MIN_ADVANCE_MS,
   REDIRECT_REJECTED,
   resetSpotifyPause,
+  audioToText,
+  positionAtPercentage,
+  textToAudio,
   positionFromChapters,
   spotifyConnector,
   spotifyPosition,
@@ -63,7 +66,27 @@ afterEach(() => {
 });
 
 describe('positionFromChapters', () => {
-  it('is the first chapter not fully played, at its resume point', () => {
+  const chap = (id: string, resume: { fully_played?: boolean; resume_position_ms?: number } | undefined) => ({
+    id, uri: `spotify:episode:${id}`, name: id, duration_ms: 1000, resume_point: resume,
+  });
+
+  it('is not pulled back by a skipped early track', () => {
+    // Opening credits skipped (never played), then chapters 1 and 2 listened to.
+    const p = positionFromChapters([
+      chap('credits', { fully_played: false, resume_position_ms: 0 }),
+      chap('c1', { fully_played: true }),
+      chap('c2', { fully_played: false, resume_position_ms: 400 }),
+      chap('c3', undefined),
+    ])!;
+    expect(p).toMatchObject({ chapterId: 'c2', positionMs: 400 });
+  });
+
+  it('moves to the start of the next chapter once the furthest one is fully played', () => {
+    const p = positionFromChapters([chap('c1', { fully_played: true }), chap('c2', { fully_played: true }), chap('c3', undefined)])!;
+    expect(p).toMatchObject({ chapterId: 'c3', positionMs: 0, finished: false });
+  });
+
+  it('is the furthest chapter with progress, at its resume point', () => {
     const p = positionFromChapters(CHAPTERS)!;
     expect(p).toMatchObject({ chapterId: 'c2', chapterIndex: 1, chapterCount: 3, positionMs: 500, finished: false, live: false });
     expect(p.percentage).toBeCloseTo(1500 / 4000);
@@ -189,17 +212,59 @@ describe('spotify connector', () => {
     expect(JSON.parse(f.calls[2].body!)).toEqual({ uris: ['spotify:episode:c2'], position_ms: 500 });
   });
 
+  it('resumes at the reader\'s place when it\'s ahead of Spotify, never behind it', async () => {
+    const routes = {
+      'GET /audiobooks/a1/chapters': [200, { items: CHAPTERS, next: null }],
+      'GET /me/player': [204, null],
+      'PUT /me/player/play': [404, { error: { status: 404, reason: 'NO_ACTIVE_DEVICE' } }],
+    } as const;
+    // Chapters are 1s, 2s, 1s; Spotify is 0.5s into c2 (37.5%). The reader at 60% is 1.4s into c2.
+    const ahead = fakeSpotify({ ...routes });
+    const r = await spotifyResume(fresh(), 'a1', ahead.transport, 0.6);
+    expect(JSON.parse(ahead.calls[2].body!)).toEqual({ uris: ['spotify:episode:c2'], position_ms: 1400 });
+    expect(r).toMatchObject({ ok: false, fallbackUrl: 'https://open.spotify.com/episode/c2?t=1', appUrl: 'spotify:episode:c2' });
+    // A reader behind Spotify (listened ahead) resumes at Spotify's place.
+    const behind = fakeSpotify({ ...routes });
+    await spotifyResume(fresh(), 'a1', behind.transport, 0.1);
+    expect(JSON.parse(behind.calls[2].body!)).toEqual({ uris: ['spotify:episode:c2'], position_ms: 500 });
+  });
+
+  it('keeps a calibration across re-saves of the same audiobook, not a different one', () => {
+    const { db } = makeTestApp();
+    db.prepare("INSERT INTO users (id, username, key_hash, created_at) VALUES (1, 'u', 'x', 0)").run();
+    saveMatch(db, 1, 'spotify', DOC, { externalId: 'a1', confidence: 1 }, 'manual');
+    setMatchAnchor(db, 1, 'spotify', DOC, { text: 0.2, audio: 0.18 });
+    saveMatch(db, 1, 'spotify', DOC, { externalId: 'a1', confidence: 1 }, 'manual');
+    expect(getMatchAnchor(db, 1, 'spotify', 'a1')).toEqual({ text: 0.2, audio: 0.18 });
+    saveMatch(db, 1, 'spotify', DOC, { externalId: 'a2', confidence: 1 }, 'manual');
+    expect(getMatchAnchor(db, 1, 'spotify', 'a2')).toBeNull();
+  });
+
+  it('maps percentages through a calibration both ways, exact at the anchor', () => {
+    const anchor = { text: 0.1659, audio: 0.1495 };
+    expect(textToAudio(0.1659, anchor)).toBeCloseTo(0.1495, 6);
+    expect(audioToText(0.1495, anchor)).toBeCloseTo(0.1659, 6);
+    for (const x of [0, 0.05, 0.3, 0.9, 1]) expect(audioToText(textToAudio(x, anchor), anchor)).toBeCloseTo(x, 9);
+    expect(textToAudio(0.4, null)).toBe(0.4);
+  });
+
+  it('maps a reading percentage to a track and time', () => {
+    expect(positionAtPercentage(CHAPTERS, 0.6)).toMatchObject({ chapterId: 'c2', positionMs: 1400, offsetMs: 2400 });
+    expect(positionAtPercentage(CHAPTERS, 0.75)).toMatchObject({ chapterId: 'c3', positionMs: 0 });
+    expect(positionAtPercentage(CHAPTERS, 1)).toMatchObject({ chapterId: 'c3', positionMs: 1000 });
+  });
+
   it.each([
     [404, 'NO_ACTIVE_DEVICE'],
     [403, 'PREMIUM_REQUIRED'],
-  ])('resume falls back to the audiobook in the Spotify app on %i', async (status, reason) => {
+  ])('resume falls back to opening the track in the Spotify app on %i', async (status, reason) => {
     const f = fakeSpotify({
       'GET /audiobooks/a1/chapters': [200, { items: CHAPTERS, next: null }],
       'GET /me/player': [204, null],
       'PUT /me/player/play': [status, { error: { status, reason } }],
     });
     expect(await spotifyResume(fresh(), 'a1', f.transport)).toMatchObject({
-      ok: false, reason, fallbackUrl: 'https://open.spotify.com/audiobook/a1', appUrl: 'spotify:audiobook:a1',
+      ok: false, reason, fallbackUrl: 'https://open.spotify.com/episode/c2?t=0', appUrl: 'spotify:episode:c2',
     });
   });
 });
@@ -242,6 +307,32 @@ describe('spotify routes', () => {
     expect(await res.json()).toEqual({ matched: false, position: null });
   });
 
+  it('calibrates a book: resume goes where the reader really is, and clearing it falls back', async () => {
+    const { app, headers } = await linked({
+      'GET /me/audiobooks': [200, { items: [{ id: 'a1', name: 'Dune', authors: [{ name: 'Frank Herbert' }] }], next: null }],
+      'GET /audiobooks/a1/chapters': [200, { items: CHAPTERS, next: null }],
+      'GET /me/player': [204, null],
+    });
+    // Tracks are 1s, 2s, 1s (4s). The reader synced 75%: by time alone that's the start of c3.
+    await app.request('/syncs/progress', {
+      method: 'PUT', headers, body: JSON.stringify({ document: DOC, progress: '/body/DocFragment[9]/body', percentage: 0.75, device: 'r', device_id: 'r' }),
+    });
+    const position = async () => (await (await app.request(`/api/v1/connectors/spotify/position/${DOC}`, { headers })).json()).target;
+    expect(await position()).toMatchObject({ chapterId: 'c3', positionMs: 0 });
+
+    const tracks = await (await app.request(`/api/v1/connectors/spotify/tracks/${DOC}`, { headers })).json();
+    expect(tracks).toMatchObject({ total_ms: 4000, reader_pct: 0.75, anchor: null });
+    expect(tracks.tracks[2]).toEqual({ index: 2, name: 'Chapter c3', start_ms: 3000, duration_ms: 1000 });
+
+    // "My reader is really at c3, 0.5s in."
+    const saved = await app.request(`/api/v1/connectors/spotify/anchor/${DOC}`, { method: 'PUT', headers, body: JSON.stringify({ track: 2, position_ms: 500 }) });
+    expect(await saved.json()).toEqual({ anchor: { text: 0.75, audio: 0.875 } });
+    expect(await position()).toMatchObject({ chapterId: 'c3', positionMs: 500 });
+
+    await app.request(`/api/v1/connectors/spotify/anchor/${DOC}`, { method: 'DELETE', headers });
+    expect(await position()).toMatchObject({ chapterId: 'c3', positionMs: 0 });
+  });
+
   it('resume returns the fallback deep link without an active device', async () => {
     const { app, headers } = await linked({
       'GET /me/audiobooks': [200, { items: [{ id: 'a1', name: 'Dune', authors: [{ name: 'Frank Herbert' }] }], next: null }],
@@ -250,7 +341,7 @@ describe('spotify routes', () => {
       'PUT /me/player/play': [404, { error: { status: 404, reason: 'NO_ACTIVE_DEVICE' } }],
     });
     const res = await app.request(`/api/v1/connectors/spotify/resume/${DOC}`, { method: 'POST', headers });
-    expect(await res.json()).toMatchObject({ ok: false, reason: 'NO_ACTIVE_DEVICE', fallback_url: 'https://open.spotify.com/audiobook/a1', app_url: 'spotify:audiobook:a1' });
+    expect(await res.json()).toMatchObject({ ok: false, reason: 'NO_ACTIVE_DEVICE', fallback_url: 'https://open.spotify.com/episode/c2?t=0', app_url: 'spotify:episode:c2' });
   });
 });
 

@@ -152,6 +152,7 @@ export function saveMatch(
        query_used = excluded.query_used,
        push_note = NULL,
        snapshot = NULL,
+       anchor = CASE WHEN excluded.external_id IS connector_matches.external_id THEN connector_matches.anchor ELSE NULL END,
        updated_at = excluded.updated_at`
   ).run(
     userId,
@@ -222,6 +223,21 @@ export function getMatchSnapshot<T>(db: DB, userId: number, connectorId: string,
 export function setMatchSnapshot(db: DB, userId: number, connectorId: string, externalId: string, snapshot: unknown): void {
   db.prepare('UPDATE connector_matches SET snapshot = ? WHERE user_id = ? AND connector_id = ? AND external_id = ?')
     .run(JSON.stringify(snapshot), userId, connectorId, externalId);
+}
+
+/** A matched audiobook's calibration: reading position `text` is listening position `audio` (0..1 each). */
+export interface MatchAnchor { text: number; audio: number }
+
+export function getMatchAnchor(db: DB, userId: number, connectorId: string, externalId: string): MatchAnchor | null {
+  const row = db.prepare(
+    'SELECT anchor FROM connector_matches WHERE user_id = ? AND connector_id = ? AND external_id = ? AND anchor IS NOT NULL LIMIT 1'
+  ).get(userId, connectorId, externalId) as { anchor: string } | undefined;
+  return row ? (JSON.parse(row.anchor) as MatchAnchor) : null;
+}
+
+export function setMatchAnchor(db: DB, userId: number, connectorId: string, document: string, anchor: MatchAnchor | null): void {
+  db.prepare('UPDATE connector_matches SET anchor = ? WHERE user_id = ? AND connector_id = ? AND document = ?')
+    .run(anchor ? JSON.stringify(anchor) : null, userId, connectorId, document);
 }
 
 /** Give every matched book without a snapshot this one (a first-sync baseline). */

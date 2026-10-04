@@ -1,4 +1,4 @@
-import { getMatchSnapshot, setMatchSnapshot } from './store.js';
+import { getMatchAnchor, getMatchSnapshot, setMatchSnapshot, type MatchAnchor } from './store.js';
 import { decideMatch, extractTitleAuthor, type Candidate } from './matching.js';
 import {
   ConnectorOperationError,
@@ -283,15 +283,23 @@ export interface SpotifyPosition {
 }
 
 /**
- * Where the listener is: the first chapter not fully played, at its resume
- * point. A matching live player overrides that (resume points lag playback).
+ * Where the listener is: the furthest chapter with any progress, at its resume
+ * point (or the start of the next chapter once it's fully played). Not "the
+ * first chapter not fully played": one skipped or unfinished early track (opening
+ * credits, say) or a fully_played flag Spotify hasn't set yet would pin that to
+ * an earlier chapter. A matching live player overrides this (resume points lag playback).
  */
 export function positionFromChapters(chapters: SpotifyChapter[], player?: any): SpotifyPosition | null {
   if (!chapters.length) return null;
-  let index = chapters.findIndex((c) => !c.resume_point?.fully_played);
-  const finished = index < 0;
-  if (finished) index = chapters.length - 1;
-  let positionMs = finished ? chapters[index].duration_ms : chapters[index].resume_point?.resume_position_ms ?? 0;
+  const started = (c: SpotifyChapter) => !!c.resume_point?.fully_played || (c.resume_point?.resume_position_ms ?? 0) > 0;
+  let furthest = -1;
+  chapters.forEach((c, i) => {
+    if (started(c)) furthest = i;
+  });
+  const done = furthest >= 0 && !!chapters[furthest].resume_point?.fully_played;
+  const finished = done && furthest === chapters.length - 1;
+  let index = finished ? furthest : done ? furthest + 1 : Math.max(0, furthest);
+  let positionMs = finished ? chapters[index].duration_ms : done ? 0 : chapters[index].resume_point?.resume_position_ms ?? 0;
   let live = false;
   const playing = player?.item?.id ? chapters.findIndex((c) => c.id === player.item.id) : -1;
   if (playing >= 0) {
@@ -328,6 +336,62 @@ const playerOf = async (cred: Credential, http: HttpTransport) => {
 /** The listening position on a matched audiobook; null when Spotify has none (or none in this market). */
 export async function spotifyPosition(cred: Credential, audiobookId: string, http: HttpTransport): Promise<SpotifyPosition | null> {
   return positionFromChapters(await chaptersOf(cred, audiobookId, http), await playerOf(cred, http));
+}
+
+/**
+ * Reading % <-> listening %. Without a calibration they're equal (by time). With
+ * one ("reading position text is listening position audio"), map piecewise
+ * linearly through (0,0), the anchor and (1,1): exact at the anchor, proportional
+ * around it. An epub's % counts every file by size (cover, contents, markup), so
+ * on its own it runs ahead of the narration by however much front matter there is.
+ */
+function through(x: number, from: number, to: number): number {
+  if (!(from > 0 && from < 1 && to > 0 && to < 1)) return x;
+  return x <= from ? (x * to) / from : to + ((x - from) * (1 - to)) / (1 - from);
+}
+export const textToAudio = (pct: number, anchor: MatchAnchor | null) => (anchor ? through(pct, anchor.text, anchor.audio) : pct);
+export const audioToText = (pct: number, anchor: MatchAnchor | null) => (anchor ? through(pct, anchor.audio, anchor.text) : pct);
+
+/** Every track with where it starts in the whole audiobook (for the calibration picker). */
+export async function spotifyTracks(cred: Credential, audiobookId: string, http: HttpTransport) {
+  const chapters = await chaptersOf(cred, audiobookId, http);
+  let start = 0;
+  const tracks = chapters.map((c, index) => {
+    const t = { index, name: c.name, start_ms: start, duration_ms: c.duration_ms || 0 };
+    start += c.duration_ms || 0;
+    return t;
+  });
+  return { tracks, total_ms: start };
+}
+
+/** The track and time a reading percentage lands on, by listening time (as fan-in maps the other way). */
+export function positionAtPercentage(chapters: SpotifyChapter[], pct: number): SpotifyPosition | null {
+  if (!chapters.length) return null;
+  const total = chapters.reduce((s, c) => s + (c.duration_ms || 0), 0);
+  const target = Math.max(0, Math.min(1, pct)) * total;
+  let before = 0;
+  let index = 0;
+  while (index < chapters.length - 1 && before + (chapters[index].duration_ms || 0) <= target) before += chapters[index++].duration_ms || 0;
+  const c = chapters[index];
+  const positionMs = Math.max(0, Math.min(c.duration_ms || 0, Math.round(target - before)));
+  return {
+    chapterId: c.id, chapterUri: c.uri, chapterName: c.name, chapterIndex: index, chapterCount: chapters.length,
+    positionMs, offsetMs: before + positionMs, percentage: total ? (before + positionMs) / total : 0, finished: false, live: false,
+  };
+}
+
+/**
+ * Spotify's own position, and where Resume should go: the reader's place
+ * (readerPct) mapped into the audiobook when it's further along, else Spotify's.
+ * Never backward, so listening ahead still wins.
+ */
+export async function spotifyPlan(cred: Credential, audiobookId: string, http: HttpTransport, readerPct: number | null, anchor: MatchAnchor | null = null) {
+  const chapters = await chaptersOf(cred, audiobookId, http);
+  const position = positionFromChapters(chapters, await playerOf(cred, http));
+  if (!position) return null;
+  const reader = readerPct == null ? null : positionAtPercentage(chapters, textToAudio(readerPct, anchor));
+  const target = reader && !position.finished && reader.offsetMs > position.offsetMs ? reader : position;
+  return { position, target };
 }
 
 export interface SpotifySnapshot { chapterIndex: number; offsetMs: number; finished: boolean }
@@ -369,7 +433,7 @@ async function pullProgress(
   if (!moved) return null;
   return {
     externalId: match.externalId,
-    percentage: pos.finished ? 1 : pos.percentage,
+    percentage: pos.finished ? 1 : audioToText(pos.percentage, getMatchAnchor(ctx.db, ctx.userId, 'spotify', match.externalId)),
     finished: pos.finished,
     updatedAtMs: Date.now(),
     furthestReadOnly: true,
@@ -381,12 +445,16 @@ export type ResumeResult =
   | { ok: false; position: SpotifyPosition; reason: string; fallbackUrl: string; appUrl: string };
 
 /**
- * Start playback at the listening position. Only ever called from a user tap.
- * Without Premium (403) or an active device (404) the caller opens fallbackUrl.
+ * Start playback where Resume should go (spotifyPlan: the reader's place when
+ * it's ahead, else Spotify's). Only ever called from a user tap. Without Premium
+ * (403) or an active device (404) the caller opens appUrl / fallbackUrl.
  */
-export async function spotifyResume(cred: Credential, audiobookId: string, http: HttpTransport): Promise<ResumeResult | null> {
-  const position = await spotifyPosition(cred, audiobookId, http);
-  if (!position) return null;
+export async function spotifyResume(
+  cred: Credential, audiobookId: string, http: HttpTransport, readerPct: number | null = null, anchor: MatchAnchor | null = null
+): Promise<ResumeResult | null> {
+  const plan = await spotifyPlan(cred, audiobookId, http, readerPct, anchor);
+  if (!plan) return null;
+  const position = plan.target;
   const r = await api(http, cred, 'PUT', '/me/player/play', { uris: [position.chapterUri], position_ms: position.positionMs });
   if (r.status >= 200 && r.status < 300) return { ok: true, position };
   if (r.status === 403 || r.status === 404) {
@@ -394,10 +462,12 @@ export async function spotifyResume(cred: Credential, audiobookId: string, http:
       ok: false,
       position,
       reason: r.body?.error?.reason ?? (r.status === 404 ? 'NO_ACTIVE_DEVICE' : 'PREMIUM_REQUIRED'),
-      // Spotify has no web page for a chapter, so both point at the audiobook; the
-      // app resumes it at its own saved place (the position shown).
-      fallbackUrl: `https://open.spotify.com/audiobook/${encodeURIComponent(audiobookId)}`,
-      appUrl: `spotify:audiobook:${encodeURIComponent(audiobookId)}`,
+      // The exact track: Spotify serves audiobook chapters as episodes (its chapter
+      // uri is spotify:episode:..., and open.spotify.com/episode/<id> is the track's
+      // page; /chapter/ and /audiobook/ pages 404). The app resumes the track at its
+      // own saved point, the position shown.
+      fallbackUrl: `https://open.spotify.com/episode/${encodeURIComponent(position.chapterId)}?t=${Math.floor(position.positionMs / 1000)}`,
+      appUrl: position.chapterUri,
     };
   }
   throw new ConnectorOperationError(r.body?.error?.message ?? `Spotify answered ${r.status}`, false);
