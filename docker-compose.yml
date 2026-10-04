@@ -8,6 +8,8 @@ services:
     environment:
       # Set to "true" on private instances once your accounts exist.
       REGISTRATION_DISABLED: "false"
+      # Set Listen Address so the service is accessible from outside the container
+      LISTEN_ADDRESS: "::"
     restart: unless-stopped
 
 volumes:
