@@ -17,7 +17,7 @@ const browser = (name: string, alt: string, cls = '', eager = false) => `<div cl
 const tablet = (name: string, alt: string, cls = '') => `<div class="tablet ${cls}">${shot(name, alt)}</div>`;
 
 const SERVICES: [string, string, string, 'ready' | 'beta'][] = [
-  ['hardcover', 'Hardcover', 'Your shelf and progress stay up to date as you read.', 'ready'],
+  ['hardcover', 'Hardcover', 'Your shelf and progress update each time you sync.', 'ready'],
   ['bookfusion', 'BookFusion', 'Reading positions both ways for books from BookFusion.', 'ready'],
   ['kosync', 'Another KOSync server', 'Mirror your place to sync.koreader.rocks or your own server.', 'ready'],
   ['readwise', 'Readwise', 'Send the passages you highlight to Readwise.', 'ready'],
@@ -200,7 +200,7 @@ export function landingPage(fontFaces: string): string {
 
 <section class="tight"><div class="wrap">
   <div class="lead"><h2>Sync progress, highlights, and stats anywhere</h2>
-    <p>Link the services you already use. Progress and highlights flow out as you read.</p></div>
+    <p>Link the services you already use. Progress and highlights go to them each time you sync.</p></div>
   <div class="services">
     ${SERVICES.map(
       ([icon, name, desc, state]) =>
@@ -216,9 +216,9 @@ export function landingPage(fontFaces: string): string {
   <div class="steps">
     <div class="step"><h3>Point your reader here</h3>
       <p>Sign in under KOReader Sync on CrossPoint, CrossInk or KOReader. No plugin to install.</p></div>
-    <div class="step"><h3>Just read</h3>
-      <p>Your place syncs as you read, so any device picks up where you left off.</p></div>
-    <div class="step"><h3>Open the app</h3>
+    <div class="step"><h3>Sync when you want to</h3>
+      <p>Send your progress from KOReader Sync, then pick up on another device right where you left off.</p></div>
+    <div class="step"><h3>View &amp; share in app</h3>
       <p>Your library, highlights and reading habits, on your phone and the web.</p></div>
   </div>
 </div></section>
