@@ -13,8 +13,7 @@ const shot = (name: string, alt: string, eager = false) =>
 
 const phone = (name: string, alt: string, cls = '', eager = false) =>
   `<div class="phone ${cls}">${shot(name, alt, eager)}</div>`;
-const browser = (name: string, alt: string, cls = '', eager = false) =>
-  `<div class="browser ${cls}"><div class="bar"><span>sync.crosspointreader.com</span></div>${shot(name, alt, eager)}</div>`;
+const browser = (name: string, alt: string, cls = '', eager = false) => `<div class="browser ${cls}">${shot(name, alt, eager)}</div>`;
 const tablet = (name: string, alt: string, cls = '') => `<div class="tablet ${cls}">${shot(name, alt)}</div>`;
 
 const SERVICES: [string, string, string, 'ready' | 'beta'][] = [
@@ -73,13 +72,13 @@ nav a.link:hover{color:var(--ink);background:var(--wash)}
 nav .btn{height:38px;padding:0 16px;font-size:14px}
 
 /* device frames */
-.phone{background:var(--bezel);border-radius:24px;padding:6px;box-shadow:var(--shadow),inset 0 0 0 1px rgba(255,255,255,.06)}
-.phone img{border-radius:18px;aspect-ratio:390/844;object-fit:cover;object-position:top}
-.tablet{background:var(--bezel);border-radius:20px;padding:10px;box-shadow:var(--shadow)}
-.tablet img{border-radius:10px;aspect-ratio:1100/820;object-fit:cover;object-position:top}
+.phone,.tablet{container-type:inline-size}
+/* Bezel and corners scale with the device's width (cqi), so a small phone mock
+   has the same proportions as a large one. */
+.phone img{border:1.2cqi solid var(--bezel);border-radius:7cqi;aspect-ratio:390/844;object-fit:cover;object-position:top;
+  box-shadow:var(--shadow),0 0 0 1px rgba(255,255,255,.06)}
+.tablet img{border:.6cqi solid var(--bezel);border-radius:2.2cqi;aspect-ratio:1100/820;object-fit:cover;object-position:top;box-shadow:var(--shadow)}
 .browser{border-radius:14px;overflow:hidden;background:var(--surface);box-shadow:var(--shadow),0 0 0 1px var(--line)}
-.browser .bar{display:flex;align-items:center;justify-content:center;height:34px;padding:0 14px;background:var(--wash);border-bottom:1px solid var(--line)}
-.browser .bar span{padding:2px 12px;border-radius:999px;background:var(--surface);font:12px "Geist Mono",monospace;color:var(--soft)}
 .browser img{aspect-ratio:1280/800;object-fit:cover;object-position:top}
 .browser.short img{aspect-ratio:1280/660}
 
@@ -199,7 +198,19 @@ export function landingPage(fontFaces: string): string {
   </div>
 </div>
 
-<section id="how" class="tight"><div class="wrap">
+<section class="tight"><div class="wrap">
+  <div class="lead"><h2>Your reading, everywhere it lives</h2>
+    <p>Link the services you already use. Progress and highlights flow out as you read.</p></div>
+  <div class="services">
+    ${SERVICES.map(
+      ([icon, name, desc, state]) =>
+        `<div class="svc"><img src="/icons/${icon}.png" alt="" width="40" height="40" loading="lazy"><div>` +
+        `<div class="name">${name}${state === 'beta' ? '<span class="pill">beta</span>' : ''}</div><div class="desc">${desc}</div></div></div>`
+    ).join('')}
+  </div>
+</div></section>
+
+<section id="how"><div class="wrap">
   <div class="lead"><h2>Nothing new to learn</h2>
     <p>It speaks KOSync, the protocol your reader already has. Point it here and keep reading.</p></div>
   <div class="steps">
@@ -252,17 +263,6 @@ export function landingPage(fontFaces: string): string {
   </div>
 </div></section>
 
-<section><div class="wrap">
-  <div class="lead"><h2>Your reading, everywhere it lives</h2>
-    <p>Link the services you already use. Progress and highlights flow out as you read.</p></div>
-  <div class="services">
-    ${SERVICES.map(
-      ([icon, name, desc, state]) =>
-        `<div class="svc"><img src="/icons/${icon}.png" alt="" width="40" height="40" loading="lazy"><div>` +
-        `<div class="name">${name}${state === 'beta' ? '<span class="pill">beta</span>' : ''}</div><div class="desc">${desc}</div></div></div>`
-    ).join('')}
-  </div>
-</div></section>
 
 <div class="wrap closing">
   <h2>Start syncing in a minute</h2>
