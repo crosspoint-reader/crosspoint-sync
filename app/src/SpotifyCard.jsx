@@ -28,9 +28,16 @@ export default function SpotifyCard({ session, book }) {
     setBusy(true)
     try {
       const r = await api.spotifyResume(session, book.document)
-      // No Premium or no active device: open the chapter in Spotify instead.
+      // No Premium or no active device: open the audiobook in the Spotify app
+      // (spotify: link), or its web page when the app isn't there.
       if (r.ok) notify({ title: 'Playing in Spotify' })
-      else await open(r.fallback_url)
+      else if (isApp && r.app_url) {
+        try {
+          await openUrl(r.app_url)
+        } catch {
+          await open(r.fallback_url)
+        }
+      } else await open(r.fallback_url)
       reload()
     } catch (e) {
       notify({ error: true, title: "Spotify: that didn't work", detail: e.message })

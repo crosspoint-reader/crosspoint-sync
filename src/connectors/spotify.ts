@@ -378,7 +378,7 @@ async function pullProgress(
 
 export type ResumeResult =
   | { ok: true; position: SpotifyPosition }
-  | { ok: false; position: SpotifyPosition; reason: string; fallbackUrl: string };
+  | { ok: false; position: SpotifyPosition; reason: string; fallbackUrl: string; appUrl: string };
 
 /**
  * Start playback at the listening position. Only ever called from a user tap.
@@ -394,7 +394,10 @@ export async function spotifyResume(cred: Credential, audiobookId: string, http:
       ok: false,
       position,
       reason: r.body?.error?.reason ?? (r.status === 404 ? 'NO_ACTIVE_DEVICE' : 'PREMIUM_REQUIRED'),
-      fallbackUrl: `https://open.spotify.com/chapter/${encodeURIComponent(position.chapterId)}`,
+      // Spotify has no web page for a chapter, so both point at the audiobook; the
+      // app resumes it at its own saved place (the position shown).
+      fallbackUrl: `https://open.spotify.com/audiobook/${encodeURIComponent(audiobookId)}`,
+      appUrl: `spotify:audiobook:${encodeURIComponent(audiobookId)}`,
     };
   }
   throw new ConnectorOperationError(r.body?.error?.message ?? `Spotify answered ${r.status}`, false);
@@ -409,7 +412,6 @@ export const spotifyConnector: Connector = {
   carries: ['progress'],
   credentialKind: 'oauth',
   beta: true,
-  revealable: true,
   oauth,
   checkClientId,
   validate,

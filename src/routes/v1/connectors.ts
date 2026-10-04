@@ -502,7 +502,7 @@ export function connectorRoutes(
     }
   });
 
-  // "Resume in Spotify": a user tap. On 403/404 the app opens fallback_url instead.
+  // "Resume in Spotify": a user tap. On 403/404 the app opens app_url (the Spotify app), else fallback_url.
   app.post('/connectors/spotify/resume/:document', async (c) => {
     const b = await spotifyBook(c);
     if (b.error) return b.error;
@@ -510,7 +510,7 @@ export function connectorRoutes(
     try {
       const r = await spotifyResume(b.cred, b.externalId, transport);
       if (!r) return c.json({ code: 2003, message: 'Spotify has no position for this audiobook' }, 404);
-      return c.json(r.ok ? { ok: true, position: r.position } : { ok: false, position: r.position, reason: r.reason, fallback_url: r.fallbackUrl });
+      return c.json(r.ok ? { ok: true, position: r.position } : { ok: false, position: r.position, reason: r.reason, fallback_url: r.fallbackUrl, app_url: r.appUrl });
     } catch (err) {
       return spotifyFailed(c, b.user.id, err);
     }

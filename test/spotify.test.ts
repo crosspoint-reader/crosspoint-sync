@@ -192,14 +192,14 @@ describe('spotify connector', () => {
   it.each([
     [404, 'NO_ACTIVE_DEVICE'],
     [403, 'PREMIUM_REQUIRED'],
-  ])('resume falls back to the chapter deep link on %i', async (status, reason) => {
+  ])('resume falls back to the audiobook in the Spotify app on %i', async (status, reason) => {
     const f = fakeSpotify({
       'GET /audiobooks/a1/chapters': [200, { items: CHAPTERS, next: null }],
       'GET /me/player': [204, null],
       'PUT /me/player/play': [status, { error: { status, reason } }],
     });
     expect(await spotifyResume(fresh(), 'a1', f.transport)).toMatchObject({
-      ok: false, reason, fallbackUrl: 'https://open.spotify.com/chapter/c2',
+      ok: false, reason, fallbackUrl: 'https://open.spotify.com/audiobook/a1', appUrl: 'spotify:audiobook:a1',
     });
   });
 });
@@ -250,7 +250,7 @@ describe('spotify routes', () => {
       'PUT /me/player/play': [404, { error: { status: 404, reason: 'NO_ACTIVE_DEVICE' } }],
     });
     const res = await app.request(`/api/v1/connectors/spotify/resume/${DOC}`, { method: 'POST', headers });
-    expect(await res.json()).toMatchObject({ ok: false, reason: 'NO_ACTIVE_DEVICE', fallback_url: 'https://open.spotify.com/chapter/c2' });
+    expect(await res.json()).toMatchObject({ ok: false, reason: 'NO_ACTIVE_DEVICE', fallback_url: 'https://open.spotify.com/audiobook/a1', app_url: 'spotify:audiobook:a1' });
   });
 });
 
@@ -405,28 +405,22 @@ describe('spotify hourly job', () => {
   });
 });
 
-describe('spotify per-account flag', () => {
+describe('spotify visibility', () => {
   const list = async (app: any, headers: Record<string, string>) =>
     ((await (await app.request('/api/v1/connectors', { headers })).json()).connectors as { id: string }[]).map((c) => c.id);
 
-  it('is not listed or linkable until enabled, then is listed', async () => {
+  it('is listed and linkable for every account, no reveal needed', async () => {
     const f = fakeSpotify({
       'POST /api/token': [200, { access_token: 'at', refresh_token: 'rt', expires_in: 3600 }],
       'GET /me': [200, { display_name: 'Julia', country: 'US' }],
     });
     const { app } = makeTestApp({}, { connectorTransport: f.transport });
     const { headers } = await registerUser(app);
-    expect(await list(app, headers)).not.toContain('spotify');
-    expect((await begin(app, headers)).res.status).toBe(404);
-    expect(f.calls).toEqual([]);
-
-    expect((await app.request('/api/v1/connectors/spotify/reveal', { method: 'POST', headers })).status).toBe(200);
     expect(await list(app, headers)).toContain('spotify');
     expect((await callback(app, (await begin(app, headers)).state)).status).toBe(302);
 
-    // Per account: another user still sees nothing.
     const { headers: other } = await registerUser(app);
-    expect(await list(app, other)).not.toContain('spotify');
+    expect(await list(app, other)).toContain('spotify');
   });
 
   it('has no book card data until linked', async () => {
@@ -753,10 +747,10 @@ describe('spotify: bring your own Client ID', () => {
     expect(Object.fromEntries(new URLSearchParams(f.calls[0].body))).toMatchObject({ client_id: OWN, redirect_uri: REDIRECT });
   });
 
-  it('needs the per-account flag', async () => {
+  it('works for any account, no reveal needed', async () => {
     const { app, save } = await setup();
     const { headers } = await registerUser(app);
-    expect((await save(headers, OWN)).status).toBe(404);
+    expect((await save(headers, OWN)).status).not.toBe(404);
   });
 
   it('links with that app, keeps it on the credential, and refreshes with it', async () => {

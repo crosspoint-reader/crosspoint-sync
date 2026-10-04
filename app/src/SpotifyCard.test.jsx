@@ -72,13 +72,27 @@ describe('SpotifyCard', () => {
     expect(openUrl).not.toHaveBeenCalled()
   })
 
-  it('opens the chapter deep link when Spotify cannot play (no device or no Premium)', async () => {
+  it('opens the audiobook in the Spotify app when Spotify cannot play (no device or no Premium)', async () => {
     api.bookMatches.mockResolvedValue([{ id: 'spotify' }])
     api.spotifyPosition.mockResolvedValue({ matched: true, position: POSITION })
-    api.spotifyResume.mockResolvedValue({ ok: false, reason: 'NO_ACTIVE_DEVICE', fallback_url: 'https://open.spotify.com/chapter/c2' })
+    api.spotifyResume.mockResolvedValue({
+      ok: false, reason: 'NO_ACTIVE_DEVICE', fallback_url: 'https://open.spotify.com/audiobook/a1', app_url: 'spotify:audiobook:a1',
+    })
     render(<SpotifyCard session={session} book={book()} />)
     fireEvent.click(await screen.findByRole('button'))
-    await waitFor(() => expect(openUrl).toHaveBeenCalledWith('https://open.spotify.com/chapter/c2'))
+    await waitFor(() => expect(openUrl).toHaveBeenCalledWith('spotify:audiobook:a1'))
+  })
+
+  it('falls back to the web page when the Spotify app link fails', async () => {
+    api.bookMatches.mockResolvedValue([{ id: 'spotify' }])
+    api.spotifyPosition.mockResolvedValue({ matched: true, position: POSITION })
+    api.spotifyResume.mockResolvedValue({
+      ok: false, reason: 'NO_ACTIVE_DEVICE', fallback_url: 'https://open.spotify.com/audiobook/a1', app_url: 'spotify:audiobook:a1',
+    })
+    openUrl.mockRejectedValueOnce(new Error('no handler'))
+    render(<SpotifyCard session={session} book={book()} />)
+    fireEvent.click(await screen.findByRole('button'))
+    await waitFor(() => expect(openUrl).toHaveBeenCalledWith('https://open.spotify.com/audiobook/a1'))
   })
 
   it('marks a live session', async () => {
