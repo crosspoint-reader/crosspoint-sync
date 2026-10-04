@@ -199,7 +199,7 @@ export function landingPage(fontFaces: string): string {
 </div>
 
 <section class="tight"><div class="wrap">
-  <div class="lead"><h2>Your reading, everywhere it lives</h2>
+  <div class="lead"><h2>Sync progress, highlights, and stats anywhere</h2>
     <p>Link the services you already use. Progress and highlights flow out as you read.</p></div>
   <div class="services">
     ${SERVICES.map(
