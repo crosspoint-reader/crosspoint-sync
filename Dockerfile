@@ -23,6 +23,9 @@ ENV NODE_ENV=production \
     DATABASE_PATH=/data/crosspoint.db \
     PORT=8080 \
     WEB_APP_DIR=/app/web
+# Listen on every interface: a container's localhost is unreachable from the host
+# or a platform proxy (Railway). Outside Docker the default stays localhost.
+ENV LISTEN_ADDRESS=::
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist

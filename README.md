@@ -85,6 +85,7 @@ DATABASE_PATH=./data/crosspoint.db PORT=8080 node dist/index.js
 | Env var | Default | Meaning |
 |---------|---------|---------|
 | `PORT` | `8080` | Listen port |
+| `LISTEN_ADDRESS` | `localhost` (`::` in the Docker image) | Interface to listen on. `::` listens on all of them, which a container needs to be reachable. |
 | `DATABASE_PATH` | `/data/crosspoint.db` | SQLite file (parent dirs auto-created) |
 | `REGISTRATION_DISABLED` | `false` | Set `true` to lock down a private instance |
 | `AUTH_RATE_LIMIT_PER_MINUTE` | `30` | Per-IP limit on registration (0 disables) |
