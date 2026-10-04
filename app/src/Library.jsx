@@ -73,6 +73,10 @@ export default function Library({ session, books, summary, activity }) {
   // First book that looks like another synced copy of itself.
   const dupe = books.find((b) => books.some((o) => looksLikeSame(b, o)))
   const [hero, ...rest] = tab === 'reading' ? shown : [null, ...shown]
+  // Totals count only books the library shows, as Stats does: metadata-less
+  // syncs are hidden everywhere, so they mustn't add a "finished" here (#18).
+  const listed = new Set(books.map((b) => b.document))
+  const read = (activity?.books ?? []).filter((b) => listed.has(b.document))
 
   return (
     <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
@@ -92,8 +96,8 @@ export default function Library({ session, books, summary, activity }) {
               ]
             : [
                 [counts.reading, 'reading'],
-                [activity.pages_total.toLocaleString(), 'pages read'],
-                [activity.books.filter((b) => b.finished_at).length, 'finished'],
+                [read.reduce((n, b) => n + (b.pages_read ?? 0), 0).toLocaleString(), 'pages read'],
+                [read.filter((b) => b.finished_at).length, 'finished'],
               ]
           ).map(([v, l]) => (
             <div key={l}>
