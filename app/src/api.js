@@ -194,6 +194,7 @@ export const api = {
   bookMatches: (s, doc) => call(s, `/api/v1/documents/${doc}/matches`).then((r) => r.services),
   // Spotify audiobook position, and "Resume in Spotify" (a user tap; never background sync).
   spotifyPosition: (s, doc) => call(s, `/api/v1/connectors/spotify/position/${doc}`),
+  spotifySync: (s, doc) => call(s, `/api/v1/connectors/spotify/sync/${doc}`, { method: 'POST' }),
   spotifyResume: (s, doc) => call(s, `/api/v1/connectors/spotify/resume/${doc}`, { method: 'POST' }),
   // Calibration: the audiobook's tracks, and "my reader is here = this track at this time".
   spotifyTracks: (s, doc) => call(s, `/api/v1/connectors/spotify/tracks/${doc}`),

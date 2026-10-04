@@ -6,9 +6,9 @@ import { secretsEnabled } from '../../crypto/secrets.js';
 import { fetchTransport, getConnector, listConnectors } from '../../connectors/registry.js';
 import { purgeConnector, queueDepth } from '../../connectors/queue.js';
 import { backfillConnector } from '../../connectors/fanout.js';
-import { spotifyFirstSync } from '../../connectors/fanin.js';
+import { pollConnector, spotifyFirstSync } from '../../connectors/fanin.js';
 import { resolveMatch } from '../../connectors/runner.js';
-import { CLIENT_ID_RE, CLIENT_ID_REJECTED, spotifyPlan, spotifyResume, spotifyTracks } from '../../connectors/spotify.js';
+import { CLIENT_ID_RE, CLIENT_ID_REJECTED, playWhenDeviceAppears, spotifyPlan, spotifyResume, spotifyTracks } from '../../connectors/spotify.js';
 import {
   backfillDocumentMeta,
   decryptCredential,
@@ -523,7 +523,24 @@ export function connectorRoutes(
     try {
       const r = await spotifyResume(b.cred, b.externalId, transport, b.readerPct, b.anchor);
       if (!r) return c.json({ code: 2003, message: 'Spotify has no position for this audiobook' }, 404);
-      return c.json(r.ok ? { ok: true, position: r.position } : { ok: false, position: r.position, reason: r.reason, fallback_url: r.fallbackUrl, app_url: r.appUrl });
+      if (r.ok) return c.json({ ok: true, position: r.position });
+      // No active device: the app opens Spotify, and playback starts there once it's up.
+      const retrying = r.reason === 'NO_ACTIVE_DEVICE';
+      if (retrying) void playWhenDeviceAppears(b.cred, r.position, transport).catch(() => {});
+      return c.json({ ok: false, position: r.position, reason: r.reason, fallback_url: r.fallbackUrl, app_url: r.appUrl, retrying });
+    } catch (err) {
+      return spotifyFailed(c, b.user.id, err);
+    }
+  });
+
+  // The Spotify card's refresh: read Spotify now and move this book's progress
+  // forward if the listener has, instead of waiting for a device sync or the hourly poll.
+  app.post('/connectors/spotify/sync/:document', async (c) => {
+    const b = await spotifyBook(c);
+    if (b.error) return b.error;
+    if (!b.externalId) return c.json({ code: 2003, message: 'Book is not matched on Spotify' }, 404);
+    try {
+      return c.json({ applied: await pollConnector(db, b.user.id, 'spotify', transport, { document: b.document, throwOnError: true }) });
     } catch (err) {
       return spotifyFailed(c, b.user.id, err);
     }

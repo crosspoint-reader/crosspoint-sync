@@ -473,6 +473,31 @@ export async function spotifyResume(
   throw new ConnectorOperationError(r.body?.error?.message ?? `Spotify answered ${r.status}`, false);
 }
 
+/**
+ * After a resume found no active device, the app is opening Spotify. A Spotify
+ * link only shows the track (its Play starts the book over), so keep trying to
+ * start playback at the exact spot once the phone shows up as a device. Runs
+ * for a few seconds after the user's tap, never on its own.
+ */
+export async function playWhenDeviceAppears(
+  cred: Credential, position: SpotifyPosition, http: HttpTransport,
+  { tries = 8, gapMs = 2000, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms)) } = {}
+): Promise<boolean> {
+  for (let i = 0; i < tries; i++) {
+    await sleep(gapMs);
+    const list = await api(http, cred, 'GET', '/me/player/devices').catch(() => null);
+    const devices: any[] = list?.status === 200 && Array.isArray(list.body?.devices) ? list.body.devices : [];
+    const device = devices.find((d) => d.is_active) ?? devices.find((d) => d.type === 'Smartphone') ?? devices[0];
+    if (!device?.id) continue;
+    const r = await api(http, cred, 'PUT', `/me/player/play?device_id=${encodeURIComponent(device.id)}`, {
+      uris: [position.chapterUri], position_ms: position.positionMs,
+    }).catch(() => null);
+    if (r && r.status >= 200 && r.status < 300) return true;
+    if (r?.status === 403) return false; // no Premium: nothing more to try
+  }
+  return false;
+}
+
 export const spotifyConnector: Connector = {
   id: 'spotify',
   displayName: 'Spotify',

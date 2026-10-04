@@ -11,6 +11,7 @@ import {
   REDIRECT_REJECTED,
   resetSpotifyPause,
   audioToText,
+  playWhenDeviceAppears,
   positionAtPercentage,
   textToAudio,
   positionFromChapters,
@@ -248,6 +249,33 @@ describe('spotify connector', () => {
     expect(textToAudio(0.4, null)).toBe(0.4);
   });
 
+  it('starts playback on the phone once Spotify shows up as a device', async () => {
+    const f = fakeSpotify({ 'GET /me/player/devices': [200, { devices: [] }] })
+    const target = positionAtPercentage(CHAPTERS, 0.6)!;
+    let polls = 0;
+    const sleep = async () => {
+      // The Spotify app finishes starting on the second check.
+      if (++polls === 2) f.routes['GET /me/player/devices'] = [200, { devices: [{ id: 'laptop', type: 'Computer' }, { id: 'phone', type: 'Smartphone' }] }];
+    };
+    f.routes['PUT /me/player/play'] = [204, null];
+    expect(await playWhenDeviceAppears(fresh(), target, f.transport, { tries: 5, sleep })).toBe(true);
+    const play = f.calls.find((c) => c.method === 'PUT')!;
+    expect(play.url).toContain('device_id=phone');
+    expect(JSON.parse(play.body!)).toEqual({ uris: ['spotify:episode:c2'], position_ms: 1400 });
+  });
+
+  it('gives up quietly without Premium or when no device appears', async () => {
+    const target = positionAtPercentage(CHAPTERS, 0.6)!;
+    const none = fakeSpotify({ 'GET /me/player/devices': [200, { devices: [] }] });
+    expect(await playWhenDeviceAppears(fresh(), target, none.transport, { tries: 3, sleep: async () => {} })).toBe(false);
+    const free = fakeSpotify({
+      'GET /me/player/devices': [200, { devices: [{ id: 'phone', type: 'Smartphone' }] }],
+      'PUT /me/player/play': [403, { error: { status: 403, reason: 'PREMIUM_REQUIRED' } }],
+    });
+    expect(await playWhenDeviceAppears(fresh(), target, free.transport, { tries: 3, sleep: async () => {} })).toBe(false);
+    expect(free.calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
+  });
+
   it('maps a reading percentage to a track and time', () => {
     expect(positionAtPercentage(CHAPTERS, 0.6)).toMatchObject({ chapterId: 'c2', positionMs: 1400, offsetMs: 2400 });
     expect(positionAtPercentage(CHAPTERS, 0.75)).toMatchObject({ chapterId: 'c3', positionMs: 0 });
@@ -305,6 +333,23 @@ describe('spotify routes', () => {
     });
     const res = await app.request(`/api/v1/connectors/spotify/position/${DOC}`, { headers });
     expect(await res.json()).toEqual({ matched: false, position: null });
+  });
+
+  it('syncs one book from Spotify on demand (the card\'s refresh)', async () => {
+    const { app, headers, f } = await linked({
+      'GET /me/audiobooks': [200, { items: [{ id: 'a1', name: 'Dune', authors: [{ name: 'Frank Herbert' }] }], next: null }],
+      'GET /audiobooks/a1/chapters': [200, { items: CHAPTERS, next: null }],
+      'GET /me/player': [204, null],
+    });
+    const sync = async () => (await (await app.request(`/api/v1/connectors/spotify/sync/${DOC}`, { method: 'POST', headers })).json()).applied;
+    await app.request(`/api/v1/connectors/spotify/position/${DOC}`, { headers }); // matches the book
+    const first = await sync();
+    // Listened ahead: now 0.5s into c3.
+    f.routes['GET /audiobooks/a1/chapters'] = [200, { items: [ch('c1', 1000, true), ch('c2', 2000, true), ch('c3', 1000, false, 500)], next: null }];
+    expect(await sync()).toBe(1);
+    const got = await (await app.request(`/syncs/progress/${DOC}`, { headers })).json();
+    expect(got.percentage).toBeCloseTo(0.875, 3);
+    expect(first).toBe(0); // the first look is only a baseline
   });
 
   it('calibrates a book: resume goes where the reader really is, and clearing it falls back', async () => {

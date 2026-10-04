@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { openUrl } from '@tauri-apps/plugin-opener'
-import { Headphones, Loader2, Play } from 'lucide-react'
+import { Headphones, Loader2, Play, RefreshCw } from 'lucide-react'
 import { api, isApp } from './api.js'
 import { Card, notify, pct, useLoad } from './ui.jsx'
 
@@ -80,12 +80,13 @@ function Calibrate({ session, book, data, onDone }) {
 
 // The audiobook's place on Spotify next to the reader's. Shown only when Spotify
 // is linked and has this book; playback starts only from the button.
-export default function SpotifyCard({ session, book }) {
+export default function SpotifyCard({ session, book, onChange }) {
   const [services] = useLoad(() => api.bookMatches(session, book.document), [book.document], `matches ${book.document}`)
   const linked = !!services?.some((s) => s.id === 'spotify')
   const [data, , reload] = useLoad(() => (linked ? api.spotifyPosition(session, book.document) : Promise.resolve(null)), [book.document, linked])
   const [busy, setBusy] = useState(false)
   const [calibrating, setCalibrating] = useState(false)
+  const [syncing, setSyncing] = useState(false)
   const p = data?.matched ? data.position : null
   if (!p) return null
   // Resume goes to the reader's place when it's ahead of Spotify (older servers send no target).
@@ -93,20 +94,39 @@ export default function SpotifyCard({ session, book }) {
   const at = `${t.chapterName} / ${clock(t.positionMs)}`
   const spotifyAt = `${p.chapterName} / ${clock(p.positionMs)}`
 
+  // Read Spotify now: moves the book's progress forward if you've listened ahead.
+  async function sync() {
+    setSyncing(true)
+    try {
+      const { applied } = await api.spotifySync(session, book.document)
+      notify({ title: applied ? 'Progress updated from Spotify' : 'Up to date with Spotify' })
+      reload()
+      if (applied) onChange?.()
+    } catch (e) {
+      notify({ error: true, title: "Spotify: that didn't work", detail: e.message })
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   async function resume() {
     setBusy(true)
     try {
       const r = await api.spotifyResume(session, book.document)
-      // No Premium or no active device: open the track in the Spotify app
-      // (spotify: link), or its web page when the app isn't there.
       if (r.ok) notify({ title: 'Playing in Spotify' })
-      else if (isApp && r.app_url) {
-        try {
-          await openUrl(r.app_url)
-        } catch {
-          await open(r.fallback_url)
-        }
-      } else await open(r.fallback_url)
+      else {
+        // No Premium or no active device: open the track in the Spotify app (spotify:
+        // link), or its web page when the app isn't there. Without a device the server
+        // starts playback at the exact spot once Spotify is up (retrying).
+        if (r.retrying) notify({ title: 'Opening Spotify', detail: `Starting ${r.position.chapterName} at ${clock(r.position.positionMs)} in a moment.` })
+        if (isApp && r.app_url) {
+          try {
+            await openUrl(r.app_url)
+          } catch {
+            await open(r.fallback_url)
+          }
+        } else await open(r.fallback_url)
+      }
       reload()
     } catch (e) {
       notify({ error: true, title: "Spotify: that didn't work", detail: e.message })
@@ -116,8 +136,17 @@ export default function SpotifyCard({ session, book }) {
   }
 
   return (
-    <Card className="mt-4 p-4">
-      <p className="flex items-center gap-1.5 text-xs font-medium text-stone-500">
+    <Card className="relative mt-4 p-4">
+      <button
+        type="button"
+        onClick={sync}
+        disabled={syncing}
+        aria-label="Sync with Spotify now"
+        className="absolute top-1.5 right-1.5 grid size-10 place-items-center rounded-full text-brand-600 active:bg-stone-100 disabled:opacity-60 md:hover:bg-stone-100"
+      >
+        <RefreshCw className={`size-5 ${syncing ? 'animate-spin' : ''}`} strokeWidth={1.75} />
+      </button>
+      <p className="flex items-center gap-1.5 pr-9 text-xs font-medium text-stone-500">
         <Headphones className="size-3.5" strokeWidth={2} /> Spotify Audiobook
         {p.live && <span className="ml-auto rounded-full bg-brand-50 px-2 py-0.5 text-brand-700">Playing now</span>}
       </p>
