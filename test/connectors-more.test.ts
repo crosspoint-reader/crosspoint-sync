@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DOC, makeTestApp, registerUser } from './helpers.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
@@ -259,7 +260,7 @@ describe('audiobookshelf fan-in (audiobook -> ebook)', () => {
     expect(targets).not.toContain('audiobookshelf');
   });
 
-  it('maps a percentage-only fan-in to the nearest real device position (not a synthetic string)', async () => {
+  it('maps a percentage-only fan-in to a nearby real device position, and never a far one', async () => {
     const fake = fakeTransport();
     fake.on('/api/me', 200, { username: 'julia' });
     const { app, db } = makeTestApp({}, { connectorTransport: fake.transport });
@@ -281,12 +282,42 @@ describe('audiobookshelf fan-in (audiobook -> ebook)', () => {
     const applied = await pollConnector(db, userId, 'audiobookshelf', fake.transport);
     expect(applied).toBe(1);
 
-    // The pulled progress carries the real xpointer (nearest sample), so stock
-    // KOReader can seek to it, while percentage reflects the audiobook position.
-    const got = await (await app.request(`/syncs/progress/${DOC}`, { headers })).json();
+    // 38% is too far from 62% to stand in: the percentage goes out alone, so the
+    // reader opens 62% instead of reading its own old spot as "already synced".
+    let got = await (await app.request(`/syncs/progress/${DOC}`, { headers })).json();
     expect(got.percentage).toBe(0.62);
-    expect(got.progress).toBe(XPOINTER);
-    expect(got.progress).not.toContain('audiobookshelf:');
+    expect(got.progress).toBe('audiobookshelf:620000');
+
+    // A real position right next to the audiobook's is borrowed, so stock KOReader can seek to it.
+    const NEAR = '/body/DocFragment[20]/body/p[7]';
+    await app.request('/syncs/progress', {
+      method: 'PUT', headers, body: JSON.stringify({ document: DOC, progress: NEAR, percentage: 0.652, device_id: 'kindle' }),
+    });
+    fake.on('/api/me', 200, { mediaProgress: [{ libraryItemId: 'li_1', progress: 0.655, isFinished: false, lastUpdate: 9000, episodeId: null }] });
+    expect(await pollConnector(db, userId, 'audiobookshelf', fake.transport)).toBe(1);
+    got = await (await app.request(`/syncs/progress/${DOC}`, { headers })).json();
+    expect(got.percentage).toBe(0.655);
+    expect(got.progress).toBe(NEAR);
+  });
+
+  it('a migration repairs stored rows that borrowed a far position', async () => {
+    const { db } = makeTestApp();
+    db.prepare("INSERT INTO users (id, username, key_hash, created_at) VALUES (1, 'u', 'x', 0)").run();
+    const FAR = '/body/DocFragment[42]/body/p[1]';
+    const NEAR = '/body/DocFragment[10]/body/p[1]';
+    const row = db.prepare('INSERT INTO progress (user_id, document, device_id, device, percentage, progress, updated_at) VALUES (1, ?, ?, ?, ?, ?, 0)');
+    const sample = db.prepare('INSERT INTO progress_samples (user_id, document, pct_bucket, percentage, progress, updated_at) VALUES (1, ?, ?, ?, ?, 0)');
+    // The reader was at 47.1%; Spotify's 56.9% borrowed that location. Another book borrowed a nearby one.
+    sample.run('a'.repeat(32), 471, 0.471218, FAR);
+    row.run('a'.repeat(32), 'crosspoint-reader', 'CrossPoint', 0.471218, FAR);
+    row.run('a'.repeat(32), 'spotify', 'Spotify', 0.568571, FAR);
+    sample.run('b'.repeat(32), 200, 0.2, NEAR);
+    row.run('b'.repeat(32), 'audiobookshelf', 'Audiobookshelf', 0.203, NEAR);
+    db.exec(readFileSync(new URL('../migrations/0022_unborrow_far_positions.sql', import.meta.url), 'utf8'));
+    const get = (doc: string, dev: string) => (db.prepare('SELECT progress FROM progress WHERE document = ? AND device_id = ?').get(doc, dev) as { progress: string }).progress;
+    expect(get('a'.repeat(32), 'spotify')).toBe('spotify:568571');
+    expect(get('a'.repeat(32), 'crosspoint-reader')).toBe(FAR);
+    expect(get('b'.repeat(32), 'audiobookshelf')).toBe(NEAR);
   });
 
   it('epsilon-suppresses an echo of our own pushed value', async () => {

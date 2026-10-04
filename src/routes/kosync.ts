@@ -140,6 +140,9 @@ export function recordProgressSample(
  * turn a percentage-only fan-in update into a position stock KOReader can seek
  * to. Returns null when we've never seen a real position for this document.
  */
+/** How far (0..1) a recorded real position may be from a percentage-only one and still stand in for it: about 2 pages of a 400-page book. */
+export const SAMPLE_REACH = 0.005;
+
 export function nearestProgressSample(
   db: DB,
   userId: number,
@@ -157,7 +160,12 @@ export function nearestProgressSample(
     .get(userId, document, Math.max(0, Math.min(1, pct))) as
     | { progress: string; position: string | null; percentage: number }
     | undefined;
-  return row ?? null;
+  // Only a nearby real position stands in for this one. A far one (you listened
+  // past anything the reader has seen) would send the reader to the wrong place,
+  // and CrossPoint compares locations: a borrowed copy of its own reads as
+  // "already synced". Without one, the percentage alone goes out; CrossPoint
+  // opens that, stock KOReader can't.
+  return row && Math.abs(row.percentage - pct) <= SAMPLE_REACH ? row : null;
 }
 
 export function upsertProgress(db: DB, p: ProgressUpsert): void {
