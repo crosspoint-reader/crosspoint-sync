@@ -6,7 +6,9 @@ import { pollConnector, pollSpotify } from '../src/connectors/fanin.js';
 import { decryptCredential, getAccount, revealConnector, saveMatch, upsertAccount } from '../src/connectors/store.js';
 import {
   advance,
+  CLIENT_ID_REJECTED,
   MIN_ADVANCE_MS,
+  REDIRECT_REJECTED,
   resetSpotifyPause,
   positionFromChapters,
   spotifyConnector,
@@ -86,14 +88,14 @@ describe('positionFromChapters', () => {
 });
 
 describe('spotify connector', () => {
-  it('offers PKCE sign-in only when a client id is set', () => {
+  it("offers PKCE sign-in, with the server's shared client id when set", () => {
     expect(spotifyConnector.oauth!()).toEqual({
       authorizeUrl: 'https://accounts.spotify.com/authorize',
       clientId: 'client-123',
       scopes: ['user-library-read', 'user-read-playback-position', 'user-read-playback-state', 'user-modify-playback-state'],
     });
     delete process.env.SPOTIFY_CLIENT_ID;
-    expect(spotifyConnector.oauth!()).toBeNull();
+    expect(spotifyConnector.oauth!().clientId).toBeNull();
   });
 
   it('validate exchanges the PKCE code and keeps only tokens on the credential', async () => {
@@ -108,7 +110,8 @@ describe('spotify connector', () => {
       grant_type: 'authorization_code', code: 'the-code', redirect_uri: REDIRECT,
       client_id: 'client-123', code_verifier: 'v'.repeat(64),
     });
-    expect(Object.keys(cred).sort()).toEqual(['access_token', 'expires_at', 'refresh_token']);
+    expect(Object.keys(cred).sort()).toEqual(['access_token', 'client_id', 'expires_at', 'refresh_token']);
+    expect(cred.client_id).toBe('client-123');
     expect(f.calls[1].url).toBe('https://api.spotify.com/v1/me');
   });
 
@@ -119,7 +122,7 @@ describe('spotify connector', () => {
     });
     const v = await spotifyConnector.validate({ code: 'c', code_verifier: 'v', redirect_uri: REDIRECT }, f.transport);
     expect(v.ok).toBe(false);
-    expect(v.error).toMatch(/developer dashboard/i);
+    expect(v.error).toMatch(/created the app \(step 1\).*User Management/);
   });
 
     it('notes accounts outside the audiobook markets', async () => {
@@ -548,7 +551,7 @@ describe('spotify sign-in (server-run PKCE, one https redirect)', () => {
     expect(await (await callback(app, 'made-up')).text()).toContain('This sign-in expired');
     const off = await callback(app, (await begin(app, headers)).state);
     expect(off.status).toBe(400);
-    expect(await off.text()).toContain('Spotify developer dashboard');
+    expect(await off.text()).toContain('User Management');
     expect(await linked()).toBe(false);
   });
 
@@ -681,3 +684,135 @@ describe('spotify connect follow-ups', () => {
     expect(db.prepare('SELECT device_id FROM progress WHERE document = ? ORDER BY updated_at DESC LIMIT 1').get(DOC)).toEqual({ device_id: 'reader' });
   });
 });
+
+describe('spotify: bring your own Client ID', () => {
+  const OWN = 'abcdef0123456789abcdef0123456789';
+  const OTHER = '0123456789abcdef0123456789abcdef';
+  async function setup(routes: Record<string, [number, unknown]> = {}, configOverrides = {}) {
+    delete process.env.SPOTIFY_CLIENT_ID; // a self-hosted server with no shared app
+    const f = fakeSpotify({
+      'POST /api/token': [400, { error: 'invalid_grant', error_description: 'Invalid authorization code' }], // the save-time check
+      'GET /me': [200, { display_name: 'Julia', country: 'US' }],
+      ...routes,
+    });
+    const { app, db } = makeTestApp(configOverrides, { connectorTransport: f.transport });
+    const user = async () => {
+      const { headers } = await registerUser(app);
+      await app.request('/api/v1/connectors/spotify/reveal', { method: 'POST', headers });
+      return headers;
+    };
+    const save = (headers: Record<string, string>, client_id: unknown) =>
+      app.request('/api/v1/connectors/spotify/client-id', { method: 'PUT', headers, body: JSON.stringify({ client_id }) });
+    const info = async (headers: Record<string, string>) =>
+      ((await (await app.request('/api/v1/connectors', { headers })).json()).connectors as any[]).find((c) => c.id === 'spotify');
+    return { app, db, f, user, save, info };
+  }
+
+  it('without one (and no shared app) sign-in asks for it; the list says so', async () => {
+    const { app, user, info } = await setup();
+    const headers = await user();
+    expect((await info(headers)).oauth).toEqual({ redirect_uri: REDIRECT, client_id: null, shared: false });
+    const { res, body } = await begin(app, headers);
+    expect(res.status).toBe(400);
+    expect(body.message).toBe("Add your Spotify app's Client ID first.");
+  });
+
+  it('is stored per account and used for that account\'s sign-in', async () => {
+    const { app, user, save, info } = await setup();
+    const a = await user();
+    const b = await user();
+    expect((await save(a, OWN.toUpperCase())).status).toBe(200); // normalized
+    expect((await save(b, ` ${OTHER} `)).status).toBe(200);
+    expect((await info(a)).oauth.client_id).toBe(OWN);
+    expect((await info(b)).oauth.client_id).toBe(OTHER);
+    expect((await begin(app, a)).q!.get('client_id')).toBe(OWN);
+    expect((await begin(app, b)).q!.get('client_id')).toBe(OTHER);
+  });
+
+  it('falls back to the shared app when removed', async () => {
+    const { app, user, save } = await setup();
+    const headers = await user();
+    await save(headers, OWN);
+    process.env.SPOTIFY_CLIENT_ID = 'client-123';
+    expect((await begin(app, headers)).q!.get('client_id')).toBe(OWN);
+    await app.request('/api/v1/connectors/spotify/client-id', { method: 'DELETE', headers });
+    expect((await begin(app, headers)).q!.get('client_id')).toBe('client-123');
+  });
+
+  it('rejects a malformed id without asking Spotify, and one Spotify doesn\'t know', async () => {
+    const { f, user, save } = await setup();
+    const headers = await user();
+    const bad = await save(headers, 'not-a-client-id');
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).message).toMatch(/32 letters and numbers.*step 3/);
+    expect(f.calls).toEqual([]);
+    f.routes['POST /api/token'] = [400, { error: 'invalid_client', error_description: 'Failed to get client' }];
+    const unknown = await save(headers, OWN);
+    expect(unknown.status).toBe(400);
+    expect((await unknown.json()).message).toBe(CLIENT_ID_REJECTED);
+    expect(Object.fromEntries(new URLSearchParams(f.calls[0].body))).toMatchObject({ client_id: OWN, redirect_uri: REDIRECT });
+  });
+
+  it('needs the per-account flag', async () => {
+    const { app, save } = await setup();
+    const { headers } = await registerUser(app);
+    expect((await save(headers, OWN)).status).toBe(404);
+  });
+
+  it('links with that app, keeps it on the credential, and refreshes with it', async () => {
+    const { app, db, f, user, save } = await setup();
+    const headers = await user();
+    await save(headers, OWN);
+    const { state } = await begin(app, headers);
+    f.routes['POST /api/token'] = [200, { access_token: 'at', refresh_token: 'rt', expires_in: 3600 }];
+    expect((await callback(app, state)).status).toBe(302);
+    const exchange = Object.fromEntries(new URLSearchParams(f.calls.filter((c) => c.method === 'POST').at(-1)!.body));
+    expect(exchange).toMatchObject({ grant_type: 'authorization_code', client_id: OWN });
+    const cred = decryptCredential(getAccount(db, 1, 'spotify')!);
+    expect(cred.client_id).toBe(OWN);
+
+    // Changing the saved id later doesn't break the existing link: its tokens refresh with the app that issued them.
+    await save(headers, OTHER);
+    f.routes['POST /api/token'] = [200, { access_token: 'at2', expires_in: 3600 }];
+    const expired = { ...cred, expires_at: 0 };
+    await spotifyConnector.validate(expired, f.transport);
+    expect(Object.fromEntries(new URLSearchParams(f.calls.at(-2)!.body))).toEqual({ grant_type: 'refresh_token', refresh_token: 'rt', client_id: OWN });
+  });
+
+  it('links made before per-account ids refresh with the shared app', async () => {
+    const { f } = await setup({ 'POST /api/token': [200, { access_token: 'at2', expires_in: 3600 }] });
+    process.env.SPOTIFY_CLIENT_ID = 'client-123';
+    await spotifyConnector.validate({ access_token: 'old', refresh_token: 'rt', expires_at: 0 }, f.transport);
+    expect(Object.fromEntries(new URLSearchParams(f.calls[0].body)).client_id).toBe('client-123');
+  });
+
+  it.each([
+    [{ error: 'invalid_client', error_description: 'Invalid client' }, CLIENT_ID_REJECTED],
+    [{ error: 'invalid_grant', error_description: 'Invalid redirect URI' }, REDIRECT_REJECTED],
+  ])('explains a rejected sign-in on the callback page (%o)', async (answer, message) => {
+    const { app, f, user, save } = await setup();
+    const headers = await user();
+    await save(headers, OWN);
+    const { state } = await begin(app, headers);
+    f.routes['POST /api/token'] = [400, answer];
+    const res = await callback(app, state);
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain(escape(message));
+  });
+
+  it('shows and uses the redirect for a self-hosted server at its own URL', async () => {
+    const { app, f, user, save } = await setup({}, { trustProxy: true });
+    const headers = { ...(await user()), 'x-forwarded-proto': 'https' };
+    const at = (path: string) => `https://books.example.net${path}`;
+    const own = 'https://books.example.net/connectors/spotify/callback';
+    const list = await (await app.request(at('/api/v1/connectors'), { headers })).json();
+    expect(list.connectors.find((c: any) => c.id === 'spotify').oauth.redirect_uri).toBe(own);
+    await app.request(at('/api/v1/connectors/spotify/client-id'), { method: 'PUT', headers, body: JSON.stringify({ client_id: OWN }) });
+    expect(Object.fromEntries(new URLSearchParams(f.calls[0].body)).redirect_uri).toBe(own);
+    const r = await (await app.request(at('/api/v1/connectors/spotify/oauth/begin'), { method: 'POST', headers, body: '{}' })).json();
+    expect(r.redirect_uri).toBe(own);
+    expect(new URL(r.authorize_url).searchParams.get('redirect_uri')).toBe(own);
+  });
+});
+
+const escape = (s: string) => s.replace(/'/g, '&#39;');

@@ -8,18 +8,20 @@ import { purgeConnector, queueDepth } from '../../connectors/queue.js';
 import { backfillConnector } from '../../connectors/fanout.js';
 import { spotifyFirstSync } from '../../connectors/fanin.js';
 import { resolveMatch } from '../../connectors/runner.js';
-import { spotifyPosition, spotifyResume } from '../../connectors/spotify.js';
+import { CLIENT_ID_RE, CLIENT_ID_REJECTED, spotifyPosition, spotifyResume } from '../../connectors/spotify.js';
 import {
   backfillDocumentMeta,
   decryptCredential,
   deleteAccount,
   getAccount,
+  getClientId,
   getMatch,
   listMatches,
   listReveals,
   revealConnector,
   saveMatch,
   setAccountStatus,
+  setClientId,
   upsertAccount,
 } from '../../connectors/store.js';
 import { isValidDocument } from '../kosync.js';
@@ -33,6 +35,7 @@ interface PendingOAuth {
   connectorId: string;
   verifier: string;
   redirectUri: string;
+  clientId: string;
   client: 'app' | 'web';
   expires: number;
   outcome?: Promise<{ error?: string }>;
@@ -68,7 +71,7 @@ async function exchangeOAuth(
 ): Promise<{ error?: string }> {
   const conn = getConnector(entry.connectorId)!;
   if (!code) return { error: error === 'access_denied' ? `You declined on ${conn.displayName}.` : 'Sign-in failed. Start again.' };
-  const cred: Record<string, unknown> = { code, code_verifier: entry.verifier, redirect_uri: entry.redirectUri };
+  const cred: Record<string, unknown> = { code, code_verifier: entry.verifier, redirect_uri: entry.redirectUri, client_id: entry.clientId };
   const result = await conn.validate(cred, transport);
   if (!result.ok) return { error: result.error ?? 'Sign-in failed. Start again.' };
   const first = !getAccount(db, entry.userId, conn.id);
@@ -149,8 +152,6 @@ export function connectorRoutes(
     const enabled = secretsEnabled();
     const revealed = new Set(listReveals(db, user.id));
     const visible = listConnectors().filter((conn) => {
-      // OAuth services need the server's client id (e.g. SPOTIFY_CLIENT_ID) to be linkable at all.
-      if (conn.oauth && !conn.oauth() && !getAccount(db, user.id, conn.id)) return false;
       if (!conn.revealable) return true;
       if (revealed.has(conn.id)) return true;
       return !!getAccount(db, user.id, conn.id);
@@ -167,6 +168,13 @@ export function connectorRoutes(
           carries: conn.carries,
           capabilities: conn.capabilities,
           credential_kind: conn.credentialKind,
+          // Sign-in setup: the redirect to register (this server's own public URL), the
+          // user's own client id, and whether the server has a shared one.
+          ...(conn.oauth ? { oauth: {
+            redirect_uri: publicOrigin(c, trustProxy) + oauthCallbackPath(conn.id),
+            client_id: getClientId(db, user.id, conn.id),
+            shared: !!conn.oauth().clientId,
+          } } : {}),
           library_refresh: !!conn.refreshLibrary,
           asin_lookup: !!conn.lookup,
           matches: conn.matchBy !== 'document',
@@ -279,13 +287,46 @@ export function connectorRoutes(
 
   // Start a browser sign-in: the server keeps the PKCE verifier, so whichever
   // side receives the redirect (app link or callback page) can finish it.
-  app.post('/connectors/:id/oauth/begin', async (c) => {
-    const conn = getConnector(c.req.param('id'));
-    const user = c.get('user');
-    const config = conn?.oauth?.();
-    if (!conn || !config || (conn.revealable && !listReveals(db, user.id).includes(conn.id) && !getAccount(db, user.id, conn.id))) {
-      return c.json({ code: 2003, message: 'Unknown connector' }, 404);
+  // An OAuth connector this user may set up (revealed, for gated ones), else null.
+  function oauthConnector(c: Context<AppEnv>) {
+    const conn = getConnector(c.req.param('id') ?? '');
+    const userId = c.get('user').id;
+    if (!conn?.oauth || (conn.revealable && !listReveals(db, userId).includes(conn.id) && !getAccount(db, userId, conn.id))) return null;
+    return conn;
+  }
+
+  // The user's own developer app: checked with the provider, then used for new sign-ins.
+  // An existing link keeps the client id that issued its tokens until signing in again.
+  app.put('/connectors/:id/client-id', async (c) => {
+    const conn = oauthConnector(c);
+    if (!conn) return c.json({ code: 2003, message: 'Unknown connector' }, 404);
+    const body = (await c.req.json().catch(() => null)) as { client_id?: unknown } | null;
+    const id = typeof body?.client_id === 'string' ? body.client_id.trim().toLowerCase() : '';
+    if (!CLIENT_ID_RE.test(id)) {
+      return c.json({ code: 2003, message: 'A Client ID is 32 letters and numbers. Copy it from your app\'s Settings (step 3).' }, 400);
     }
+    const redirectUri = publicOrigin(c, trustProxy) + oauthCallbackPath(conn.id);
+    if ((await conn.checkClientId?.(id, redirectUri, transport)) === 'rejected') {
+      return c.json({ code: 2003, message: CLIENT_ID_REJECTED }, 400);
+    }
+    setClientId(db, c.get('user').id, conn.id, id);
+    return c.json({ id: conn.id, client_id: id });
+  });
+
+  app.delete('/connectors/:id/client-id', (c) => {
+    const conn = oauthConnector(c);
+    if (!conn) return c.json({ code: 2003, message: 'Unknown connector' }, 404);
+    setClientId(db, c.get('user').id, conn.id, null);
+    return c.json({ id: conn.id, client_id: null });
+  });
+
+  app.post('/connectors/:id/oauth/begin', async (c) => {
+    const conn = oauthConnector(c);
+    const user = c.get('user');
+    if (!conn) return c.json({ code: 2003, message: 'Unknown connector' }, 404);
+    const config = conn.oauth!();
+    const clientId = getClientId(db, user.id, conn.id) ?? config.clientId;
+    if (!clientId) return c.json({ code: 2003, message: `Add your ${conn.displayName} app's Client ID first.` }, 400);
     if (!credentialRequestIsSecure(c, trustProxy)) {
       return c.json({ code: 2003, message: 'Connector credentials require HTTPS' }, 400);
     }
@@ -299,11 +340,11 @@ export function connectorRoutes(
     const state = b64url(randomBytes(16));
     const redirectUri = publicOrigin(c, trustProxy) + oauthCallbackPath(conn.id);
     pendingOAuth.set(state, {
-      userId: user.id, connectorId: conn.id, verifier, redirectUri,
+      userId: user.id, connectorId: conn.id, verifier, redirectUri, clientId,
       client: body?.client === 'app' ? 'app' : 'web', expires: now + OAUTH_TTL_MS,
     });
     const q = new URLSearchParams({
-      client_id: config.clientId,
+      client_id: clientId,
       response_type: 'code',
       redirect_uri: redirectUri,
       scope: config.scopes.join(' '),

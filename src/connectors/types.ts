@@ -32,10 +32,11 @@ export interface DeviceLinkPoll {
   error?: string;
 }
 
-/** Browser OAuth (Authorization Code + PKCE), run by the server; validate() gets { code, code_verifier, redirect_uri }. */
+/** Browser OAuth (Authorization Code + PKCE), run by the server; validate() gets { code, code_verifier, redirect_uri, client_id }. */
 export interface OAuthConfig {
   authorizeUrl: string;
-  clientId: string;
+  /** The server's shared client id; null = each user brings their own. */
+  clientId: string | null;
   scopes: string[];
 }
 
@@ -215,8 +216,10 @@ export interface Connector {
    */
   matchBy?: 'document' | 'metadata';
 
-  /** PKCE sign-in details for the app; null when the server isn't configured for it. */
-  oauth?(): OAuthConfig | null;
+  /** PKCE sign-in details. */
+  oauth?(): OAuthConfig;
+  /** Whether the provider knows a user-supplied client id. Optional. */
+  checkClientId?(clientId: string, redirectUri: string, http: HttpTransport): Promise<'ok' | 'rejected' | 'unknown'>;
 
   /** Validate a credential and return the account label if possible. */
   validate(cred: Credential, http: HttpTransport): Promise<ValidateResult>;

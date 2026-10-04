@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { onOpenUrl } from '@tauri-apps/plugin-deep-link'
-import { ArrowLeft, ChevronRight, KeyRound, ListChecks, Loader2, LogOut, Monitor, Moon, RefreshCw, Search, Server, Sun, Trash2, UserX } from 'lucide-react'
+import { ArrowLeft, ChevronRight, Copy, KeyRound, ListChecks, Loader2, LogOut, Monitor, Moon, RefreshCw, Search, Server, Sun, Trash2, UserX } from 'lucide-react'
 import SparkMD5 from 'spark-md5'
 import { api, isApp } from './api.js'
 import { Bone, Card, EmptyState, Eyebrow, notify, useLoad } from './ui.jsx'
@@ -60,12 +60,118 @@ const open = (url) => (isApp ? openUrl(url) : window.open(url, '_blank', 'noopen
 const field =
   'h-11 w-full rounded-xl bg-stone-50 px-3 text-sm text-stone-900 ring-1 ring-stone-950/10 outline-none placeholder:text-stone-400 focus:ring-2 focus:ring-brand-500/60'
 
+const DASHBOARD = 'https://developer.spotify.com/dashboard'
+
+// Setting up the user's own developer app for an OAuth service (Spotify): its
+// owner is allowed automatically, so there's no allowlist step. The redirect
+// URI comes from the server, so it's this server's own public URL.
+export function ClientIdSetup({ session, conn, onSaved, onCancel }) {
+  const redirect = conn.oauth.redirect_uri
+  const [v, setV] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const id = v.trim()
+  const valid = /^[0-9a-f]{32}$/i.test(id)
+
+  async function save(e) {
+    e.preventDefault()
+    setBusy(true)
+    setError(null)
+    try {
+      onSaved((await api.setClientId(session, conn.id, id)).client_id)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(redirect)
+      notify({ title: 'Redirect URI copied' })
+    } catch {
+      notify({ error: true, title: "Couldn't copy", detail: 'Select the text and copy it instead.' })
+    }
+  }
+
+  const step = 'grid size-6 shrink-0 place-items-center rounded-full bg-brand-50 text-xs font-semibold text-brand-700'
+  return (
+    <div className="space-y-3 text-sm/6 text-stone-600">
+      <p>{conn.name} sign-in uses your own free {conn.name} developer app. It takes a couple of minutes, once.</p>
+      <ol className="space-y-3">
+        <li className="flex gap-2.5">
+          <span className={step}>1</span>
+          <div className="min-w-0">
+            <p className="font-semibold text-stone-900">Create an app</p>
+            <p>
+              Open the {conn.name} developer dashboard, sign in with the {conn.name} account you&apos;ll link, and choose{' '}
+              <b>Create app</b>. Any name and description. That account needs Premium, and as the app&apos;s owner it&apos;s
+              allowed in automatically. {conn.name} gives each account one app, so if you already have one, open it and choose{' '}
+              <b>Edit</b> instead.
+            </p>
+            <button type="button" onClick={() => open(DASHBOARD)} className="mt-1 font-medium text-brand-600">
+              Open the developer dashboard
+            </button>
+          </div>
+        </li>
+        <li className="flex gap-2.5">
+          <span className={step}>2</span>
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold text-stone-900">Add this redirect URI</p>
+            <p>Paste it under <b>Redirect URIs</b> and choose Add, tick <b>Web API</b>, agree to the terms, then Save.</p>
+            <div className="mt-1.5 flex items-center gap-2 rounded-xl bg-stone-50 p-2 ring-1 ring-stone-950/10">
+              <code className="min-w-0 flex-1 font-mono text-xs break-all text-stone-900 select-all">{redirect}</code>
+              <button type="button" onClick={copy} aria-label="Copy redirect URI" className="shrink-0 rounded-lg p-1.5 text-stone-500 active:bg-stone-100">
+                <Copy className="size-4" />
+              </button>
+            </div>
+          </div>
+        </li>
+        <li className="flex gap-2.5">
+          <span className={step}>3</span>
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold text-stone-900">Paste the Client ID</p>
+            <p>Open the app&apos;s <b>Settings</b> and copy its <b>Client ID</b>. No client secret needed.</p>
+            <form onSubmit={save} className="mt-1.5 space-y-2">
+              <input
+                className={`${field} font-mono`}
+                placeholder="Client ID"
+                value={v}
+                onChange={(e) => setV(e.target.value)}
+                autoCapitalize="none"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              {id && !valid && <p className="text-xs text-amber-700">A Client ID is 32 letters and numbers.</p>}
+              <button
+                type="submit"
+                disabled={!valid || busy}
+                className="flex h-11 w-full items-center justify-center rounded-xl bg-brand-500 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-50"
+              >
+                {busy ? <Loader2 className="size-4 animate-spin" /> : 'Save Client ID'}
+              </button>
+            </form>
+          </div>
+        </li>
+      </ol>
+      {error && <p className="text-sm text-red-700">{error}</p>}
+      {onCancel && (
+        <button type="button" onClick={onCancel} className="text-sm font-medium text-stone-500">
+          Cancel
+        </button>
+      )}
+    </div>
+  )
+}
+
 // The link form for one service, by credential kind (same shapes as the web).
 export function LinkForm({ session, conn, onLinked }) {
   const [v, setV] = useState({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [device, setDevice] = useState(null) // device-code sign-in in progress
+  const [clientId, setClientId] = useState(conn.oauth?.client_id ?? null) // the user's own app, for OAuth services
+  const [setup, setSetup] = useState(false) // showing the Client ID steps
   const live = useRef(true)
   const unlisten = useRef(null)
   const poll = useRef(null)
@@ -163,6 +269,16 @@ export function LinkForm({ session, conn, onLinked }) {
     clearTimeout(poll.current)
   }
 
+  async function removeClientId() {
+    setError(null)
+    try {
+      await api.removeClientId(session, conn.id)
+      setClientId(null)
+    } catch (e) {
+      setError(e.message)
+    }
+  }
+
   const submit = (label, credential) => (
     <button
       type="submit"
@@ -195,14 +311,51 @@ export function LinkForm({ session, conn, onLinked }) {
   if (conn.id === 'kindle') {
     body = <p className="text-sm text-stone-600">Link Kindle from the CrossPoint Sync website with the browser extension.</p>
   } else if (conn.credential_kind === 'oauth') {
-    body = (
-      <button
-        type="button"
-        onClick={startOAuth} // stays tappable: an abandoned browser sign-in just starts over
-        className="flex h-11 w-full items-center justify-center gap-1.5 rounded-xl bg-brand-500 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-50"
-      >
-        {busy ? <><Loader2 className="size-4 animate-spin" /> Waiting for {conn.name}…</> : `Sign in with ${conn.name}`}
-      </button>
+    const own = clientId
+    body = !conn.oauth ? (
+      <p className="text-sm text-stone-600">Update this server to link {conn.name}.</p>
+    ) : setup || (!own && !conn.oauth.shared) ? (
+      <ClientIdSetup
+        session={session}
+        conn={conn}
+        onSaved={(id) => {
+          setClientId(id)
+          setSetup(false)
+        }}
+        onCancel={own || conn.oauth.shared ? () => setSetup(false) : null}
+      />
+    ) : (
+      <div className="space-y-2">
+        <button
+          type="button"
+          onClick={startOAuth} // stays tappable: an abandoned browser sign-in just starts over
+          className="flex h-11 w-full items-center justify-center gap-1.5 rounded-xl bg-brand-500 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-50"
+        >
+          {busy ? <><Loader2 className="size-4 animate-spin" /> Waiting for {conn.name}…</> : `Sign in with ${conn.name}`}
+        </button>
+        {own ? (
+          <>
+            <p className="text-xs text-stone-500">
+              If {conn.name} shows &ldquo;INVALID_CLIENT: Invalid redirect URI&rdquo;, add the redirect URI from step 2 to your app.
+            </p>
+            <p className="flex flex-wrap items-center gap-x-3 text-xs text-stone-500">
+              <span>
+                Your app&apos;s Client ID <span className="font-mono">…{own.slice(-4)}</span>
+              </span>
+              <button type="button" onClick={() => setSetup(true)} className="font-medium text-brand-600">
+                Change
+              </button>
+              <button type="button" onClick={removeClientId} className="font-medium text-brand-600">
+                Remove
+              </button>
+            </p>
+          </>
+        ) : (
+          <button type="button" onClick={() => setSetup(true)} className="text-xs font-medium text-brand-600">
+            Use your own {conn.name} app
+          </button>
+        )}
+      </div>
     )
   } else if (conn.credential_kind === 'device_code') {
     body = device ? (

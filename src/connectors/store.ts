@@ -293,6 +293,20 @@ export function revealConnector(db: DB, userId: number, connectorId: string, now
   ).run(userId, connectorId, now);
 }
 
+/** A user's own OAuth client id for a connector, or null for the server's. */
+export function getClientId(db: DB, userId: number, connectorId: string): string | null {
+  const row = db.prepare('SELECT client_id FROM connector_reveals WHERE user_id = ? AND connector_id = ?')
+    .get(userId, connectorId) as { client_id: string | null } | undefined;
+  return row?.client_id ?? null;
+}
+
+export function setClientId(db: DB, userId: number, connectorId: string, clientId: string | null, now = nowSeconds()): void {
+  db.prepare(
+    `INSERT INTO connector_reveals (user_id, connector_id, revealed_at, client_id) VALUES (?, ?, ?, ?)
+     ON CONFLICT(user_id, connector_id) DO UPDATE SET client_id = excluded.client_id`
+  ).run(userId, connectorId, now, clientId);
+}
+
 /** The connector ids this user has revealed. */
 export function listReveals(db: DB, userId: number): string[] {
   return (

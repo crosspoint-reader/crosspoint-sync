@@ -59,11 +59,36 @@ let pausedUntil = 0;
 export const spotifyPaused = () => Date.now() < pausedUntil;
 export const resetSpotifyPause = () => { pausedUntil = 0; };
 
+// The server's shared app, if any; each user can bring their own (connector_reveals.client_id).
 const clientId = () => process.env.SPOTIFY_CLIENT_ID?.trim() || null;
 
-function oauth(): OAuthConfig | null {
-  const id = clientId();
-  return id ? { authorizeUrl: AUTHORIZE_URL, clientId: id, scopes: SPOTIFY_SCOPES } : null;
+function oauth(): OAuthConfig {
+  return { authorizeUrl: AUTHORIZE_URL, clientId: clientId(), scopes: SPOTIFY_SCOPES };
+}
+
+// Spotify Client IDs are 32 hex characters.
+export const CLIENT_ID_RE = /^[0-9a-f]{32}$/;
+
+export const CLIENT_ID_REJECTED =
+  "Spotify doesn't recognize this Client ID. Copy it again from your app's Settings in the Spotify dashboard (step 3).";
+export const REDIRECT_REJECTED =
+  'Spotify rejected the redirect URI. Add it to your Spotify app exactly as shown in step 2, then sign in again.';
+
+/**
+ * Whether Spotify knows a Client ID: a token exchange with a dummy code fails
+ * with invalid_client for an unknown one and invalid_grant for a real one.
+ * (The redirect URI can't be checked ahead: Spotify only reports it after login.)
+ */
+async function checkClientId(id: string, redirectUri: string, http: HttpTransport): Promise<'ok' | 'rejected' | 'unknown'> {
+  try {
+    const { body } = await tokenPost(http, {
+      grant_type: 'authorization_code', code: 'check', redirect_uri: redirectUri, client_id: id, code_verifier: 'check'.repeat(9),
+    });
+    if (body?.error === 'invalid_client') return 'rejected';
+    return body?.error === 'invalid_grant' ? 'ok' : 'unknown';
+  } catch {
+    return 'unknown';
+  }
 }
 
 interface TokenSet {
@@ -94,8 +119,8 @@ const tokenSet = (body: any, refreshToken?: string): TokenSet | null =>
 
 /** The PKCE code exchange; mutates the link credential into a stored token credential. */
 async function exchangeCode(cred: Credential, http: HttpTransport): Promise<void> {
-  const id = clientId();
-  if (!id) throw new ConnectorOperationError('This server has no SPOTIFY_CLIENT_ID set.', false);
+  const id = typeof cred.client_id === 'string' ? cred.client_id : clientId();
+  if (!id) throw new ConnectorOperationError("Add your Spotify app's Client ID first.", false);
   if (typeof cred.code !== 'string' || typeof cred.code_verifier !== 'string' || typeof cred.redirect_uri !== 'string') {
     throw new ConnectorOperationError('Spotify sign-in was incomplete. Start again.', false);
   }
@@ -108,10 +133,13 @@ async function exchangeCode(cred: Credential, http: HttpTransport): Promise<void
   });
   const tokens = tokenSet(body);
   if (!tokens) {
+    if (body?.error === 'invalid_client') throw new ConnectorOperationError(CLIENT_ID_REJECTED, false);
+    if (/redirect/i.test(body?.error_description ?? '')) throw new ConnectorOperationError(REDIRECT_REJECTED, false);
     throw new ConnectorOperationError(body?.error_description ?? body?.error ?? `Spotify answered ${status}`, false);
   }
   for (const k of Object.keys(cred)) delete cred[k];
-  Object.assign(cred, tokens);
+  // Refresh tokens belong to the app that issued them, so the link keeps its Client ID.
+  Object.assign(cred, tokens, { client_id: id });
 }
 
 // ponytail: concurrent refreshes of one credential both hit Spotify; fine since
@@ -125,7 +153,7 @@ async function accessToken(cred: Credential, http: HttpTransport): Promise<strin
   const { status, body } = await tokenPost(http, {
     grant_type: 'refresh_token',
     refresh_token: c.refresh_token,
-    client_id: clientId() ?? '',
+    client_id: (typeof c.client_id === 'string' ? c.client_id : clientId()) ?? '',
   });
   const tokens = tokenSet(body, c.refresh_token);
   if (!tokens) {
@@ -180,11 +208,11 @@ async function validate(cred: Credential, http: HttpTransport): Promise<Validate
     if (cred.code) await exchangeCode(cred, http);
     const r = await api(http, cred, 'GET', '/me');
     // A Development mode Spotify app answers 403 "User not registered in the
-    // Developer Dashboard" for anyone off its allowlist (max 5 users).
+    // Developer Dashboard" for anyone but its owner and allowlist (max 5 users).
     if (r.status === 403) {
       return {
         ok: false,
-        error: "Spotify hasn't approved this account for CrossPoint Sync yet. Ask the server owner to add your Spotify email in the Spotify developer dashboard (User Management), then sign in again.",
+        error: "This Spotify account can't use this Spotify app. Sign in with the Spotify account that created the app (step 1), or add this account under User Management in the Spotify dashboard.",
       };
     }
     if (r.status !== 200) return { ok: false, error: `Spotify answered ${r.status}` };
@@ -383,6 +411,7 @@ export const spotifyConnector: Connector = {
   beta: true,
   revealable: true,
   oauth,
+  checkClientId,
   validate,
   match,
   push,
