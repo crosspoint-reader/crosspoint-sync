@@ -637,6 +637,30 @@ describe('hardcover progress push', () => {
     expect(upd!.body).toContain('"pages":150');
   });
 
+  it('retries when Hardcover returns 200 with an empty body (silent throttle)', async () => {
+    const fake = fakeTransport();
+    fake.on('Ctx', 200, {
+      data: {
+        me: [{
+          user_books: [{
+            id: 10, status_id: 2, edition: { id: 5, pages: 300 },
+            user_book_reads: [{ id: 77, started_at: '2026-08-08', finished_at: null, edition: { id: 5, pages: 300 } }],
+          }],
+        }],
+        books_by_pk: {}, editions: [],
+      },
+    });
+    fake.on('UpdRead', 200, {}); // 200, no errors, no data - the write did not happen
+    const r = await hardcoverConnector.push(
+      { token: 't' },
+      { externalId: '42', confidence: 1 },
+      { kind: 'progress', document: 'd', percentage: 0.5, timestamp: 1_754_000_000 },
+      fake.transport
+    );
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.retryable).toBe(true);
+  });
+
   it('still succeeds (status only) when no edition has a page count', async () => {
     const fake = fakeTransport();
     fake.on('Ctx', 200, { data: { me: [{ user_books: [] }], books_by_pk: {}, editions: [] } });

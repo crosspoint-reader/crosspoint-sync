@@ -594,6 +594,15 @@ async function push(
   const opError =
     res.data?.update_user_book_read?.error ?? res.data?.insert_user_book_read?.error;
   if (opError) return { ok: false, retryable: false, error: String(opError) };
+  // Hardcover sometimes throttles with a 200 and an EMPTY body (no errors, no
+  // data) - seen live on delete mutations. Without this check such a push is
+  // marked done while nothing was written, and the book's progress silently
+  // stops moving. Demand the written read back, else retry later.
+  const written =
+    res.data?.update_user_book_read?.user_book_read ?? res.data?.insert_user_book_read?.user_book_read;
+  if (written?.id == null) {
+    return { ok: false, retryable: true, error: 'read write not confirmed (empty response)' };
+  }
   return { ok: true };
 }
 
