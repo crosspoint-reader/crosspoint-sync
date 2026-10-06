@@ -421,7 +421,7 @@ async function push(
            id
            status_id
            edition { id pages }
-           user_book_reads(where: { finished_at: { _is_null: true } }, order_by: { id: asc }, limit: 1) {
+           user_book_reads(where: { finished_at: { _is_null: true } }, order_by: { id: desc }, limit: 5) {
              id started_at finished_at edition { id pages }
            }
          }
@@ -447,9 +447,11 @@ async function push(
   let userBookId: number | undefined = meUb?.id;
   const currentStatus: number | undefined =
     typeof meUb?.status_id === 'number' ? meUb.status_id : undefined;
-  // The OLDEST still-open read is the one Hardcover treats as current and shows
-  // on the book (it creates this read itself when a book becomes "reading").
-  let openRead = meUb?.user_book_reads?.[0];
+  // The NEWEST still-open read is the one Hardcover's UI shows (seen live: a
+  // user with two open reads had the newest one displayed). Older open reads on
+  // the same book are duplicates from the auto-create race below - we update
+  // the newest and delete the rest after a successful write.
+  let openReads: any[] = meUb?.user_book_reads ?? [];
   const edition = pickEdition(meUb, ctx.data);
 
   // Already Read: nothing to write. Hardcover closed the read when it was
@@ -509,7 +511,7 @@ async function push(
       `query OpenRead($bookId: Int!) {
          me {
            user_books(where: { book_id: { _eq: $bookId } }, limit: 1) {
-             user_book_reads(where: { finished_at: { _is_null: true } }, order_by: { id: asc }, limit: 1) {
+             user_book_reads(where: { finished_at: { _is_null: true } }, order_by: { id: desc }, limit: 5) {
                id started_at finished_at edition { id pages }
              }
            }
@@ -517,13 +519,14 @@ async function push(
        }`,
       { bookId }
     );
-    const refetched = re.data?.me?.[0]?.user_books?.[0]?.user_book_reads?.[0];
+    const refetched = re.data?.me?.[0]?.user_books?.[0]?.user_book_reads;
     // Marking Read may close the open read on Hardcover's side. Then the ctx
     // read is stale and writing to it (or inserting) would reopen or duplicate
     // it, so leave it be.
-    if (refetched) openRead = refetched;
+    if (refetched?.length) openReads = refetched;
     else if (finished) return { ok: true };
   }
+  const openRead = openReads[0];
   const openReadId: number | undefined = openRead?.id;
 
   if (!edition) {
@@ -602,6 +605,14 @@ async function push(
     res.data?.update_user_book_read?.user_book_read ?? res.data?.insert_user_book_read?.user_book_read;
   if (written?.id == null) {
     return { ok: false, retryable: true, error: 'read write not confirmed (empty response)' };
+  }
+  // Clean up duplicate open reads (our insert racing Hardcover's auto-create
+  // left some users with two). Best effort: the write above already landed, and
+  // any survivor gets caught on the next push.
+  for (const dup of openReads.slice(1)) {
+    if (dup?.id != null) {
+      await gql(http, token, `mutation DelRead($id: Int!) { delete_user_book_read(id: $id) { id } }`, { id: dup.id });
+    }
   }
   return { ok: true };
 }

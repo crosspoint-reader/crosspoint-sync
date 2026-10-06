@@ -637,6 +637,38 @@ describe('hardcover progress push', () => {
     expect(upd!.body).toContain('"pages":150');
   });
 
+  it('updates the NEWEST open read and deletes older duplicates', async () => {
+    const fake = fakeTransport();
+    fake.on('Ctx', 200, {
+      data: {
+        me: [{
+          user_books: [{
+            id: 10, status_id: 2, edition: { id: 5, pages: 468 },
+            user_book_reads: [
+              { id: 7001559, started_at: '2026-10-02', finished_at: null, edition: { id: 5, pages: 468 } },
+              { id: 7001557, started_at: '2026-10-02', finished_at: null, edition: { id: 5, pages: 468 } },
+            ],
+          }],
+        }],
+        books_by_pk: {}, editions: [],
+      },
+    });
+    fake.on('UpdRead', 200, { data: { update_user_book_read: { error: null, user_book_read: { id: 7001559 } } } });
+    fake.on('DelRead', 200, { data: { delete_user_book_read: { id: 7001557 } } });
+
+    const r = await hardcoverConnector.push(
+      { token: 't' },
+      { externalId: '42', confidence: 1 },
+      { kind: 'progress', document: 'd', percentage: 0.227, timestamp: 1_754_000_000 },
+      fake.transport
+    );
+    expect(r.ok).toBe(true);
+    const upd = fake.calls.find((c) => c.body?.includes('UpdRead'));
+    expect(upd!.body).toContain('"id":7001559'); // the one the UI shows
+    const del = fake.calls.find((c) => c.body?.includes('DelRead'));
+    expect(del!.body).toContain('"id":7001557'); // the orphaned duplicate
+  });
+
   it('retries when Hardcover returns 200 with an empty body (silent throttle)', async () => {
     const fake = fakeTransport();
     fake.on('Ctx', 200, {
