@@ -440,6 +440,7 @@ function DatesSheet({ session, book, activity: a, onDone, onClose }) {
     <Sheet title="Reading dates" onClose={onClose}>
       <p className="mt-1 text-sm text-stone-500">
         Dates you set here win over your reader&apos;s. Setting a finish date marks the book finished.
+        Only the start and finish days are added to your reading grid.
       </p>
       <form onSubmit={save} className="mt-4 space-y-3">
         <div className="grid grid-cols-2 gap-3">

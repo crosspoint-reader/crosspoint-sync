@@ -10,6 +10,40 @@ const doc = (page_count: number | null, status: string | null = null, status_at:
 });
 
 describe('computeActivity', () => {
+  it('marks chosen start and finish days without filling the days between or adding pages', () => {
+    const info = { ...doc(100), start_date: T - 10 * DAY, finished_date: T - 5 * DAY };
+    const a = computeActivity(
+      [{ document: 'a', percentage: 0.4, at: T }],
+      new Map([['a', info]]),
+      240,
+      new Map([['a', T - 4 * DAY]]),
+      new Map([['a', T - 12 * DAY]])
+    );
+    expect(a.reading_days).toEqual(['2026-08-22', '2026-08-27', '2026-08-31']);
+    expect(a.pages_total).toBe(40);
+    expect(a.days.filter((d) => d.syncs > 0)).toHaveLength(1);
+    expect(a.days.every((d) => d.pages === 0)).toBe(true);
+  });
+
+  it('falls back to CrossInk dates when manual dates are cleared, then to server sync days', () => {
+    const rows = [{ document: 'a', percentage: 1, at: T }];
+    const docs = new Map([['a', doc(100)]]);
+    const fromDevice = computeActivity(rows, docs, -540,
+      new Map([['a', T - 2 * DAY]]), new Map([['a', T - 5 * DAY]]));
+    expect(fromDevice.reading_days).toEqual(['2026-08-27', '2026-08-30', '2026-09-01']);
+    expect(computeActivity(rows, docs, -540).reading_days).toEqual(['2026-09-01']);
+  });
+
+  it('marks a start date alone and ignores a finish date overridden by an unfinished status', () => {
+    const a = computeActivity(
+      [{ document: 'a', percentage: 1, at: T }],
+      new Map([['a', { ...doc(100, 'dnf'), start_date: T - 5 * DAY }]]),
+      0,
+      new Map([['a', T - 2 * DAY]])
+    );
+    expect(a.reading_days).toEqual(['2026-08-27', '2026-09-01']);
+  });
+
   it('counts only forward progress after the first sync, as a running max across devices', () => {
     const a = computeActivity(
       [

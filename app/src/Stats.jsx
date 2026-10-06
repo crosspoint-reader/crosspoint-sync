@@ -9,10 +9,20 @@ const WEEKS = 52 // phones show the newest 26
 const EPOCH = Date.UTC(2000, 0, 1)
 
 // history_b64: bit N (LSB-first per byte) = anchor_day - N, anchor_day = days since 2000-01-01.
-export function decodeHistory(b64, anchorDay) {
+export function decodeHistory(b64, anchorDay, readingDays = []) {
   const bytes = Uint8Array.from(atob(b64 || ''), (ch) => ch.charCodeAt(0))
-  const read = (n) => n >= 0 && n < bytes.length * 8 && ((bytes[n >> 3] >> (n & 7)) & 1) === 1
-  const anchor = new Date(EPOCH + anchorDay * 86400000)
+  const extra = new Set(readingDays)
+  const today = localDay(new Date())
+  const latest = readingDays.filter((day) => day <= today).sort().at(-1)
+  const original = EPOCH + anchorDay * 86400000
+  const anchor = new Date(Math.max(original, latest ? Date.parse(`${latest}T00:00:00Z`) : original))
+  const shift = (anchor.getTime() - original) / 86400000
+  const read = (n) => {
+    if (n < 0) return false
+    const day = new Date(anchor.getTime() - n * 86400000).toISOString().slice(0, 10)
+    const bit = n - shift
+    return extra.has(day) || (bit >= 0 && bit < bytes.length * 8 && ((bytes[bit >> 3] >> (bit & 7)) & 1) === 1)
+  }
   const anchorRow = (anchor.getUTCDay() + 6) % 7 // Monday = 0
   return { read, anchor, anchorRow }
 }
@@ -67,8 +77,8 @@ const deviceList = (devices) => {
   return [...counts].map(([name, n]) => (n > 1 ? `${n} ${name} readers` : name)).join(', ')
 }
 
-function Heatmap({ summary }) {
-  const { read, anchor, anchorRow } = decodeHistory(summary.history_b64, summary.anchor_day)
+function Heatmap({ summary, activity }) {
+  const { read, anchor, anchorRow } = decodeHistory(summary.history_b64, summary.anchor_day, activity?.reading_days)
   let days = 0
   for (let n = 0; n < 365; n++) if (read(n)) days++
   const cols = Array.from({ length: WEEKS }, (_, c) =>
@@ -327,13 +337,14 @@ function calendarRange(scale, back, today) {
   return { weeks, first, last, label: `${fmt(first, opts)} to ${fmt(last > today ? today : last, { month: 'short', year: 'numeric' })}` }
 }
 
-function ReadingCalendar({ days, books = [] }) {
+function ReadingCalendar({ days, readingDays = [], books = [] }) {
   const [scale, setScale] = useState('year')
   const [back, setBack] = useState(0)
   const [sharing, setSharing] = useState(false)
   const scroller = useRef(null)
   // Any sync marks a reading day; pages read deepen the shade.
   const byDay = new Map(days.filter((d) => d.syncs > 0 || d.pages > 0).map((d) => [d.day, d.pages]))
+  for (const day of readingDays) if (!byDay.has(day)) byDay.set(day, 0)
   const max = Math.max(...byDay.values(), 1)
   const level = (day) => (!byDay.has(day) ? 0 : Math.max(1, Math.min(4, Math.ceil((byDay.get(day) / max) * 4))))
   const today = new Date()
@@ -787,7 +798,7 @@ export default function Stats({ session, tab = '', summary, activity, books }) {
               ['Books finished', summary.completed],
             ]}
           />
-          <Heatmap summary={summary} />
+          <Heatmap summary={summary} activity={activity} />
           <div className="md:grid md:grid-cols-2 md:gap-4">
             <Bars title="Time of day" labels={['Morning', 'Afternoon', 'Evening', 'Night']} values={summary.tod} />
             <Bars title="Day of week" labels={['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']} values={summary.dow} />
@@ -797,7 +808,7 @@ export default function Stats({ session, tab = '', summary, activity, books }) {
           </p>
         </>
       ) : (
-        activity && <ReadingCalendar days={activity.days} books={books} />
+        activity && <ReadingCalendar days={activity.days} readingDays={activity.reading_days} books={books} />
       )}
     </div>
   )

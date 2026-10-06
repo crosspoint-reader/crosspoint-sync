@@ -52,6 +52,9 @@ export interface BookActivity {
 export interface Activity {
   pages_total: number;
   books: BookActivity[];
+  /** Reading-grid dates from syncs and a book's chosen start and finish days.
+   *  These dates do not add pages, time, sessions, or syncs. */
+  reading_days: string[];
   /** Local-day buckets (YYYY-MM-DD) with syncs, and print pages read that day, oldest first. */
   days: { day: string; pages: number; syncs: number; books: DayBook[] }[];
 }
@@ -88,11 +91,13 @@ export function computeActivity(
   }
 
   const books: BookActivity[] = [];
+  const readingDays = new Set<string>();
   const days = new Map<string, { pages: number; syncs: number; books: Map<string, DayBook> }>();
   // The day bucket for a sync, and this book's entry in it (opened at position `from`).
   const dayKey = (at: number) => new Date((at - tzOffsetMinutes * 60) * 1000).toISOString().slice(0, 10);
   const dayOf = (at: number, document: string, from: number) => {
     const key = dayKey(at);
+    readingDays.add(key);
     let d = days.get(key);
     if (!d) days.set(key, (d = { pages: 0, syncs: 0, books: new Map() }));
     let b = d.books.get(document);
@@ -146,6 +151,10 @@ export function computeActivity(
     const manualStart = localNoon(info?.start_date ?? undefined);
     const datedStart = manualStart ?? localNoon(startDates.get(document));
     const started = datedStart ?? list[0].at;
+    // Explicit dates mark only their own days, without inventing daily progress.
+    // Resolve each endpoint independently: manual -> CrossInk -> server history.
+    if (datedStart !== null) readingDays.add(dayKey(datedStart));
+    if (datedFinish !== null && finished === datedFinish) readingDays.add(dayKey(datedFinish));
     let daysToFinish: number | null = null;
     // A manual "finished" (status_at) marks when it was tapped, not when it was read.
     const realFinish = finished !== null && (finished === datedFinish || finished === logFinish);
@@ -170,6 +179,7 @@ export function computeActivity(
   return {
     pages_total: pagesTotal,
     books: books.sort((a, b) => b.last_at - a.last_at),
+    reading_days: [...readingDays].sort(),
     days: [...days]
       .sort(([a], [b]) => (a < b ? -1 : 1))
       .map(([day, d]) => ({
