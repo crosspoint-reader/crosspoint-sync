@@ -134,3 +134,36 @@ describe('manual book info, cover candidates, all clippings', () => {
     ]);
   });
 });
+
+describe('covers for non-Latin titles', () => {
+  it('finds a Japanese book in the Japanese Apple Books store and matches it by its title', async () => {
+    const { findBookInfo } = await import('../src/models/cover.js');
+    const stores: string[] = [];
+    const http: HttpTransport = async (url) => {
+      if (url.includes('itunes')) {
+        const store = new URL(url).searchParams.get('country')!;
+        stores.push(store);
+        return json({
+          results: store === 'jp'
+            ? [
+                { trackName: '変な家(6)', artistName: '雨穴 & 綾野暁', artworkUrl100: 'https://img/v6/100x100bb.jpg' },
+                { trackName: '変な家2 ～11の間取り図～', artistName: '雨穴', artworkUrl100: 'https://img/v2/100x100bb.jpg' },
+              ]
+            : [],
+        });
+      }
+      return json({ docs: [] });
+    };
+    const info = await findBookInfo(http, '変な家２ ～11の間取り図～', '雨穴', {});
+    expect(stores).toEqual(['jp']);
+    expect(info.cover).toBe('https://img/v2/600x600bb.jpg');
+  });
+
+  it('keeps letters and digits from every script when normalizing', async () => {
+    const { normalizeText, scoreCandidate } = await import('../src/connectors/matching.js');
+    expect(normalizeText('変な家２ ～11の間取り図～')).toBe('変な家2 11の間取り図');
+    expect(normalizeText('Café Society')).toBe('cafe society');
+    // A different volume of the same series doesn't pass for this one.
+    expect(scoreCandidate('変な家２ ～11の間取り図～', '雨穴', { externalId: 'x', title: '変な家(6)', author: '雨穴 & 綾野暁' })).toBeLessThan(0.6);
+  });
+});

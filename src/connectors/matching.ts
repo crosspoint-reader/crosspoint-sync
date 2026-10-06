@@ -8,11 +8,12 @@ import type { DocumentMeta } from './types.js';
 
 /** Fold diacritics, lowercase, drop punctuation, collapse whitespace. */
 export function normalizeText(s: string): string {
+  // Letters and digits in any script: an a-z-only rule reduced "変な家２ ～11の間取り図～" to "2 11".
   return s
     .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '') // combining marks
+    .replace(/\p{M}/gu, '') // combining marks (accents, kana voicing marks)
     .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }

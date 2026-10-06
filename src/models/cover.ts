@@ -45,8 +45,17 @@ async function safe(p: Promise<BookCandidate[]>): Promise<BookCandidate[]> {
   }
 }
 
+// Apple Books is per country: a Japanese book is only in the Japanese store.
+function storeFor(text: string): string {
+  if (/[\u3040-\u30ff]/.test(text)) return 'jp'; // kana
+  if (/[\uac00-\ud7af]/.test(text)) return 'kr'; // hangul
+  if (/[\u4e00-\u9fff]/.test(text)) return 'tw'; // han without kana: Chinese
+  return 'us';
+}
+
 async function itunes(http: HttpTransport, title: string, author: string): Promise<BookCandidate[]> {
-  const q = new URLSearchParams({ term: `${title} ${author}`.trim(), entity: 'ebook', limit: '10', country: 'us' });
+  const term = `${title} ${author}`.trim();
+  const q = new URLSearchParams({ term, entity: 'ebook', limit: '10', country: storeFor(term) });
   const res = await http(`https://itunes.apple.com/search?${q}`, { method: 'GET', signal: AbortSignal.timeout(8000) });
   if (res.status !== 200) return [];
   const body = (await res.json()) as { results?: { trackName?: string; artistName?: string; artworkUrl100?: string }[] };
