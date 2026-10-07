@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ChartColumn, CloudOff, Compass, Quote, Eye, EyeOff, LibraryBig, Loader2, Lock, Send as SendIcon, Server, Settings as SettingsIcon, User } from 'lucide-react'
 import { useTheme } from './theme.js'
 import { DEFAULT_SERVER, api, hostedServer, isApp, lastServer, loadSession, login, logout, offline, cached, register, saveSession } from './api.js'
-import { ErrorNote, PageSkeleton, RefreshPill, Toaster, useLoad } from './ui.jsx'
+import { ErrorNote, LoadCacheProvider, PageSkeleton, RefreshPill, Toaster, useLoad } from './ui.jsx'
 import Library from './Library.jsx'
 import Book from './Book.jsx'
 import Stats from './Stats.jsx'
@@ -11,7 +11,7 @@ import Wallpaper from './Wallpaper.jsx'
 import Settings, { Matches } from './Settings.jsx'
 import Browse from './Browse.jsx'
 import Clippings from './Clippings.jsx'
-import { updateWidget } from './widget.js'
+import { clearWidget, updateWidget } from './widget.js'
 import InstallPrompt from './Install.jsx'
 
 // A filled, full-width field with a leading icon: the native mobile idiom.
@@ -382,9 +382,12 @@ function Home({ session, onSession, onLogout, theme }) {
 export default function App() {
   const theme = useTheme()
   const [session, setSession] = useState(loadSession)
+  useEffect(() => {
+    if (!session) clearWidget()
+  }, [session])
   if (!session) return <Login onLogin={setSession} />
   return (
-    <>
+    <LoadCacheProvider key={JSON.stringify([session.server, session.username])}>
       <Home
         session={session}
         theme={theme}
@@ -399,6 +402,6 @@ export default function App() {
       />
       {/* After sign-in, so the card never covers the sign-in button. */}
       <InstallPrompt />
-    </>
+    </LoadCacheProvider>
   )
 }

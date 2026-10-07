@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { makeTestApp, md5, DOC } from './helpers.js';
+import { makeTestApp, md5, DOC, registerUser } from './helpers.js';
 import { resetSessionSecretCache } from '../src/auth/session.js';
 
 type App = ReturnType<typeof makeTestApp>['app'];
@@ -120,6 +120,48 @@ describe('master (website) account', () => {
 });
 
 describe('kosync account linked under a master account', () => {
+  it('uses the app-selected account for reads and writes even with another account cookie', async () => {
+    const { app, db } = makeTestApp();
+    const { cookie } = await signupSession(app, 'uxj4');
+    expect((await createKosync(app, cookie, 'uxj4')).status).toBe(200);
+    const other = await registerUser(app);
+    for (const [username, percentage] of [['uxj4', 0.4], [other.username, 0.3]] as const) {
+      const res = await app.request('/syncs/progress', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', 'x-auth-user': username, 'x-auth-key': username === 'uxj4' ? md5('reader-pw') : other.headers['x-auth-key'] },
+        body: JSON.stringify({ document: DOC, progress: '/body/DocFragment[2]', percentage, device: 'X4', device_id: 'x4' }),
+      });
+      expect(res.status).toBe(200);
+    }
+    const headers = { ...other.headers, cookie };
+    const list = await app.request('/api/v1/progress', { headers });
+    expect(list.status).toBe(200);
+    expect(list.headers.get('Cache-Control')).toBe('no-store');
+    expect((await list.json()).items[0].percentage).toBe(0.3);
+    expect((await (await app.request('/api/v1/progress', { headers: { cookie } })).json()).items[0].percentage).toBe(0.4);
+    const change = await app.request(`/api/v1/documents/${DOC}/status`, { method: 'PUT', headers, body: JSON.stringify({ status: 'finished' }) });
+    expect(change.status).toBe(200);
+    const status = db.prepare('SELECT status FROM documents WHERE user_id = (SELECT id FROM users WHERE username = ?) AND document = ?');
+    expect(status.get(other.username, DOC)).toMatchObject({ status: 'finished' });
+    expect(status.get('uxj4', DOC)).not.toMatchObject({ status: 'finished' });
+    db.close();
+  });
+
+  it('rejects invalid or incomplete app credentials instead of falling back to a valid cookie', async () => {
+    const { app, db } = makeTestApp();
+    const { cookie } = await signupSession(app, 'uxj4');
+    await createKosync(app, cookie, 'uxj4');
+    for (const headers of [
+      { 'x-auth-user': 'uxj4', 'x-auth-key': md5('wrong') },
+      { 'x-auth-user': 'uxj4' },
+      { 'x-auth-key': md5('reader-pw') },
+      { 'x-auth-user': '', 'x-auth-key': '' },
+    ]) {
+      expect((await app.request('/api/v1/progress', { headers: { cookie, ...headers } })).status).toBe(401);
+    }
+    db.close();
+  });
+
   it('create a kosync account with a chosen password; reader + web both work', async () => {
     const { app } = makeTestApp();
     const { cookie } = await signupSession(app, 'julia');

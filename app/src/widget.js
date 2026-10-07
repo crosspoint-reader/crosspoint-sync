@@ -4,6 +4,18 @@ import { http, isApp } from './api.js'
 // Feeds the home screen widget: Android through MainActivity's CrossPointWidget
 // bridge, iOS through the Rust update_widget command (App Group container).
 let last = ''
+let version = 0
+
+async function publish(data, cover) {
+  if (window.CrossPointWidget) window.CrossPointWidget.update(JSON.stringify(data), cover)
+  else if (isApp) await invoke('update_widget', { json: JSON.stringify(data), cover }).catch(() => {})
+}
+
+export function clearWidget() {
+  version++
+  last = ''
+  return publish({ label: 'CROSSPOINT SYNC', title: 'Sign in to see your reading', author: '', percent: -1, stats: '' }, '')
+}
 
 async function coverBase64(url) {
   try {
@@ -39,7 +51,7 @@ export async function updateWidget({ books, summary, activity }) {
   const key = JSON.stringify([data, current?.cover_url])
   if (key === last) return
   last = key
+  const currentVersion = ++version
   const cover = current?.cover_url ? await coverBase64(current.cover_url) : ''
-  if (window.CrossPointWidget) window.CrossPointWidget.update(JSON.stringify(data), cover)
-  else await invoke('update_widget', { json: JSON.stringify(data), cover }).catch(() => {})
+  if (currentVersion === version) await publish(data, cover)
 }

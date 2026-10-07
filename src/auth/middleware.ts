@@ -103,6 +103,12 @@ export function sessionOrKeyAuth(db: DB): MiddlewareHandler<AppEnv> {
     'SELECT id, username FROM users WHERE account_id = ?'
   );
   return async (c, next) => {
+    c.header('Cache-Control', 'no-store');
+    // An app/device explicitly selects its sync account. A browser cookie left
+    // by the web dashboard must not override that choice (or mask a bad key).
+    if (c.req.header('x-auth-user') !== undefined || c.req.header('x-auth-key') !== undefined) {
+      return headerAuth(c, next);
+    }
     const session = verifySession(getCookie(c, SESSION_COOKIE));
     if (session) {
       const account = getAccount.get(session.uid) as { id: number; handle: string } | undefined;

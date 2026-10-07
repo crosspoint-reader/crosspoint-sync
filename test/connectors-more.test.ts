@@ -875,6 +875,36 @@ describe('bookorbit connector', () => {
     fake.on('/auth/login', 401, {});
     const v = await bookorbitConnector.validate(cred('bad'), fake.transport);
     expect(v.ok).toBe(false);
+    expect(fake.calls).toHaveLength(1);
+  });
+
+  it('falls back to password login when an older server rejects native-client fields', async () => {
+    const fake = fakeTransport();
+    fake.on('/auth/login', 200, { accessToken: 'legacy-at' });
+    fake.on('/auth/me', 200, { username: 'legacy' });
+    const http: HttpTransport = async (url, init) => {
+      if (url.endsWith('/auth/login') && JSON.parse(init.body!).clientKind) {
+        fake.on('/auth/login', 400, { message: [
+          'property clientKind should not exist', 'property deviceLabel should not exist',
+        ] });
+        const response = await fake.transport(url, init);
+        fake.on('/auth/login', 200, { accessToken: 'legacy-at' });
+        return response;
+      }
+      return fake.transport(url, init);
+    };
+    expect(await bookorbitConnector.validate(cred('legacy'), http)).toEqual({ ok: true, accountLabel: 'legacy @ orbit.test' });
+    const logins = fake.calls.filter((c) => c.url.endsWith('/auth/login'));
+    expect(logins).toHaveLength(2);
+    expect(logins.every((c) => c.url === 'https://orbit.test/api/v1/auth/login')).toBe(true);
+    expect(JSON.parse(logins[1].body!)).toEqual({ username: 'legacy', password: 'pw' });
+  });
+
+  it('does not retry unrelated login validation errors', async () => {
+    const fake = fakeTransport();
+    fake.on('/auth/login', 400, { message: ['property clientKind should not exist', 'username should not be empty'] });
+    expect(await bookorbitConnector.validate(cred('invalid'), fake.transport)).toEqual({ ok: false, error: 'BookOrbit login failed (400)' });
+    expect(fake.calls).toHaveLength(1);
   });
 
   it('matches by title/author and caches the EPUB file id', async () => {

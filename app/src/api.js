@@ -45,22 +45,36 @@ export function saveSession(session) {
 }
 
 export function logout() {
+  sessionVersion++
   localStorage.removeItem(KEY)
+  clearOffline()
 }
 
 // Offline: every successful GET is kept on the device; when the network is down
 // the last copy is served and an event lets the UI say so.
 // ponytail: localStorage (~5 MB); move to IndexedDB if libraries outgrow it.
-const OFFLINE = 'crosspoint-offline:'
+const OFFLINE_PREFIX = 'crosspoint-offline:'
+// Older copies may have been filled by the dashboard cookie's account.
+const OFFLINE = `${OFFLINE_PREFIX}v2:`
 export const offline = new EventTarget()
+let sessionVersion = 0
 
-async function call(session, path, init = {}) {
+function clearOffline() {
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith(OFFLINE_PREFIX)) localStorage.removeItem(key)
+  }
+}
+
+async function call(session, path, init = {}, keepOffline = true) {
+  const version = sessionVersion
   const key = `${OFFLINE}${session.username}@${session.server}${path}`
-  const isGet = !init.method || init.method === 'GET'
+  const isGet = keepOffline && (!init.method || init.method === 'GET')
   let res
   try {
     res = await http(session.server + path, {
       ...init,
+      credentials: 'omit',
+      cache: 'no-store',
       headers: {
         'content-type': 'application/json',
         'x-auth-user': session.username,
@@ -68,7 +82,7 @@ async function call(session, path, init = {}) {
       },
     })
   } catch (e) {
-    const saved = isGet && localStorage.getItem(key)
+    const saved = isGet && version === sessionVersion && localStorage.getItem(key)
     if (!saved) throw e
     offline.dispatchEvent(new Event('offline'))
     return JSON.parse(saved)
@@ -80,7 +94,7 @@ async function call(session, path, init = {}) {
     throw Object.assign(new Error(body?.message || `Server error ${res.status}`), { status: res.status })
   }
   const data = await res.json()
-  if (isGet) {
+  if (isGet && version === sessionVersion) {
     offline.dispatchEvent(new Event('online'))
     try {
       localStorage.setItem(key, JSON.stringify(data))
@@ -133,7 +147,10 @@ export async function login(server, username, password) {
     username: username.trim(),
     key: SparkMD5.hash(password),
   }
-  await call(session, '/users/auth')
+  // Sign-in must be verified online, never accepted from an old offline copy.
+  await call(session, '/users/auth', {}, false)
+  sessionVersion++
+  clearOffline()
   localStorage.setItem(KEY, JSON.stringify(session))
   localStorage.setItem(LAST_SERVER, JSON.stringify(session.server))
   return session

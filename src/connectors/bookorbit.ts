@@ -82,12 +82,22 @@ async function login(http: HttpTransport, c: OrbitCred): Promise<Session> {
     if (res.status === 200) return store(res);
   }
   sessions.delete(key);
-  const res = await post('/auth/login', {
+  let res = await post('/auth/login', {
     username: c.username,
     password: c.password,
     clientKind: 'native',
     deviceLabel: 'CrossPoint Sync',
   });
+  if (res.status === 400) {
+    // Older servers reject native-client fields. Retry only that validation error.
+    const body = await res.json().catch(() => null) as { message?: unknown } | null;
+    const errors = body?.message;
+    if (Array.isArray(errors) && errors.length > 0 && errors.every((error) =>
+      error === 'property clientKind should not exist' || error === 'property deviceLabel should not exist'
+    )) {
+      res = await post('/auth/login', { username: c.username, password: c.password });
+    }
+  }
   if (res.status === 200) return store(res);
   if (res.status === 401 || res.status === 403) throw new ConnectorOperationError('invalid BookOrbit username or password', false, true);
   if (res.status === 429) throw new ConnectorOperationError('BookOrbit rate limited the login', true);

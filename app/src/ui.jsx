@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import { BookOpen, CircleAlert, CircleCheck, CircleX, Pause } from 'lucide-react'
 import { api, isApp } from './api.js'
 
@@ -93,11 +93,18 @@ export function ErrorNote({ error }) {
 
 // Tiny fetch hook: [data, error, reload].
 // Last result per `memo` key: revisiting a screen shows it instantly while it refreshes.
-const remembered = new Map()
+const LoadCache = createContext(null)
+
+// Lives with the signed-in screen tree; signing out discards every screen cache.
+export function LoadCacheProvider({ children }) {
+  const [cache] = useState(() => new Map())
+  return <LoadCache.Provider value={cache}>{children}</LoadCache.Provider>
+}
 
 export function useLoad(fn, deps, memo, initial) {
+  const remembered = useContext(LoadCache)
   // `initial` (e.g. the saved offline copy) paints right away while fn() refreshes.
-  const [state, setState] = useState(() => ({ data: (memo ? remembered.get(memo) : null) ?? initial?.() ?? null, error: null }))
+  const [state, setState] = useState(() => ({ data: (memo ? remembered?.get(memo) : null) ?? initial?.() ?? null, error: null }))
   const [loading, setLoading] = useState(true)
   const [tick, setTick] = useState(0)
   useEffect(() => {
@@ -106,8 +113,10 @@ export function useLoad(fn, deps, memo, initial) {
     fn()
       .then(
         (data) => {
-          if (memo) remembered.set(memo, data)
-          if (live) setState({ data, error: null })
+          if (live) {
+            if (memo) remembered?.set(memo, data)
+            setState({ data, error: null })
+          }
         },
         // A failed refresh keeps whatever is already on screen.
         (error) => live && setState((s) => (s.data ? s : { data: null, error }))
