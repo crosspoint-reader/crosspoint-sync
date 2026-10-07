@@ -18,6 +18,40 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+describe('daily reading time', () => {
+  const summary = {
+    devices: [{ device: 'CrossInk' }], history_b64: '', anchor_day: anchorDay('2026-09-30'),
+    seconds: 3600, pages: 10, sessions: 1, completed: 0, current_streak: 0, streak: 0,
+    tod: [0, 0, 0, 0], dow: [0, 0, 0, 0, 0, 0, 0],
+  }
+
+  it.each([
+    ['missing', undefined],
+    ['empty', []],
+    ['older than seven days', [{ date: '2026-09-23', seconds: 4200 }]],
+    ['future only', [{ date: '2026-10-01', seconds: 4200 }]],
+  ])('hides both tiles when daily history is %s', (_, daily) => {
+    const { queryByText, getByText } = render(<Stats session={{}} books={[]} summary={{ ...summary, daily }} />)
+    expect(queryByText('Today')).toBeNull()
+    expect(queryByText('7-day average')).toBeNull()
+    expect(getByText('Time read').nextElementSibling.textContent).toBe('1h')
+  })
+
+  it('shows the weekly average without a missing Today stat', () => {
+    const daily = [{ date: '2026-09-24', seconds: 4200 }]
+    const { queryByText, getByText } = render(<Stats session={{}} books={[]} summary={{ ...summary, daily }} />)
+    expect(queryByText('Today')).toBeNull()
+    expect(getByText('7-day average').nextElementSibling.textContent).toBe('10m')
+  })
+
+  it.each([0, 4200])('shows both tiles for a recorded Today value of %s seconds', (seconds) => {
+    const daily = [{ date: '2026-09-30', seconds }]
+    const { getByText } = render(<Stats session={{}} books={[]} summary={{ ...summary, daily }} />)
+    expect(getByText('Today').nextElementSibling.textContent).toBe(seconds ? '1h 10m' : '0m')
+    expect(getByText('7-day average').nextElementSibling.textContent).toBe(seconds ? '10m' : '0m')
+  })
+})
+
 describe('reading grids', () => {
   it('adds chosen dates to device history and preserves existing bits when the anchor moves', () => {
     // Device history says Aug 11 was read. Manual finish is Aug 16.

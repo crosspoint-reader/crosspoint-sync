@@ -248,8 +248,10 @@ function WhatYouRead({ books }) {
 }
 
 function Tiles({ tiles, action }) {
+  // Four columns keep eight tiles from leaving an empty cell.
+  const cols = tiles.length % 4 === 0 ? 'md:grid-cols-4' : 'md:grid-cols-3'
   return (
-    <Card className="relative mt-4 grid grid-cols-2 gap-px overflow-hidden bg-stone-100 md:grid-cols-3">
+    <Card className={`relative mt-4 grid grid-cols-2 gap-px overflow-hidden bg-stone-100 ${cols}`}>
       {action}
       {tiles.map(([l, v]) => (
         <div key={l} className="bg-surface px-4 py-3">
@@ -263,6 +265,23 @@ function Tiles({ tiles, action }) {
 
 const DAY_MS = 86400000
 const localDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+// Missing stats stay unknown; a recorded week averages over all seven calendar days.
+function dailyReading(daily) {
+  const byDay = new Map(daily.map((d) => [d.date, d.seconds]))
+  const now = new Date()
+  now.setHours(12, 0, 0, 0)
+  let total = 0
+  let hasWeek = false
+  for (let i = 0; i < 7; i++) {
+    const seconds = byDay.get(localDay(new Date(now.getTime() - i * DAY_MS)))
+    if (seconds != null) {
+      total += seconds
+      hasWeek = true
+    }
+  }
+  return { today: byDay.get(localDay(now)), average: hasWeek ? total / 7 : null }
+}
 
 // Print pages per week (Monday start), newest week last.
 function weeklyPages(days, weeks = 12) {
@@ -760,6 +779,8 @@ function Timeline({ session, activity, books }) {
 
 export default function Stats({ session, tab = '', summary, activity, books }) {
   const hasTime = summary?.devices?.length > 0
+  // Only CrossInk firmware with daily tracking sends per-day reading time.
+  const daily = summary?.daily?.length ? dailyReading(summary.daily) : null
   const [sharing, setSharing] = useState(false)
   const header = (
     <>
@@ -792,6 +813,8 @@ export default function Stats({ session, tab = '', summary, activity, books }) {
             tiles={[
               ['Current streak', `${summary.current_streak} days`],
               ['Longest streak', `${summary.streak} days`],
+              ...(daily?.today != null ? [['Today', duration(daily.today)]] : []),
+              ...(daily?.average != null ? [['7-day average', duration(daily.average)]] : []),
               ['Time read', duration(summary.seconds)],
               ['Pages turned', summary.pages.toLocaleString()],
               ['Sessions', summary.sessions.toLocaleString()],
