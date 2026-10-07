@@ -1,5 +1,6 @@
 import type { DB } from '../db/db.js';
 import { nowSeconds } from './sync.js';
+import { completedBookStatsSql } from './stats.js';
 
 export const AUTO_PAUSE_DAYS = 30;
 // Matches the derived "finished" in GET /progress.
@@ -19,6 +20,7 @@ export function autoPause(db: DB, opts: { userId?: number; document?: string } =
       WHERE (? IS NULL OR l.user_id = ?) AND (? IS NULL OR l.document = ?)
       GROUP BY l.user_id, l.document
      HAVING MAX(l.at) < ?
+        AND NOT ${completedBookStatsSql('l.user_id', 'l.document')}
         AND (SELECT p.percentage FROM progress p WHERE p.user_id = l.user_id AND p.document = l.document
               ORDER BY p.updated_at DESC, p.device_id LIMIT 1) < ${FINISHED}
      ON CONFLICT(user_id, document) DO UPDATE SET

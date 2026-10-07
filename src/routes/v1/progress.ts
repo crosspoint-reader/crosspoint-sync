@@ -8,6 +8,7 @@ import { fanOutProgress } from '../../connectors/fanout.js';
 import { aliasesByDocument, resolveDocument } from '../../models/merge.js';
 import { enrichSoon } from '../../models/cover.js';
 import { autoPause } from '../../models/pause.js';
+import { completedBookStatsSql } from '../../models/stats.js';
 
 export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async () => {}): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -45,7 +46,8 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
         `SELECT p.document, p.device_id, p.device, p.percentage, p.progress, p.position, p.updated_at,
                 d.title, d.author, d.filename, d.cover_url, d.page_count,
                 d.hc_slug, d.moods, d.genres, d.content_warnings, d.rating, d.series, d.series_position, d.release_year,
-                COALESCE(d.status, CASE WHEN p.percentage >= 0.98 THEN 'finished' ELSE 'reading' END) AS status,
+                COALESCE(d.status, CASE WHEN p.percentage >= 0.98 OR ${completedBookStatsSql('p.user_id', 'p.document')}
+                  THEN 'finished' ELSE 'reading' END) AS status,
                 d.status_at, d.pause_reason
          FROM progress p
          LEFT JOIN documents d ON d.user_id = p.user_id AND d.document = p.document

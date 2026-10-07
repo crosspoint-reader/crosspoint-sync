@@ -41,6 +41,19 @@ export interface BookStatsSnapshot {
   dow: number[];
 }
 
+/** SQL predicate for device completion, including copies merged with stats.
+ *  Arguments are internal SQL column expressions, never request values. */
+export function completedBookStatsSql(userId: string, document: string): string {
+  return `EXISTS (
+    SELECT 1 FROM stats_device_book s
+    WHERE s.user_id = ${userId} AND json_extract(s.payload, '$.completed') = 1
+      AND (s.document = ${document} OR s.document IN (
+        SELECT a.alias FROM document_aliases a
+        WHERE a.user_id = ${userId} AND a.document = ${document} AND a.merge_stats = 1
+      ))
+  )`;
+}
+
 function isCount(v: unknown): v is number {
   return typeof v === 'number' && Number.isInteger(v) && v >= 0;
 }

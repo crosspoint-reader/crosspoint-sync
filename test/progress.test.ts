@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DOC, makeTestApp, registerUser } from './helpers.js';
 
 const POSITION = {
@@ -10,6 +10,85 @@ const POSITION = {
   anchor: 'ch08-sec2',
   xpath: '/body/DocFragment[8]/body/div[2]/p[4]/text()[1].96',
 };
+
+describe('CrossInk completion in the library', () => {
+  const ALIAS = 'ffeeddccbbaa99887766554433221100';
+  const stats = (completed: boolean, document = DOC) => ({
+    document, v: 5, sessions: 1, seconds: 600, pages: 10, completed,
+    avg_fwd: 12, pace_n: 10, eta: 0, start_manual: false, finish_manual: false,
+    start_date: 0, finished_date: 0, tod: [0, 0, 0, 0], dow: [0, 0, 0, 0, 0, 0, 0],
+  });
+
+  async function setup() {
+    const { app, db } = makeTestApp();
+    const { headers } = await registerUser(app);
+    const push = (percentage = 0.6) => app.request('/api/v1/progress', {
+      method: 'PUT', headers,
+      body: JSON.stringify({ document: DOC, progress: 'last-read-page', percentage, device_id: 'reader' }),
+    });
+    const upload = (completed: boolean, document = DOC, deviceId = 'reader', auth = headers) =>
+      app.request('/api/v1/stats/books', {
+        method: 'PUT', headers: auth,
+        body: JSON.stringify({ device_id: deviceId, items: [stats(completed, document)] }),
+      });
+    const book = async () => (await (await app.request('/api/v1/progress', { headers })).json()).items[0];
+    await push();
+    return { app, db, headers, push, upload, book };
+  }
+
+  afterEach(() => vi.useRealTimers());
+
+  it('marks a book finished below 98% without changing its synced position', async () => {
+    const { app, headers, upload, book } = await setup();
+    expect((await book()).status).toBe('reading');
+    expect((await upload(true)).status).toBe(200);
+    expect(await book()).toMatchObject({ status: 'finished', percentage: 0.6, progress: 'last-read-page' });
+    const synced = await (await app.request(`/syncs/progress/${DOC}`, { headers })).json();
+    expect(synced.percentage).toBe(0.6);
+    expect(synced.progress).toBe('last-read-page');
+    await upload(false);
+    expect((await book()).status).toBe('reading');
+  });
+
+  it('combines completion across devices without leaking another account’s stats', async () => {
+    const { app, upload, book } = await setup();
+    const other = await registerUser(app);
+    await upload(true, DOC, 'reader', other.headers);
+    expect((await book()).status).toBe('reading');
+    await upload(true, DOC, 'second-reader');
+    await upload(false);
+    expect((await book()).status).toBe('finished');
+  });
+
+  it.each([true, false])('honors the stats choice when merging copies: %s', async (mergeStats) => {
+    const { app, headers, upload, book } = await setup();
+    await upload(true, ALIAS);
+    const merged = await app.request('/api/v1/documents/merge', {
+      method: 'POST', headers, body: JSON.stringify({ document: ALIAS, into: DOC, stats: mergeStats }),
+    });
+    expect(merged.status).toBe(200);
+    expect((await book()).status).toBe(mergeStats ? 'finished' : 'reading');
+  });
+
+  it.each(['reading', 'paused', 'dnf', 'finished'])('preserves a manual %s status', async (status) => {
+    const { app, headers, upload, book } = await setup();
+    await upload(true);
+    const set = await app.request(`/api/v1/documents/${DOC}/status`, {
+      method: 'PUT', headers, body: JSON.stringify({ status }),
+    });
+    expect(set.status).toBe(200);
+    expect((await book()).status).toBe(status);
+  });
+
+  it('does not auto-pause a completed book whose last page was synced over 30 days ago', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-01T12:00:00Z'));
+    const { upload, book } = await setup();
+    await upload(true);
+    vi.setSystemTime(new Date('2026-10-07T12:00:00Z'));
+    expect(await book()).toMatchObject({ status: 'finished', pause_reason: null });
+  });
+});
 
 describe('v1 rich progress', () => {
   it('PUT /api/v1/progress stores position; GET returns per-device rows', async () => {
