@@ -1,6 +1,6 @@
 # Design: Incremental Bulk Sync
 
-Status: **draft / not implemented**
+Status: **in progress** (server step 2 implemented)
 
 Make CrossInk's bulk sync actions (Sync Books, today called Sync All Books, and Sync Folder) cost
 work proportional to the number of books that **changed**, not the size of the library. Spans both
@@ -216,8 +216,9 @@ Migration `0024_progress_change_seq.sql`:
 
 ```sql
 CREATE TABLE change_seq (id INTEGER PRIMARY KEY CHECK (id = 1), value INTEGER NOT NULL);
-INSERT INTO change_seq (id, value) VALUES (1, 0);
 ALTER TABLE progress ADD COLUMN change_seq INTEGER NOT NULL DEFAULT 0;
+UPDATE progress SET change_seq = rowid;
+INSERT INTO change_seq (id, value) VALUES (1, COALESCE((SELECT MAX(change_seq) FROM progress), 0));
 CREATE INDEX idx_progress_change_seq ON progress(user_id, change_seq);
 ```
 
@@ -225,7 +226,9 @@ CREATE INDEX idx_progress_change_seq ON progress(user_id, change_seq);
 transaction. KOSync PUT, v1 PUT, and fan-in already go through it. Document merges do not:
 `mergeDocuments` (`models/merge.ts`) rewrites `progress` rows directly, so it must also stamp a new
 `change_seq` on the canonical document's rows. Otherwise a user's merge in the web app never reaches
-devices until the next progress write. Existing rows keep `0` and are returned by `since=0`.
+devices until the next progress write. The migration stamps existing rows with their `rowid` (and
+starts the counter at the highest one), so they are returned by `since=0` and a device's cursor moves
+past them instead of replaying them on every sync.
 
 ### History check for a device's first write
 
@@ -263,7 +266,7 @@ Response:
       "aliases": ["c3d4..."],
       "percentage": 0.4213,
       "progress": "/body/DocFragment[12]/body/p[3]/text().0",
-      "position": "{...}",
+      "position": { "pctQ": 421300, "spine": 11, "page": 4, "pages": 30 },
       "device": "Phone",
       "device_id": "...",
       "timestamp": 1791234567
@@ -274,6 +277,8 @@ Response:
 
 - One entry per document: the newest row (same tie-break as `GET /api/v1/progress`), included only
   if that row's `change_seq > since`.
+- `position` is the parsed rich position object, or `null` for rows written by plain KOSync
+  clients.
 - `document` is canonical; `aliases` comes from `document_aliases` so the device can match whichever
   hash it uses.
 - `device` self-exclusion: the server picks each document's newest row first; if that row was

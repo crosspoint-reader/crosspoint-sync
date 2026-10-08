@@ -14,6 +14,7 @@ import { hashKey, looksLikeMd5, md5Hex } from '../auth/password.js';
 import { parsePosition } from '../models/position.js';
 import { resolveDocument } from '../models/merge.js';
 import { nowSeconds } from '../models/sync.js';
+import { nextChangeSeq } from '../models/changes.js';
 import { fanOutProgress } from '../connectors/fanout.js';
 import { seedSidecarMatches } from '../connectors/store.js';
 import { getConnector } from '../connectors/registry.js';
@@ -168,12 +169,41 @@ export function nearestProgressSample(
   return row && Math.abs(row.percentage - pct) <= SAMPLE_REACH ? row : null;
 }
 
-export function upsertProgress(db: DB, p: ProgressUpsert): void {
-  // History for server-derived activity stats; skip re-pushes of the same spot.
-  const prev = db
+/** The shared device id every CrossInk reader sent before per-reader ids. */
+export const LEGACY_CROSSINK_DEVICE_ID = 'crossink-device';
+
+/**
+ * The percentage a progress write is compared against to decide whether it is
+ * a new history entry. Normally that device's own previous row. A device with
+ * no row yet compares against:
+ * 1. the legacy shared CrossInk row, for a per-reader CrossInk id, so switching
+ *    ids logs exactly what the shared row would have; otherwise
+ * 2. the document's newest row from any device, so a new reader re-pushing a
+ *    position another device already reported adds no reading day.
+ */
+function previousPercentage(db: DB, p: ProgressUpsert): number | undefined {
+  const own = db
     .prepare('SELECT percentage FROM progress WHERE user_id = ? AND document = ? AND device_id = ?')
     .get(p.userId, p.document, p.deviceId) as { percentage: number } | undefined;
-  if (prev?.percentage !== p.percentage) {
+  if (own) return own.percentage;
+  if (p.deviceId.startsWith('crossink-') && p.deviceId !== LEGACY_CROSSINK_DEVICE_ID) {
+    const legacy = db
+      .prepare('SELECT percentage FROM progress WHERE user_id = ? AND document = ? AND device_id = ?')
+      .get(p.userId, p.document, LEGACY_CROSSINK_DEVICE_ID) as { percentage: number } | undefined;
+    if (legacy) return legacy.percentage;
+  }
+  const newest = db
+    .prepare(
+      `SELECT percentage FROM progress WHERE user_id = ? AND document = ?
+       ORDER BY updated_at DESC, device_id LIMIT 1`
+    )
+    .get(p.userId, p.document) as { percentage: number } | undefined;
+  return newest?.percentage;
+}
+
+export function upsertProgress(db: DB, p: ProgressUpsert): void {
+  // History for server-derived activity stats; skip re-pushes of the same spot.
+  if (previousPercentage(db, p) !== p.percentage) {
     db.prepare('INSERT INTO progress_log (user_id, document, device_id, percentage, at) VALUES (?, ?, ?, ?, ?)').run(
       p.userId,
       p.document,
@@ -184,16 +214,29 @@ export function upsertProgress(db: DB, p: ProgressUpsert): void {
     autoUnpause(db, p.userId, p.document, p.updatedAt);
     autoFinish(db, p.userId, p.document, p.percentage, p.updatedAt);
   }
+  // Every write gets a fresh feed sequence number, even a same-spot re-push:
+  // it may have become the document's newest row.
   db.prepare(
-    `INSERT INTO progress (user_id, document, device_id, device, percentage, progress, position, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO progress (user_id, document, device_id, device, percentage, progress, position, updated_at, change_seq)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(user_id, document, device_id) DO UPDATE SET
        device = excluded.device,
        percentage = excluded.percentage,
        progress = excluded.progress,
        position = COALESCE(excluded.position, progress.position),
-       updated_at = excluded.updated_at`
-  ).run(p.userId, p.document, p.deviceId, p.device, p.percentage, p.progress, p.position, p.updatedAt);
+       updated_at = excluded.updated_at,
+       change_seq = excluded.change_seq`
+  ).run(
+    p.userId,
+    p.document,
+    p.deviceId,
+    p.device,
+    p.percentage,
+    p.progress,
+    p.position,
+    p.updatedAt,
+    nextChangeSeq(db)
+  );
   if (p.metadata) {
     upsertDocumentMetadata(db, p.userId, p.document, p.metadata, p.updatedAt);
     // Exact service ids from the plugin sidecar bypass fuzzy matching: seed the

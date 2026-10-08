@@ -9,6 +9,7 @@ import { aliasesByDocument, resolveDocument } from '../../models/merge.js';
 import { enrichSoon } from '../../models/cover.js';
 import { autoPause } from '../../models/pause.js';
 import { completedBookStatsSql } from '../../models/stats.js';
+import { CHANGES_DEFAULT_LIMIT, CHANGES_MAX_LIMIT, listProgressChanges } from '../../models/changes.js';
 
 export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async () => {}): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -138,6 +139,21 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
         };
       }),
     });
+  });
+
+  // Progress change feed for incremental device sync. Registered before
+  // /progress/:document so "changes" is not read as a document hash.
+  app.get('/progress/changes', (c) => {
+    const user = c.get('user');
+    const sinceRaw = Number(c.req.query('since') ?? 0);
+    const since = Number.isFinite(sinceRaw) && sinceRaw > 0 ? Math.floor(sinceRaw) : 0;
+    const limitRaw = Number(c.req.query('limit') || CHANGES_DEFAULT_LIMIT);
+    const limit = Number.isFinite(limitRaw) && limitRaw >= 0
+      ? Math.min(Math.floor(limitRaw), CHANGES_MAX_LIMIT)
+      : CHANGES_DEFAULT_LIMIT;
+    const deviceRaw = c.req.query('device');
+    const device = deviceRaw ? deviceRaw.slice(0, 128) : null;
+    return c.json(listProgressChanges(db, user.id, since, limit, device));
   });
 
   app.get('/progress/:document', async (c) => {
