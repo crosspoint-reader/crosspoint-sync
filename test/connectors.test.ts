@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DOC, makeTestApp, registerUser } from './helpers.js';
-import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
-import type { HttpTransport } from '../src/connectors/types.js';
-import { drainQueue } from '../src/connectors/runner.js';
-import { claimReady } from '../src/connectors/queue.js';
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { claimReady } from "../src/connectors/queue.js";
+import { drainQueue } from "../src/connectors/runner.js";
+import type { HttpTransport } from "../src/connectors/types.js";
+import { resetEncryptionKeyCache } from "../src/crypto/secrets.js";
+import { DOC, makeTestApp, registerUser } from "./helpers.js";
 
 // A programmable fake transport. Records requests; returns queued responses by
 // URL substring match.
@@ -16,12 +16,15 @@ function fakeTransport() {
     // GraphQL operations (Search, mutations) override a broad 'graphql' handler.
     const h = [...handlers]
       .reverse()
-      .find((x) => url.includes(x.match) || (init.body ?? '').includes(x.match));
+      .find(
+        (x) => url.includes(x.match) || (init.body ?? "").includes(x.match),
+      );
     const status = h?.status ?? 200;
     const body = h?.body ?? {};
     return {
       status,
-      text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
+      text: async () =>
+        typeof body === "string" ? body : JSON.stringify(body),
       json: async () => body,
     };
   };
@@ -34,7 +37,7 @@ function fakeTransport() {
   };
 }
 
-const KEY = { TOKEN_ENC_KEY: 'a'.repeat(64) };
+const KEY = { TOKEN_ENC_KEY: "a".repeat(64) };
 
 beforeEach(() => {
   Object.assign(process.env, KEY);
@@ -45,377 +48,552 @@ afterEach(() => {
   resetEncryptionKeyCache();
 });
 
-describe('connector management API', () => {
-  it('lists connectors with encryption status and unlinked state', async () => {
+describe("connector management API", () => {
+  it("lists connectors with encryption status and unlinked state", async () => {
     const fake = fakeTransport();
     const { app } = makeTestApp({}, { connectorTransport: fake.transport });
     const { headers } = await registerUser(app);
-    const res = await app.request('/api/v1/connectors', { headers });
+    const res = await app.request("/api/v1/connectors", { headers });
     const body = await res.json();
-    expect(body.encryption).toBe('enabled');
+    expect(body.encryption).toBe("enabled");
     const ids = body.connectors.map((c: { id: string }) => c.id).sort();
     // The classic (highlights-only) readwise connector is hidden; still
     // registered but not listed. Kindle is stealth: hidden until revealed.
-    expect(ids).toEqual(['audiobookshelf', 'bookfusion', 'bookorbit', 'hardcover', 'kosync', 'microblog', 'readwise-reader', 'spotify']);
-    expect(body.connectors.every((c: { linked: boolean }) => !c.linked)).toBe(true);
+    expect(ids).toEqual([
+      "audiobookshelf",
+      "bookfusion",
+      "bookorbit",
+      "hardcover",
+      "jellyfin",
+      "kosync",
+      "microblog",
+      "readwise-reader",
+      "spotify",
+    ]);
+    expect(body.connectors.every((c: { linked: boolean }) => !c.linked)).toBe(
+      true,
+    );
   });
 
-  it('reveals a stealth connector on demand, and always shows it once linked', async () => {
+  it("reveals a stealth connector on demand, and always shows it once linked", async () => {
     const fake = fakeTransport();
     const { app } = makeTestApp({}, { connectorTransport: fake.transport });
     const { headers } = await registerUser(app);
 
     // Hidden by default.
-    let list = await (await app.request('/api/v1/connectors', { headers })).json();
-    expect(list.connectors.some((c: { id: string }) => c.id === 'kindle')).toBe(false);
+    let list = await (
+      await app.request("/api/v1/connectors", { headers })
+    ).json();
+    expect(list.connectors.some((c: { id: string }) => c.id === "kindle")).toBe(
+      false,
+    );
 
     // Reveal via the landing-page endpoint (idempotent).
-    const reveal = await app.request('/api/v1/connectors/kindle/reveal', { method: 'POST', headers });
+    const reveal = await app.request("/api/v1/connectors/kindle/reveal", {
+      method: "POST",
+      headers,
+    });
     expect(reveal.status).toBe(200);
     expect((await reveal.json()).revealed).toBe(true);
-    list = await (await app.request('/api/v1/connectors', { headers })).json();
-    expect(list.connectors.some((c: { id: string }) => c.id === 'kindle')).toBe(true);
+    list = await (await app.request("/api/v1/connectors", { headers })).json();
+    expect(list.connectors.some((c: { id: string }) => c.id === "kindle")).toBe(
+      true,
+    );
 
     // Non-revealable connectors reject the endpoint.
-    const nope = await app.request('/api/v1/connectors/hardcover/reveal', { method: 'POST', headers });
+    const nope = await app.request("/api/v1/connectors/hardcover/reveal", {
+      method: "POST",
+      headers,
+    });
     expect(nope.status).toBe(400);
 
     // A fresh user who LINKS kindle (e.g. via the extension) sees it without revealing.
     const { headers: headers2 } = await registerUser(app);
-    fake.on('syncMetaData', 200, '<response/>');
-    const { generateKeyPairSync } = await import('node:crypto');
-    const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
-    const good = await app.request('/api/v1/connectors/kindle', {
-      method: 'PUT',
+    fake.on("syncMetaData", 200, "<response/>");
+    const { generateKeyPairSync } = await import("node:crypto");
+    const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const good = await app.request("/api/v1/connectors/kindle", {
+      method: "PUT",
       headers: headers2,
       body: JSON.stringify({
         credential: {
-          adp_token: 'x',
-          private_key: Buffer.from(privateKey.export({ format: 'der', type: 'pkcs8' })).toString('base64'),
-          device_serial: 'd'.repeat(40),
+          adp_token: "x",
+          private_key: Buffer.from(
+            privateKey.export({ format: "der", type: "pkcs8" }),
+          ).toString("base64"),
+          device_serial: "d".repeat(40),
         },
       }),
     });
     expect(good.status).toBe(200);
-    list = await (await app.request('/api/v1/connectors', { headers: headers2 })).json();
-    const kindle = list.connectors.find((c: { id: string }) => c.id === 'kindle');
+    list = await (
+      await app.request("/api/v1/connectors", { headers: headers2 })
+    ).json();
+    const kindle = list.connectors.find(
+      (c: { id: string }) => c.id === "kindle",
+    );
     expect(kindle?.linked).toBe(true);
   });
 
-  it('rejects linking when TOKEN_ENC_KEY is unset', async () => {
+  it("rejects linking when TOKEN_ENC_KEY is unset", async () => {
     delete process.env.TOKEN_ENC_KEY;
     resetEncryptionKeyCache();
     const fake = fakeTransport();
     const { app } = makeTestApp({}, { connectorTransport: fake.transport });
     const { headers } = await registerUser(app);
-    const res = await app.request('/api/v1/connectors/hardcover', {
-      method: 'PUT',
+    const res = await app.request("/api/v1/connectors/hardcover", {
+      method: "PUT",
       headers,
-      body: JSON.stringify({ credential: { token: 'x' } }),
+      body: JSON.stringify({ credential: { token: "x" } }),
     });
     expect(res.status).toBe(403);
   });
 
-  it('validates and links Hardcover, then reports linked', async () => {
+  it("validates and links Hardcover, then reports linked", async () => {
     const fake = fakeTransport();
-    fake.on('graphql', 200, { data: { me: [{ username: 'julia' }] } });
+    fake.on("graphql", 200, { data: { me: [{ username: "julia" }] } });
     const { app } = makeTestApp({}, { connectorTransport: fake.transport });
     const { headers } = await registerUser(app);
-    const link = await app.request('/api/v1/connectors/hardcover', {
-      method: 'PUT',
+    const link = await app.request("/api/v1/connectors/hardcover", {
+      method: "PUT",
       headers,
-      body: JSON.stringify({ credential: { token: 'hc-token' } }),
+      body: JSON.stringify({ credential: { token: "hc-token" } }),
     });
     expect(link.status).toBe(200);
-    expect((await link.json()).account).toBe('julia');
+    expect((await link.json()).account).toBe("julia");
 
-    const list = await (await app.request('/api/v1/connectors', { headers })).json();
-    const hc = list.connectors.find((c: { id: string }) => c.id === 'hardcover');
+    const list = await (
+      await app.request("/api/v1/connectors", { headers })
+    ).json();
+    const hc = list.connectors.find(
+      (c: { id: string }) => c.id === "hardcover",
+    );
     expect(hc.linked).toBe(true);
-    expect(hc.account).toBe('julia');
+    expect(hc.account).toBe("julia");
   });
 
-  it('rejects an invalid credential (validate fails)', async () => {
+  it("rejects an invalid credential (validate fails)", async () => {
     const fake = fakeTransport();
-    fake.on('graphql', 401, {});
+    fake.on("graphql", 401, {});
     const { app } = makeTestApp({}, { connectorTransport: fake.transport });
     const { headers } = await registerUser(app);
-    const res = await app.request('/api/v1/connectors/hardcover', {
-      method: 'PUT',
+    const res = await app.request("/api/v1/connectors/hardcover", {
+      method: "PUT",
       headers,
-      body: JSON.stringify({ credential: { token: 'bad' } }),
+      body: JSON.stringify({ credential: { token: "bad" } }),
     });
     expect(res.status).toBe(400);
   });
 
-  it('rejects credentials sent over non-loopback HTTP', async () => {
+  it("rejects credentials sent over non-loopback HTTP", async () => {
     const fake = fakeTransport();
-    fake.on('graphql', 200, { data: { me: [{ username: 'julia' }] } });
+    fake.on("graphql", 200, { data: { me: [{ username: "julia" }] } });
     const { app } = makeTestApp({}, { connectorTransport: fake.transport });
     const { headers } = await registerUser(app);
-    const res = await app.request('http://sync.example.com/api/v1/connectors/hardcover', {
-      method: 'PUT',
-      headers,
-      body: JSON.stringify({ credential: { token: 'hc-token' } }),
-    });
+    const res = await app.request(
+      "http://sync.example.com/api/v1/connectors/hardcover",
+      {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ credential: { token: "hc-token" } }),
+      },
+    );
 
     expect(res.status).toBe(400);
-    expect(await res.json()).toMatchObject({ message: expect.stringContaining('HTTPS') });
+    expect(await res.json()).toMatchObject({
+      message: expect.stringContaining("HTTPS"),
+    });
     expect(fake.calls).toHaveLength(0);
   });
 
-  it('accepts credentials forwarded from an HTTPS reverse proxy', async () => {
+  it("accepts credentials forwarded from an HTTPS reverse proxy", async () => {
     const fake = fakeTransport();
-    fake.on('graphql', 200, { data: { me: [{ username: 'julia' }] } });
-    const { app } = makeTestApp({ trustProxy: true }, { connectorTransport: fake.transport });
+    fake.on("graphql", 200, { data: { me: [{ username: "julia" }] } });
+    const { app } = makeTestApp(
+      { trustProxy: true },
+      { connectorTransport: fake.transport },
+    );
     const { headers } = await registerUser(app);
-    const res = await app.request('http://sync.example.com/api/v1/connectors/hardcover', {
-      method: 'PUT',
-      headers: { ...headers, 'x-forwarded-proto': 'https' },
-      body: JSON.stringify({ credential: { token: 'hc-token' } }),
-    });
+    const res = await app.request(
+      "http://sync.example.com/api/v1/connectors/hardcover",
+      {
+        method: "PUT",
+        headers: { ...headers, "x-forwarded-proto": "https" },
+        body: JSON.stringify({ credential: { token: "hc-token" } }),
+      },
+    );
 
     expect(res.status).toBe(200);
   });
 
-  it('rejects a forged forwarded HTTPS header when proxy trust is disabled', async () => {
+  it("rejects a forged forwarded HTTPS header when proxy trust is disabled", async () => {
     const fake = fakeTransport();
-    fake.on('graphql', 200, { data: { me: [{ username: 'julia' }] } });
+    fake.on("graphql", 200, { data: { me: [{ username: "julia" }] } });
     const { app } = makeTestApp({}, { connectorTransport: fake.transport });
     const { headers } = await registerUser(app);
-    const res = await app.request('http://sync.example.com/api/v1/connectors/hardcover', {
-      method: 'PUT',
-      headers: { ...headers, 'x-forwarded-proto': 'https' },
-      body: JSON.stringify({ credential: { token: 'hc-token' } }),
-    });
+    const res = await app.request(
+      "http://sync.example.com/api/v1/connectors/hardcover",
+      {
+        method: "PUT",
+        headers: { ...headers, "x-forwarded-proto": "https" },
+        body: JSON.stringify({ credential: { token: "hc-token" } }),
+      },
+    );
 
     expect(res.status).toBe(400);
     expect(fake.calls).toHaveLength(0);
   });
 
-  it('rejects a forged loopback Host from a remote peer', async () => {
+  it("rejects a forged loopback Host from a remote peer", async () => {
     const fake = fakeTransport();
-    fake.on('graphql', 200, { data: { me: [{ username: 'julia' }] } });
+    fake.on("graphql", 200, { data: { me: [{ username: "julia" }] } });
     const { app } = makeTestApp({}, { connectorTransport: fake.transport });
     const { headers } = await registerUser(app);
-    const res = await app.request('http://localhost/api/v1/connectors/hardcover', {
-      method: 'PUT',
-      headers,
-      body: JSON.stringify({ credential: { token: 'hc-token' } }),
-    }, { incoming: { socket: { remoteAddress: '203.0.113.10' } } });
+    const res = await app.request(
+      "http://localhost/api/v1/connectors/hardcover",
+      {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ credential: { token: "hc-token" } }),
+      },
+      { incoming: { socket: { remoteAddress: "203.0.113.10" } } },
+    );
 
     expect(res.status).toBe(400);
     expect(fake.calls).toHaveLength(0);
   });
 
-  it('fails closed when a Node request has no peer address', async () => {
+  it("fails closed when a Node request has no peer address", async () => {
     const fake = fakeTransport();
-    fake.on('graphql', 200, { data: { me: [{ username: 'julia' }] } });
+    fake.on("graphql", 200, { data: { me: [{ username: "julia" }] } });
     const { app } = makeTestApp({}, { connectorTransport: fake.transport });
     const { headers } = await registerUser(app);
-    const res = await app.request('http://localhost/api/v1/connectors/hardcover', {
-      method: 'PUT',
-      headers,
-      body: JSON.stringify({ credential: { token: 'hc-token' } }),
-    }, { incoming: { socket: {} } });
+    const res = await app.request(
+      "http://localhost/api/v1/connectors/hardcover",
+      {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ credential: { token: "hc-token" } }),
+      },
+      { incoming: { socket: {} } },
+    );
 
     expect(res.status).toBe(400);
     expect(fake.calls).toHaveLength(0);
   });
 
-  it('unlink wipes account, matches, and queue', async () => {
+  it("unlink wipes account, matches, and queue", async () => {
     const fake = fakeTransport();
-    fake.on('graphql', 200, { data: { me: [{ username: 'julia' }] } });
+    fake.on("graphql", 200, { data: { me: [{ username: "julia" }] } });
     const { app, db } = makeTestApp({}, { connectorTransport: fake.transport });
     const { headers } = await registerUser(app);
-    await app.request('/api/v1/connectors/hardcover', {
-      method: 'PUT',
+    await app.request("/api/v1/connectors/hardcover", {
+      method: "PUT",
       headers,
-      body: JSON.stringify({ credential: { token: 'hc' } }),
+      body: JSON.stringify({ credential: { token: "hc" } }),
     });
-    const del = await app.request('/api/v1/connectors/hardcover', { method: 'DELETE', headers });
+    const del = await app.request("/api/v1/connectors/hardcover", {
+      method: "DELETE",
+      headers,
+    });
     expect(del.status).toBe(200);
-    const list = await (await app.request('/api/v1/connectors', { headers })).json();
-    expect(list.connectors.find((c: { id: string }) => c.id === 'hardcover').linked).toBe(false);
+    const list = await (
+      await app.request("/api/v1/connectors", { headers })
+    ).json();
+    expect(
+      list.connectors.find((c: { id: string }) => c.id === "hardcover").linked,
+    ).toBe(false);
   });
 });
 
-describe('fan-out on progress sync', () => {
-  it('enqueues a progress event for a linked write connector and pushes it', async () => {
+describe("fan-out on progress sync", () => {
+  it("enqueues a progress event for a linked write connector and pushes it", async () => {
     const fake = fakeTransport();
-    fake.on('graphql', 200, { data: { me: [{ username: 'julia' }] } });
+    fake.on("graphql", 200, { data: { me: [{ username: "julia" }] } });
     const { app, db } = makeTestApp({}, { connectorTransport: fake.transport });
     const { headers } = await registerUser(app);
 
     // Link Hardcover.
-    await app.request('/api/v1/connectors/hardcover', {
-      method: 'PUT',
+    await app.request("/api/v1/connectors/hardcover", {
+      method: "PUT",
       headers,
-      body: JSON.stringify({ credential: { token: 'hc' } }),
+      body: JSON.stringify({ credential: { token: "hc" } }),
     });
     // Provide metadata so matching can work, then sync progress.
-    await app.request('/api/v1/documents', {
-      method: 'PUT',
+    await app.request("/api/v1/documents", {
+      method: "PUT",
       headers,
       body: JSON.stringify({
-        items: [{ document: DOC, title: 'Foundryside', author: 'Robert Jackson Bennett' }],
+        items: [
+          {
+            document: DOC,
+            title: "Foundryside",
+            author: "Robert Jackson Bennett",
+          },
+        ],
       }),
     });
-    await app.request('/syncs/progress', {
-      method: 'PUT',
+    await app.request("/syncs/progress", {
+      method: "PUT",
       headers,
-      body: JSON.stringify({ document: DOC, progress: 'p', percentage: 0.3, device_id: 'd1' }),
+      body: JSON.stringify({
+        document: DOC,
+        progress: "p",
+        percentage: 0.3,
+        device_id: "d1",
+      }),
     });
 
     // A pending queue row should exist.
     expect(claimReady(db, 10).length).toBeGreaterThan(0);
 
     // Now the drain: match (search) then push (mutation).
-    fake.on('Search', 200, {
-      data: { search: { results: [{ document: { id: 42, title: 'Foundryside', author_names: ['Robert Jackson Bennett'] } }] } },
+    fake.on("Search", 200, {
+      data: {
+        search: {
+          results: [
+            {
+              document: {
+                id: 42,
+                title: "Foundryside",
+                author_names: ["Robert Jackson Bennett"],
+              },
+            },
+          ],
+        },
+      },
     });
     // The push mutation returns success.
-    fake.on('insert_user_book', 200, { data: { insert_user_book: { id: 1 } } });
+    fake.on("insert_user_book", 200, { data: { insert_user_book: { id: 1 } } });
 
     await drainQueue(db, fake.transport, 10);
 
     // Queue drained.
     expect(claimReady(db, 10)).toHaveLength(0);
     // A mutation call was made.
-    expect(fake.calls.some((c) => c.body?.includes('insert_user_book'))).toBe(true);
+    expect(fake.calls.some((c) => c.body?.includes("insert_user_book"))).toBe(
+      true,
+    );
   });
 
-  it('surfaces a per-book push note in the review list and clears it when the push succeeds', async () => {
+  it("surfaces a per-book push note in the review list and clears it when the push succeeds", async () => {
     const fake = fakeTransport();
-    fake.on('graphql', 200, { data: { me: [{ username: 'julia' }] } });
+    fake.on("graphql", 200, { data: { me: [{ username: "julia" }] } });
     const { app, db } = makeTestApp({}, { connectorTransport: fake.transport });
     const { headers } = await registerUser(app);
-    await app.request('/api/v1/connectors/hardcover', {
-      method: 'PUT', headers, body: JSON.stringify({ credential: { token: 'hc' } }),
+    await app.request("/api/v1/connectors/hardcover", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ credential: { token: "hc" } }),
     });
-    await app.request('/api/v1/documents', {
-      method: 'PUT', headers,
-      body: JSON.stringify({ items: [{ document: DOC, title: 'Obscure Book', author: 'Nobody' }] }),
+    await app.request("/api/v1/documents", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({
+        items: [{ document: DOC, title: "Obscure Book", author: "Nobody" }],
+      }),
     });
-    await app.request('/syncs/progress', {
-      method: 'PUT', headers,
-      body: JSON.stringify({ document: DOC, progress: 'p', percentage: 0.3, device_id: 'd1' }),
+    await app.request("/syncs/progress", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({
+        document: DOC,
+        progress: "p",
+        percentage: 0.3,
+        device_id: "d1",
+      }),
     });
     // The matched book has no edition with a page count anywhere.
-    fake.on('Search', 200, {
-      data: { search: { results: [{ document: { id: 42, title: 'Obscure Book', author_names: ['Nobody'] } }] } },
+    fake.on("Search", 200, {
+      data: {
+        search: {
+          results: [
+            {
+              document: {
+                id: 42,
+                title: "Obscure Book",
+                author_names: ["Nobody"],
+              },
+            },
+          ],
+        },
+      },
     });
-    fake.on('Ctx', 200, { data: { me: [{ user_books: [] }], books_by_pk: {}, editions: [] } });
-    fake.on('SetStatus', 200, { data: { insert_user_book: { user_book: { id: 10 } } } });
+    fake.on("Ctx", 200, {
+      data: { me: [{ user_books: [] }], books_by_pk: {}, editions: [] },
+    });
+    fake.on("SetStatus", 200, {
+      data: { insert_user_book: { user_book: { id: 10 } } },
+    });
     await drainQueue(db, fake.transport, 10);
 
-    const review = await (await app.request('/api/v1/connectors/hardcover/review', { headers })).json();
+    const review = await (
+      await app.request("/api/v1/connectors/hardcover/review", { headers })
+    ).json();
     expect(review.books[0].push_note).toMatch(/page count/);
 
     // Someone adds a page count on Hardcover; the next push succeeds and clears the note.
-    fake.on('Ctx', 200, {
+    fake.on("Ctx", 200, {
       data: {
-        me: [{ user_books: [{ id: 10, status_id: 2, edition: null, user_book_reads: [{ id: 77, started_at: '2026-08-01', finished_at: null, edition: null }] }] }],
+        me: [
+          {
+            user_books: [
+              {
+                id: 10,
+                status_id: 2,
+                edition: null,
+                user_book_reads: [
+                  {
+                    id: 77,
+                    started_at: "2026-08-01",
+                    finished_at: null,
+                    edition: null,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
         books_by_pk: {},
         editions: [{ id: 900, pages: 500 }],
       },
     });
-    fake.on('UpdRead', 200, { data: { update_user_book_read: { error: null, user_book_read: { id: 77 } } } });
-    await app.request('/syncs/progress', {
-      method: 'PUT', headers,
-      body: JSON.stringify({ document: DOC, progress: 'p2', percentage: 0.5, device_id: 'd1' }),
+    fake.on("UpdRead", 200, {
+      data: {
+        update_user_book_read: { error: null, user_book_read: { id: 77 } },
+      },
+    });
+    await app.request("/syncs/progress", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({
+        document: DOC,
+        progress: "p2",
+        percentage: 0.5,
+        device_id: "d1",
+      }),
     });
     await drainQueue(db, fake.transport, 10);
-    const after = await (await app.request('/api/v1/connectors/hardcover/review', { headers })).json();
+    const after = await (
+      await app.request("/api/v1/connectors/hardcover/review", { headers })
+    ).json();
     expect(after.books[0].push_note).toBeNull();
   });
 
-  it('does not fan out when no connector is linked', async () => {
+  it("does not fan out when no connector is linked", async () => {
     const fake = fakeTransport();
     const { app, db } = makeTestApp({}, { connectorTransport: fake.transport });
     const { headers } = await registerUser(app);
-    await app.request('/syncs/progress', {
-      method: 'PUT',
+    await app.request("/syncs/progress", {
+      method: "PUT",
       headers,
-      body: JSON.stringify({ document: DOC, progress: 'p', percentage: 0.3, device_id: 'd1' }),
+      body: JSON.stringify({
+        document: DOC,
+        progress: "p",
+        percentage: 0.3,
+        device_id: "d1",
+      }),
     });
     expect(claimReady(db, 10)).toHaveLength(0);
   });
 
-  it('does not fan out a metadata-less document to a metadata-matched connector', async () => {
+  it("does not fan out a metadata-less document to a metadata-matched connector", async () => {
     const fake = fakeTransport();
-    fake.on('graphql', 200, { data: { me: [{ username: 'julia' }] } });
+    fake.on("graphql", 200, { data: { me: [{ username: "julia" }] } });
     const { app, db } = makeTestApp({}, { connectorTransport: fake.transport });
     const { headers } = await registerUser(app);
-    await app.request('/api/v1/connectors/hardcover', {
-      method: 'PUT',
+    await app.request("/api/v1/connectors/hardcover", {
+      method: "PUT",
       headers,
-      body: JSON.stringify({ credential: { token: 'hc' } }),
+      body: JSON.stringify({ credential: { token: "hc" } }),
     });
     // Sync progress for a document we have NO title/author for.
-    await app.request('/syncs/progress', {
-      method: 'PUT',
+    await app.request("/syncs/progress", {
+      method: "PUT",
       headers,
-      body: JSON.stringify({ document: DOC, progress: 'p', percentage: 0.3, device_id: 'd1' }),
+      body: JSON.stringify({
+        document: DOC,
+        progress: "p",
+        percentage: 0.3,
+        device_id: "d1",
+      }),
     });
     // Nothing queued: Hardcover can only match books we have metadata for, so a
     // metadata-less document would just dead-letter as "no book match".
     expect(claimReady(db, 10)).toHaveLength(0);
   });
 
-  it('manual match override is honored and sticky', async () => {
+  it("manual match override is honored and sticky", async () => {
     const fake = fakeTransport();
-    fake.on('graphql', 200, { data: { me: [{ username: 'julia' }] } });
+    fake.on("graphql", 200, { data: { me: [{ username: "julia" }] } });
     const { app, db } = makeTestApp({}, { connectorTransport: fake.transport });
     const { headers } = await registerUser(app);
-    await app.request('/api/v1/connectors/hardcover', {
-      method: 'PUT',
+    await app.request("/api/v1/connectors/hardcover", {
+      method: "PUT",
       headers,
-      body: JSON.stringify({ credential: { token: 'hc' } }),
+      body: JSON.stringify({ credential: { token: "hc" } }),
     });
-    const set = await app.request(`/api/v1/connectors/hardcover/matches/${DOC}`, {
-      method: 'PUT',
-      headers,
-      body: JSON.stringify({ external_id: '999' }),
-    });
+    const set = await app.request(
+      `/api/v1/connectors/hardcover/matches/${DOC}`,
+      {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ external_id: "999" }),
+      },
+    );
     expect(set.status).toBe(200);
     const list = await (
-      await app.request('/api/v1/connectors/hardcover/matches', { headers })
+      await app.request("/api/v1/connectors/hardcover/matches", { headers })
     ).json();
-    expect(list.matches[0]).toMatchObject({ document: DOC, external_id: '999', source: 'manual' });
+    expect(list.matches[0]).toMatchObject({
+      document: DOC,
+      external_id: "999",
+      source: "manual",
+    });
   });
 });
 
-describe('readwise highlight fan-out', () => {
-  it('pushes a clipping as a highlight', async () => {
+describe("readwise highlight fan-out", () => {
+  it("pushes a clipping as a highlight", async () => {
     const fake = fakeTransport();
-    fake.on('/auth/', 204, {});
+    fake.on("/auth/", 204, {});
     const { app, db } = makeTestApp({}, { connectorTransport: fake.transport });
     const { headers } = await registerUser(app);
-    await app.request('/api/v1/connectors/readwise', {
-      method: 'PUT',
+    await app.request("/api/v1/connectors/readwise", {
+      method: "PUT",
       headers,
-      body: JSON.stringify({ credential: { token: 'rw' } }),
+      body: JSON.stringify({ credential: { token: "rw" } }),
     });
-    await app.request('/api/v1/documents', {
-      method: 'PUT',
+    await app.request("/api/v1/documents", {
+      method: "PUT",
       headers,
-      body: JSON.stringify({ items: [{ document: DOC, title: 'Foundryside', author: 'RJB' }] }),
+      body: JSON.stringify({
+        items: [{ document: DOC, title: "Foundryside", author: "RJB" }],
+      }),
     });
     await app.request(`/api/v1/clippings/${DOC}`, {
-      method: 'PUT',
+      method: "PUT",
       headers,
       body: JSON.stringify({
         items: [
-          { id: 'c0ffee0011223344', spine: 1, text: 'a memorable line', created_at: 1752300000 },
+          {
+            id: "c0ffee0011223344",
+            spine: 1,
+            text: "a memorable line",
+            created_at: 1752300000,
+          },
         ],
       }),
     });
     expect(claimReady(db, 10).length).toBeGreaterThan(0);
 
-    fake.on('/highlights/', 200, [{ id: 1 }]);
+    fake.on("/highlights/", 200, [{ id: 1 }]);
     await drainQueue(db, fake.transport, 10);
-    expect(fake.calls.some((c) => c.url.includes('/highlights/') && c.method === 'POST')).toBe(true);
+    expect(
+      fake.calls.some(
+        (c) => c.url.includes("/highlights/") && c.method === "POST",
+      ),
+    ).toBe(true);
     expect(claimReady(db, 10)).toHaveLength(0);
   });
 });

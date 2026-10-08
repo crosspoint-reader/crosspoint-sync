@@ -24,6 +24,7 @@ const SERVICES: [string, string, string, 'ready' | 'beta'][] = [
   ['spotify', 'Spotify', 'Listen ahead in the audiobook and your progress moves forward. Resume it in one tap.', 'beta'],
   ['microblog', 'Micro.blog', 'Keep your Currently reading and Finished shelves current.', 'ready'],
   ['audiobookshelf', 'Audiobookshelf', 'Switch between the ebook and the audiobook without losing your place.', 'ready'],
+  ['jellyfin', 'Jellyfin', 'Keep your place in sync with books on your Jellyfin server.', 'beta'],
   ['bookorbit', 'BookOrbit', 'Two-way progress with your own library, clippings as highlights.', 'beta'],
 ];
 

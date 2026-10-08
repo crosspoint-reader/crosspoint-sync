@@ -1,14 +1,15 @@
-import type { Connector, HttpTransport } from './types.js';
-import { hardcoverConnector } from './hardcover.js';
-import { readwiseConnector } from './readwise.js';
-import { readwiseReaderConnector } from './readwise-reader.js';
-import { kosyncConnector } from './kosync.js';
-import { bookfusionConnector } from './bookfusion.js';
-import { audiobookshelfConnector } from './audiobookshelf.js';
-import { microblogConnector } from './microblog.js';
-import { kindleConnector } from './kindle.js';
-import { bookorbitConnector } from './bookorbit.js';
-import { spotifyConnector } from './spotify.js';
+import { audiobookshelfConnector } from "./audiobookshelf.js";
+import { bookfusionConnector } from "./bookfusion.js";
+import { bookorbitConnector } from "./bookorbit.js";
+import { hardcoverConnector } from "./hardcover.js";
+import { jellyfinConnector } from "./jellyfin.js";
+import { kindleConnector } from "./kindle.js";
+import { kosyncConnector } from "./kosync.js";
+import { microblogConnector } from "./microblog.js";
+import { readwiseReaderConnector } from "./readwise-reader.js";
+import { readwiseConnector } from "./readwise.js";
+import { spotifyConnector } from "./spotify.js";
+import type { Connector, HttpTransport } from "./types.js";
 
 /** All connectors known to this build. */
 const CONNECTORS: Connector[] = [
@@ -18,6 +19,7 @@ const CONNECTORS: Connector[] = [
   readwiseReaderConnector,
   bookfusionConnector,
   audiobookshelfConnector,
+  jellyfinConnector,
   bookorbitConnector,
   spotifyConnector,
   microblogConnector,

@@ -227,7 +227,13 @@ export function connectorRoutes(
       return c.json({ code: 2003, message: result.error ?? 'Credential rejected' }, 400);
     }
     const user = c.get('user');
+    const first = !getAccount(db, user.id, conn.id);
     upsertAccount(db, user.id, conn.id, cred as Record<string, unknown>, result.accountLabel ?? null);
+    if (first && conn.id === 'jellyfin') {
+      pollConnector(db, user.id, 'jellyfin', transport).catch((err) =>
+        console.error(JSON.stringify({ msg: 'first sync failed', connector: conn.id, user_id: user.id,
+          error: err instanceof Error ? err.message : String(err) })));
+    }
     return c.json({ id: conn.id, linked: true, account: result.accountLabel ?? null });
   });
 

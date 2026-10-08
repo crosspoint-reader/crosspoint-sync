@@ -1,11 +1,14 @@
-import type { DB } from '../db/db.js';
-import { pollConnector } from './fanin.js';
-import { fetchTransport } from './registry.js';
-import { resolveMatch } from './runner.js';
-import { getAccount, getMatch } from './store.js';
-import type { HttpTransport } from './types.js';
+import type { DB } from "../db/db.js";
+import { pollConnector } from "./fanin.js";
+import { fetchTransport } from "./registry.js";
+import { resolveMatch } from "./runner.js";
+import { getAccount, getMatch } from "./store.js";
+import type { HttpTransport } from "./types.js";
 
-export type ProgressRefresh = (userId: number, document: string) => Promise<void>;
+export type ProgressRefresh = (
+  userId: number,
+  document: string,
+) => Promise<void>;
 
 /**
  * Per-book fan-in pullers consulted when a device asks for progress. This is the
@@ -25,15 +28,24 @@ export type ProgressRefresh = (userId: number, document: string) => Promise<void
  *                'not found' is retried only when the credential (which carries
  *                the library) was re-uploaded since.
  */
-const PER_BOOK_PULLERS: { id: string; strict: boolean; sidecarOnly: boolean; matchOnDemand?: boolean }[] = [
-  { id: 'bookfusion', strict: true, sidecarOnly: true },
-  { id: 'kindle', strict: false, sidecarOnly: false, matchOnDemand: true },
-  { id: 'bookorbit', strict: false, sidecarOnly: false, matchOnDemand: true },
-  { id: 'spotify', strict: false, sidecarOnly: false, matchOnDemand: true },
+const PER_BOOK_PULLERS: {
+  id: string;
+  strict: boolean;
+  sidecarOnly: boolean;
+  matchOnDemand?: boolean;
+}[] = [
+  { id: "bookfusion", strict: true, sidecarOnly: true },
+  { id: "kindle", strict: false, sidecarOnly: false, matchOnDemand: true },
+  { id: "bookorbit", strict: false, sidecarOnly: false, matchOnDemand: true },
+  { id: "jellyfin", strict: false, sidecarOnly: false, matchOnDemand: true },
+  { id: "spotify", strict: false, sidecarOnly: false, matchOnDemand: true },
 ];
 
 /** Shared by both progress endpoints; only overlapping requests share a refresh. */
-export function createProgressRefresh(db: DB, http: HttpTransport = fetchTransport): ProgressRefresh {
+export function createProgressRefresh(
+  db: DB,
+  http: HttpTransport = fetchTransport,
+): ProgressRefresh {
   const pending = new Map<string, Promise<void>>();
   return async (userId, document) => {
     const pullers: typeof PER_BOOK_PULLERS = [];
@@ -41,20 +53,24 @@ export function createProgressRefresh(db: DB, http: HttpTransport = fetchTranspo
       const account = getAccount(db, userId, p.id);
       if (!account?.enabled) continue;
       let match = getMatch(db, userId, p.id, document);
-      if (!match?.external_id && p.matchOnDemand && match?.source !== 'manual' &&
-          (!match || match.updated_at < account.updated_at)) {
+      if (
+        !match?.external_id &&
+        p.matchOnDemand &&
+        match?.source !== "manual" &&
+        (!match || match.updated_at < account.updated_at)
+      ) {
         await resolveMatch(db, p.id, userId, document, http).catch(() => null);
         match = getMatch(db, userId, p.id, document);
       }
       if (!match?.external_id) continue;
-      if (p.sidecarOnly && match.source !== 'sidecar') continue;
+      if (p.sidecarOnly && match.source !== "sidecar") continue;
       pullers.push(p);
     }
     if (pullers.length === 0) return;
     for (const p of pullers) {
       if (!p.strict) continue;
       const account = getAccount(db, userId, p.id);
-      if (account && account.status !== 'ok') {
+      if (account && account.status !== "ok") {
         throw new Error(`${p.id} account needs attention`);
       }
     }
@@ -65,7 +81,10 @@ export function createProgressRefresh(db: DB, http: HttpTransport = fetchTranspo
     let timer: ReturnType<typeof setTimeout>;
     const deadline = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
-        const error = new DOMException('Progress refresh timed out', 'TimeoutError');
+        const error = new DOMException(
+          "Progress refresh timed out",
+          "TimeoutError",
+        );
         controller.abort(error);
         reject(error);
       }, 10_000);
@@ -73,7 +92,10 @@ export function createProgressRefresh(db: DB, http: HttpTransport = fetchTranspo
     const bounded: HttpTransport = (url, init) => {
       controller.signal.throwIfAborted();
       return http(url, {
-        ...init, signal: init.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal,
+        ...init,
+        signal: init.signal
+          ? AbortSignal.any([controller.signal, init.signal])
+          : controller.signal,
       });
     };
     const refresh = Promise.race([
@@ -83,14 +105,16 @@ export function createProgressRefresh(db: DB, http: HttpTransport = fetchTranspo
             document,
             signal: controller.signal,
             throwOnError: p.strict,
-          })
-        )
+          }),
+        ),
       ),
       deadline,
-    ]).then(() => {}).finally(() => {
-      clearTimeout(timer);
-      pending.delete(key);
-    });
+    ])
+      .then(() => {})
+      .finally(() => {
+        clearTimeout(timer);
+        pending.delete(key);
+      });
     pending.set(key, refresh);
     return refresh;
   };
