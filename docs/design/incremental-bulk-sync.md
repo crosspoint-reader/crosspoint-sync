@@ -1,6 +1,9 @@
 # Design: Incremental Bulk Sync
 
-Status: **in progress** (server step 2 implemented)
+Status: **implemented, not yet released.** Rollout steps 1 to 5 are done: the server change feed
+(step 2) in this repo, and the firmware steps (1, 3, 4, 5) plus the separate alternate-method fix on
+CrossInk's `feat/sync-server-file-transfer` branch, pending merge. Readers need a server with the
+change feed for incremental syncs; older servers keep the per-book walk.
 
 Make CrossInk's bulk sync actions (Sync Books, today called Sync All Books, and Sync Folder) cost
 work proportional to the number of books that **changed**, not the size of the library. Spans both
