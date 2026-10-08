@@ -120,9 +120,8 @@ export function authRoutes(db: DB, config: Config): Hono<AppEnv> {
     if (!username || !password) {
       return c.json({ error: 'Username and password required' }, 400);
     }
-    const row = db
-      .prepare('SELECT id, account_id, key_hash FROM users WHERE username = ?')
-      .get(username) as { id: number; account_id: number | null; key_hash: string } | undefined;
+    const byName = db.prepare('SELECT id, account_id, key_hash FROM users WHERE username = ?');
+    const row = (byName.get(username) ?? byName.get(username.toLowerCase())) as { id: number; account_id: number | null; key_hash: string } | undefined;
     if (!row || !verifyKey(md5(password), row.key_hash)) {
       return c.json({ error: 'Invalid sync account credentials' }, 401);
     }

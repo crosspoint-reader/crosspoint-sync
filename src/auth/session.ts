@@ -1,11 +1,12 @@
 import crypto from 'node:crypto';
+import type { DB } from '../db/db.js';
 
 /**
  * Stateless signed session cookies for the web account. Format:
  *   base64url(JSON{uid, exp}) + '.' + base64url(HMAC-SHA256(payload))
  * No session table - the HMAC makes the cookie unforgeable. Signed with
- * SESSION_SECRET (falls back to TOKEN_ENC_KEY, then an ephemeral per-process key
- * so zero-config still works, at the cost of sessions dropping on restart).
+ * SESSION_SECRET (falls back to TOKEN_ENC_KEY, then a key generated once and kept
+ * in the database by loadSessionSecret, so zero-config sign-ins survive restarts).
  */
 
 const COOKIE_NAME = 'cp_session';
@@ -31,6 +32,20 @@ function sessionSecret(env: NodeJS.ProcessEnv = process.env): Buffer {
     }
   }
   return cachedSecret;
+}
+
+/** Zero-config: generate a session key once, store it in the DB, reuse it on every boot. */
+export function loadSessionSecret(db: DB, env: NodeJS.ProcessEnv = process.env): void {
+  if (env.SESSION_SECRET || env.TOKEN_ENC_KEY) return;
+  db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(
+    'session_secret',
+    crypto.randomBytes(32).toString('hex')
+  );
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'session_secret'").get() as {
+    value: string;
+  };
+  env.SESSION_SECRET = row.value;
+  cachedSecret = undefined;
 }
 
 export function resetSessionSecretCache(): void {

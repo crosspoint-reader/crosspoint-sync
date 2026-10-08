@@ -3,6 +3,7 @@ import { createApp } from './app.js';
 import { fromEnv } from './config.js';
 import { migrate, openDatabase } from './db/db.js';
 import { secretsEnabled } from './crypto/secrets.js';
+import { loadSessionSecret } from './auth/session.js';
 import { startQueueWorker } from './connectors/runner.js';
 import { pollSpotify, startFanInWorker } from './connectors/fanin.js';
 import { autoPause } from './models/pause.js';
@@ -13,6 +14,7 @@ const ADDRESS = process.env.LISTEN_ADDRESS ?? 'localhost';
 
 const db = openDatabase(DATABASE_PATH);
 migrate(db);
+loadSessionSecret(db);
 
 const app = createApp(db, fromEnv());
 

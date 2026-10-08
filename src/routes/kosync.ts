@@ -275,7 +275,8 @@ export function kosyncRoutes(db: DB, config: Config, refreshProgress: ProgressRe
       return kosyncError(c, 403, 2003, 'Invalid request');
     }
     const o = (body ?? {}) as Record<string, unknown>;
-    const username = o.username;
+    // New names are stored lowercase; existing mixed-case names are left as-is.
+    const username = typeof o.username === 'string' ? o.username.toLowerCase() : o.username;
     const password = o.password;
     if (
       typeof username !== 'string' ||

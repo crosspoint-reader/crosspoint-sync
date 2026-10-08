@@ -43,3 +43,40 @@ describe('registration validation', () => {
     expect((await res.json()).status).toBe('ok');
   });
 });
+
+describe('session secret persistence', () => {
+  it('keeps web sessions valid across restarts without SESSION_SECRET', async () => {
+    const { openDatabase, migrate } = await import('../src/db/db.js');
+    const { loadSessionSecret, signSession, verifySession, resetSessionSecretCache } =
+      await import('../src/auth/session.js');
+    const db = openDatabase(':memory:');
+    migrate(db);
+    const boot1: NodeJS.ProcessEnv = {};
+    loadSessionSecret(db, boot1);
+    const cookie = signSession(7, 60, boot1);
+    resetSessionSecretCache(); // simulate a new process
+    const boot2: NodeJS.ProcessEnv = {};
+    loadSessionSecret(db, boot2);
+    expect(boot2.SESSION_SECRET).toBe(boot1.SESSION_SECRET);
+    expect(verifySession(cookie, boot2)).toEqual({ uid: 7 });
+    resetSessionSecretCache();
+  });
+});
+
+describe('new usernames are stored lowercase', () => {
+  it('authenticates and blocks duplicate registration regardless of case', async () => {
+    const { app } = makeTestApp();
+    const create = (username: string) =>
+      app.request('/users/create', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username, password: md5('pw') }),
+      });
+    expect((await create('Alice')).status).toBe(201);
+    expect((await create('alice')).status).toBe(402);
+    const auth = await app.request('/users/auth', {
+      headers: { 'x-auth-user': 'ALICE', 'x-auth-key': md5('pw') },
+    });
+    expect(auth.status).toBe(200);
+  });
+});

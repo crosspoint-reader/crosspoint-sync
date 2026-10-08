@@ -48,13 +48,13 @@ export function authMiddleware(db: DB): MiddlewareHandler<AppEnv> {
     if (!username || !key) {
       return kosyncError(c, 401, 2001, 'Unauthorized');
     }
-    const row = getUser.get(username) as
+    const row = (getUser.get(username) ?? getUser.get(username.toLowerCase())) as
       | { id: number; username: string; key_hash: string }
       | undefined;
     if (!row) {
       return kosyncError(c, 401, 2001, 'Unauthorized');
     }
-    if (verifiedCache.get(username) !== key) {
+    if (verifiedCache.get(row.username) !== key) {
       // Stock kosync clients send x-auth-key as MD5(password); some third-party
       // clients (e.g. BookOrbit) send the raw password. Stored hashes are always
       // PBKDF2 of the MD5 form, so fall back to hashing the key before rejecting.
@@ -64,7 +64,7 @@ export function authMiddleware(db: DB): MiddlewareHandler<AppEnv> {
       if (verifiedCache.size >= VERIFIED_CACHE_MAX) {
         verifiedCache.clear();
       }
-      verifiedCache.set(username, key);
+      verifiedCache.set(row.username, key);
     }
     c.set('user', { id: row.id, username: row.username });
     await next();

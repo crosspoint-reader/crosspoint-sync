@@ -75,7 +75,7 @@ export function accountRoutes(db: DB, config: Config): Hono<AppEnv> {
     let password: string | null = null;
     try {
       const body = (await c.req.json()) as Record<string, unknown>;
-      username = typeof body.username === 'string' ? body.username.trim() : null;
+      username = typeof body.username === 'string' ? body.username.trim().toLowerCase() : null;
       password = typeof body.password === 'string' ? body.password : null;
     } catch {
       /* validation below */
@@ -113,9 +113,8 @@ export function accountRoutes(db: DB, config: Config): Hono<AppEnv> {
     if (!username || !password) {
       return c.json({ error: 'Username and password required' }, 400);
     }
-    const row = db
-      .prepare('SELECT id, key_hash, account_id FROM users WHERE username = ?')
-      .get(username) as { id: number; key_hash: string; account_id: number | null } | undefined;
+    const byName = db.prepare('SELECT id, key_hash, account_id FROM users WHERE username = ?');
+    const row = (byName.get(username) ?? byName.get(username.toLowerCase())) as { id: number; key_hash: string; account_id: number | null } | undefined;
     // The device sends MD5(password); the web form takes the plain password.
     if (!row || !verifyKey(md5(password), row.key_hash)) {
       return c.json({ error: 'Invalid sync account credentials' }, 401);
