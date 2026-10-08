@@ -228,6 +228,38 @@ describe("jellyfin connector", () => {
     });
   });
 
+  it("treats 403 on UserData as per-item failure, not reauth", async () => {
+    const fake = fakeTransport();
+    wireAuth(fake);
+    fake.on("/Items/book-1/UserData", 403, {});
+    const ch = await jellyfinConnector.pullProgress!(
+      CRED,
+      { externalId: "book-1", confidence: 1, externalEdition: "1000000" },
+      fake.transport,
+      0,
+    );
+    expect(ch).toBeNull();
+
+    fake.on("/UserData", 403, {});
+    const push = await jellyfinConnector.push(
+      CRED,
+      { externalId: "book-1", confidence: 1, externalEdition: "1000000" },
+      {
+        kind: "progress",
+        document: DOC,
+        percentage: 0.5,
+        progress: "p",
+        position: null,
+        timestamp: 1_700_000_000,
+      },
+      fake.transport,
+    );
+    expect(push.ok).toBe(false);
+    if (push.ok) throw new Error("expected push failure");
+    expect(push.needsReauth).toBeFalsy();
+    expect(push.error).toBe("forbidden");
+  });
+
   it("pullProgress respects sinceMs", async () => {
     const fake = fakeTransport();
     wireAuth(fake);

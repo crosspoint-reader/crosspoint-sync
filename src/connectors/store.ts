@@ -1,7 +1,13 @@
-import type { DB } from '../db/db.js';
-import { nowSeconds } from '../models/sync.js';
-import { decryptSecret, encryptSecret } from '../crypto/secrets.js';
-import { SAVE_CREDENTIAL, type Credential, type DocumentMeta, type Match, type SavableCredential } from './types.js';
+import { decryptSecret, encryptSecret } from "../crypto/secrets.js";
+import type { DB } from "../db/db.js";
+import { nowSeconds } from "../models/sync.js";
+import {
+  SAVE_CREDENTIAL,
+  type Credential,
+  type DocumentMeta,
+  type Match,
+  type SavableCredential,
+} from "./types.js";
 
 export interface AccountRow {
   user_id: number;
@@ -21,7 +27,7 @@ export function upsertAccount(
   connectorId: string,
   cred: Credential,
   accountLabel: string | null,
-  now = nowSeconds()
+  now = nowSeconds(),
 ): void {
   const enc = encryptSecret(JSON.stringify(cred));
   db.prepare(
@@ -34,21 +40,27 @@ export function upsertAccount(
        status = 'ok',
        enabled = 1,
        last_error = NULL,
-       updated_at = excluded.updated_at`
+       updated_at = excluded.updated_at`,
   ).run(userId, connectorId, enc, accountLabel, now, now);
 }
 
-export function getAccount(db: DB, userId: number, connectorId: string): AccountRow | null {
+export function getAccount(
+  db: DB,
+  userId: number,
+  connectorId: string,
+): AccountRow | null {
   return (
     (db
-      .prepare('SELECT * FROM connector_accounts WHERE user_id = ? AND connector_id = ?')
+      .prepare(
+        "SELECT * FROM connector_accounts WHERE user_id = ? AND connector_id = ?",
+      )
       .get(userId, connectorId) as AccountRow | undefined) ?? null
   );
 }
 
 export function listAccounts(db: DB, userId: number): AccountRow[] {
   return db
-    .prepare('SELECT * FROM connector_accounts WHERE user_id = ?')
+    .prepare("SELECT * FROM connector_accounts WHERE user_id = ?")
     .all(userId) as unknown as AccountRow[];
 }
 
@@ -58,20 +70,23 @@ export function decryptCredential(row: AccountRow, db?: DB): Credential {
   if (db) {
     cred[SAVE_CREDENTIAL] = () => {
       const enc = encryptSecret(JSON.stringify(cred));
-      db.prepare('UPDATE connector_accounts SET cred_enc = ?, updated_at = ? WHERE user_id = ? AND connector_id = ?').run(
-        enc, nowSeconds(), row.user_id, row.connector_id
-      );
+      db.prepare(
+        "UPDATE connector_accounts SET cred_enc = ?, updated_at = ? WHERE user_id = ? AND connector_id = ?",
+      ).run(enc, nowSeconds(), row.user_id, row.connector_id);
       row.cred_enc = enc;
     };
   }
   return cred;
 }
 
-export function deleteAccount(db: DB, userId: number, connectorId: string): void {
-  db.prepare('DELETE FROM connector_accounts WHERE user_id = ? AND connector_id = ?').run(
-    userId,
-    connectorId
-  );
+export function deleteAccount(
+  db: DB,
+  userId: number,
+  connectorId: string,
+): void {
+  db.prepare(
+    "DELETE FROM connector_accounts WHERE user_id = ? AND connector_id = ?",
+  ).run(userId, connectorId);
 }
 
 export function setAccountStatus(
@@ -80,10 +95,10 @@ export function setAccountStatus(
   connectorId: string,
   status: string,
   error: string | null,
-  now = nowSeconds()
+  now = nowSeconds(),
 ): void {
   db.prepare(
-    'UPDATE connector_accounts SET status = ?, last_error = ?, updated_at = ? WHERE user_id = ? AND connector_id = ?'
+    "UPDATE connector_accounts SET status = ?, last_error = ?, updated_at = ? WHERE user_id = ? AND connector_id = ?",
   ).run(status, error, now, userId, connectorId);
 }
 
@@ -92,7 +107,7 @@ export function activeConnectorIds(db: DB, userId: number): string[] {
   return (
     db
       .prepare(
-        `SELECT connector_id FROM connector_accounts WHERE user_id = ? AND enabled = 1 AND status != 'error'`
+        `SELECT connector_id FROM connector_accounts WHERE user_id = ? AND enabled = 1 AND status != 'error'`,
       )
       .all(userId) as { connector_id: string }[]
   ).map((r) => r.connector_id);
@@ -114,18 +129,18 @@ export interface MatchRow {
 // How a match was resolved. 'sidecar' = an exact service id the device sent in
 // the book's plugin sidecar; it outranks fuzzy 'auto' search but yields to a
 // user's 'manual' pick.
-export type MatchSource = 'auto' | 'manual' | 'none' | 'sidecar';
+export type MatchSource = "auto" | "manual" | "none" | "sidecar";
 
 export function getMatch(
   db: DB,
   userId: number,
   connectorId: string,
-  document: string
+  document: string,
 ): MatchRow | null {
   return (
     (db
       .prepare(
-        'SELECT * FROM connector_matches WHERE user_id = ? AND connector_id = ? AND document = ?'
+        "SELECT * FROM connector_matches WHERE user_id = ? AND connector_id = ? AND document = ?",
       )
       .get(userId, connectorId, document) as MatchRow | undefined) ?? null
   );
@@ -138,7 +153,7 @@ export function saveMatch(
   document: string,
   match: Match | null,
   source: MatchSource,
-  now = nowSeconds()
+  now = nowSeconds(),
 ): void {
   db.prepare(
     `INSERT INTO connector_matches
@@ -153,7 +168,7 @@ export function saveMatch(
        push_note = NULL,
        snapshot = NULL,
        anchor = CASE WHEN excluded.external_id IS connector_matches.external_id THEN connector_matches.anchor ELSE NULL END,
-       updated_at = excluded.updated_at`
+       updated_at = excluded.updated_at`,
   ).run(
     userId,
     connectorId,
@@ -163,7 +178,7 @@ export function saveMatch(
     match?.confidence ?? 0,
     source,
     match?.queryUsed ?? null,
-    now
+    now,
   );
 }
 
@@ -180,21 +195,26 @@ export function seedSidecarMatches(
   document: string,
   externalIds: Record<string, string>,
   connectorExists: (id: string) => boolean,
-  now = nowSeconds()
+  now = nowSeconds(),
 ): void {
   for (const [connectorId, externalId] of Object.entries(externalIds)) {
     if (!externalId || !connectorExists(connectorId)) continue;
     const existing = getMatch(db, userId, connectorId, document);
-    if (existing && existing.source === 'manual') continue; // respect user choice
-    if (existing && existing.external_id === externalId && existing.source === 'sidecar') continue;
+    if (existing && existing.source === "manual") continue; // respect user choice
+    if (
+      existing &&
+      existing.external_id === externalId &&
+      existing.source === "sidecar"
+    )
+      continue;
     saveMatch(
       db,
       userId,
       connectorId,
       document,
       { externalId, confidence: 1 },
-      'sidecar',
-      now
+      "sidecar",
+      now,
     );
   }
 }
@@ -205,74 +225,121 @@ export function setMatchNote(
   userId: number,
   connectorId: string,
   document: string,
-  note: string | null
+  note: string | null,
 ): void {
   db.prepare(
-    'UPDATE connector_matches SET push_note = ? WHERE user_id = ? AND connector_id = ? AND document = ?'
+    "UPDATE connector_matches SET push_note = ? WHERE user_id = ? AND connector_id = ? AND document = ?",
   ).run(note, userId, connectorId, document);
 }
 
 /** A connector's last-seen remote position on a matched book (Spotify), or null. */
-export function getMatchSnapshot<T>(db: DB, userId: number, connectorId: string, externalId: string): T | null {
-  const row = db.prepare(
-    'SELECT snapshot FROM connector_matches WHERE user_id = ? AND connector_id = ? AND external_id = ? AND snapshot IS NOT NULL LIMIT 1'
-  ).get(userId, connectorId, externalId) as { snapshot: string } | undefined;
+export function getMatchSnapshot<T>(
+  db: DB,
+  userId: number,
+  connectorId: string,
+  externalId: string,
+): T | null {
+  const row = db
+    .prepare(
+      "SELECT snapshot FROM connector_matches WHERE user_id = ? AND connector_id = ? AND external_id = ? AND snapshot IS NOT NULL LIMIT 1",
+    )
+    .get(userId, connectorId, externalId) as { snapshot: string } | undefined;
   return row ? (JSON.parse(row.snapshot) as T) : null;
 }
 
-export function setMatchSnapshot(db: DB, userId: number, connectorId: string, externalId: string, snapshot: unknown): void {
-  db.prepare('UPDATE connector_matches SET snapshot = ? WHERE user_id = ? AND connector_id = ? AND external_id = ?')
-    .run(JSON.stringify(snapshot), userId, connectorId, externalId);
+export function setMatchSnapshot(
+  db: DB,
+  userId: number,
+  connectorId: string,
+  externalId: string,
+  snapshot: unknown,
+): void {
+  db.prepare(
+    "UPDATE connector_matches SET snapshot = ? WHERE user_id = ? AND connector_id = ? AND external_id = ?",
+  ).run(JSON.stringify(snapshot), userId, connectorId, externalId);
 }
 
 /** A matched audiobook's calibration: reading position `text` is listening position `audio` (0..1 each). */
-export interface MatchAnchor { text: number; audio: number }
+export interface MatchAnchor {
+  text: number;
+  audio: number;
+}
 
-export function getMatchAnchor(db: DB, userId: number, connectorId: string, externalId: string): MatchAnchor | null {
-  const row = db.prepare(
-    'SELECT anchor FROM connector_matches WHERE user_id = ? AND connector_id = ? AND external_id = ? AND anchor IS NOT NULL LIMIT 1'
-  ).get(userId, connectorId, externalId) as { anchor: string } | undefined;
+export function getMatchAnchor(
+  db: DB,
+  userId: number,
+  connectorId: string,
+  externalId: string,
+): MatchAnchor | null {
+  const row = db
+    .prepare(
+      "SELECT anchor FROM connector_matches WHERE user_id = ? AND connector_id = ? AND external_id = ? AND anchor IS NOT NULL LIMIT 1",
+    )
+    .get(userId, connectorId, externalId) as { anchor: string } | undefined;
   return row ? (JSON.parse(row.anchor) as MatchAnchor) : null;
 }
 
-export function setMatchAnchor(db: DB, userId: number, connectorId: string, document: string, anchor: MatchAnchor | null): void {
-  db.prepare('UPDATE connector_matches SET anchor = ? WHERE user_id = ? AND connector_id = ? AND document = ?')
-    .run(anchor ? JSON.stringify(anchor) : null, userId, connectorId, document);
+export function setMatchAnchor(
+  db: DB,
+  userId: number,
+  connectorId: string,
+  document: string,
+  anchor: MatchAnchor | null,
+): void {
+  db.prepare(
+    "UPDATE connector_matches SET anchor = ? WHERE user_id = ? AND connector_id = ? AND document = ?",
+  ).run(anchor ? JSON.stringify(anchor) : null, userId, connectorId, document);
 }
 
 /** Give every matched book without a snapshot this one (a first-sync baseline). */
-export function seedMatchSnapshots(db: DB, userId: number, connectorId: string, snapshot: unknown): void {
+export function seedMatchSnapshots(
+  db: DB,
+  userId: number,
+  connectorId: string,
+  snapshot: unknown,
+): void {
   db.prepare(
     `UPDATE connector_matches SET snapshot = ?
-      WHERE user_id = ? AND connector_id = ? AND external_id IS NOT NULL AND snapshot IS NULL`
+      WHERE user_id = ? AND connector_id = ? AND external_id IS NOT NULL AND snapshot IS NULL`,
   ).run(JSON.stringify(snapshot), userId, connectorId);
 }
 
 /** Books in progress: not finished or did-not-finish, and under 98%. */
 export function inProgressDocuments(db: DB, userId: number): string[] {
-  return (db.prepare(
-    `SELECT DISTINCT p.document FROM progress p
+  return (
+    db
+      .prepare(
+        `SELECT DISTINCT p.document FROM progress p
        LEFT JOIN documents d ON d.user_id = p.user_id AND d.document = p.document
       WHERE p.user_id = ? AND COALESCE(d.status, 'reading') IN ('reading', 'paused')
         AND (SELECT p2.percentage FROM progress p2 WHERE p2.user_id = p.user_id AND p2.document = p.document
-              ORDER BY p2.updated_at DESC, p2.device_id LIMIT 1) < 0.98`
-  ).all(userId) as { document: string }[]).map((r) => r.document);
+              ORDER BY p2.updated_at DESC, p2.device_id LIMIT 1) < 0.98`,
+      )
+      .all(userId) as { document: string }[]
+  ).map((r) => r.document);
 }
 
 /** Users with this connector enabled, linked and healthy, and at least one matched book. */
 export function usersWithMatches(db: DB, connectorId: string): number[] {
-  return (db.prepare(
-    `SELECT DISTINCT a.user_id FROM connector_accounts a
-       JOIN connector_reveals r ON r.user_id = a.user_id AND r.connector_id = a.connector_id
+  return (
+    db
+      .prepare(
+        `SELECT DISTINCT a.user_id FROM connector_accounts a
        JOIN connector_matches m ON m.user_id = a.user_id AND m.connector_id = a.connector_id
-      WHERE a.connector_id = ? AND a.enabled = 1 AND a.status = 'ok' AND m.external_id IS NOT NULL ORDER BY a.user_id`
-  ).all(connectorId) as { user_id: number }[]).map((r) => r.user_id);
+      WHERE a.connector_id = ? AND a.enabled = 1 AND a.status = 'ok' AND m.external_id IS NOT NULL ORDER BY a.user_id`,
+      )
+      .all(connectorId) as { user_id: number }[]
+  ).map((r) => r.user_id);
 }
 
-export function listMatches(db: DB, userId: number, connectorId: string): MatchRow[] {
+export function listMatches(
+  db: DB,
+  userId: number,
+  connectorId: string,
+): MatchRow[] {
   return db
     .prepare(
-      'SELECT * FROM connector_matches WHERE user_id = ? AND connector_id = ? ORDER BY updated_at DESC'
+      "SELECT * FROM connector_matches WHERE user_id = ? AND connector_id = ? ORDER BY updated_at DESC",
     )
     .all(userId, connectorId) as unknown as MatchRow[];
 }
@@ -289,7 +356,7 @@ export function backfillDocumentMeta(
   document: string,
   title: string | null | undefined,
   author: string | null | undefined,
-  now = nowSeconds()
+  now = nowSeconds(),
 ): void {
   if (!title && !author) return;
   db.prepare(
@@ -298,43 +365,69 @@ export function backfillDocumentMeta(
      ON CONFLICT(user_id, document) DO UPDATE SET
        title = COALESCE(documents.title, excluded.title),
        author = COALESCE(documents.author, excluded.author),
-       updated_at = excluded.updated_at`
+       updated_at = excluded.updated_at`,
   ).run(userId, document, title ?? null, author ?? null, now);
 }
 
 /** Mark a stealth connector revealed for a user (idempotent). */
-export function revealConnector(db: DB, userId: number, connectorId: string, now = nowSeconds()): void {
+export function revealConnector(
+  db: DB,
+  userId: number,
+  connectorId: string,
+  now = nowSeconds(),
+): void {
   db.prepare(
-    'INSERT OR IGNORE INTO connector_reveals (user_id, connector_id, revealed_at) VALUES (?, ?, ?)'
+    "INSERT OR IGNORE INTO connector_reveals (user_id, connector_id, revealed_at) VALUES (?, ?, ?)",
   ).run(userId, connectorId, now);
 }
 
 /** A user's own OAuth client id for a connector, or null for the server's. */
-export function getClientId(db: DB, userId: number, connectorId: string): string | null {
-  const row = db.prepare('SELECT client_id FROM connector_reveals WHERE user_id = ? AND connector_id = ?')
+export function getClientId(
+  db: DB,
+  userId: number,
+  connectorId: string,
+): string | null {
+  const row = db
+    .prepare(
+      "SELECT client_id FROM connector_reveals WHERE user_id = ? AND connector_id = ?",
+    )
     .get(userId, connectorId) as { client_id: string | null } | undefined;
   return row?.client_id ?? null;
 }
 
-export function setClientId(db: DB, userId: number, connectorId: string, clientId: string | null, now = nowSeconds()): void {
+export function setClientId(
+  db: DB,
+  userId: number,
+  connectorId: string,
+  clientId: string | null,
+  now = nowSeconds(),
+): void {
   db.prepare(
     `INSERT INTO connector_reveals (user_id, connector_id, revealed_at, client_id) VALUES (?, ?, ?, ?)
-     ON CONFLICT(user_id, connector_id) DO UPDATE SET client_id = excluded.client_id`
+     ON CONFLICT(user_id, connector_id) DO UPDATE SET client_id = excluded.client_id`,
   ).run(userId, connectorId, now, clientId);
 }
 
 /** The connector ids this user has revealed. */
 export function listReveals(db: DB, userId: number): string[] {
   return (
-    db.prepare('SELECT connector_id FROM connector_reveals WHERE user_id = ?').all(userId) as {
+    db
+      .prepare("SELECT connector_id FROM connector_reveals WHERE user_id = ?")
+      .all(userId) as {
       connector_id: string;
     }[]
   ).map((r) => r.connector_id);
 }
 
-export function getPullCursor(db: DB, userId: number, connectorId: string): number {
+export function getPullCursor(
+  db: DB,
+  userId: number,
+  connectorId: string,
+): number {
   const row = db
-    .prepare('SELECT pull_cursor FROM connector_accounts WHERE user_id = ? AND connector_id = ?')
+    .prepare(
+      "SELECT pull_cursor FROM connector_accounts WHERE user_id = ? AND connector_id = ?",
+    )
     .get(userId, connectorId) as { pull_cursor: number } | undefined;
   return row?.pull_cursor ?? 0;
 }
@@ -343,10 +436,10 @@ export function setPullCursor(
   db: DB,
   userId: number,
   connectorId: string,
-  cursor: number
+  cursor: number,
 ): void {
   db.prepare(
-    'UPDATE connector_accounts SET pull_cursor = ? WHERE user_id = ? AND connector_id = ?'
+    "UPDATE connector_accounts SET pull_cursor = ? WHERE user_id = ? AND connector_id = ?",
   ).run(cursor, userId, connectorId);
 }
 
@@ -355,39 +448,65 @@ export function documentForExternal(
   db: DB,
   userId: number,
   connectorId: string,
-  externalId: string
+  externalId: string,
 ): string | null {
   const row = db
     .prepare(
-      'SELECT document FROM connector_matches WHERE user_id = ? AND connector_id = ? AND external_id = ? LIMIT 1'
+      "SELECT document FROM connector_matches WHERE user_id = ? AND connector_id = ? AND external_id = ? LIMIT 1",
     )
     .get(userId, connectorId, externalId) as { document: string } | undefined;
   return row?.document ?? null;
 }
 
 /** Canonical progress, using the same ordering as the KOSync endpoint. */
-export function latestProgress(db: DB, userId: number, document: string): {
-  percentage: number; progress: string; updated_at: number;
+export function latestProgress(
+  db: DB,
+  userId: number,
+  document: string,
+): {
+  percentage: number;
+  progress: string;
+  updated_at: number;
 } | null {
-  return db.prepare(
-    'SELECT percentage, progress, updated_at FROM progress WHERE user_id = ? AND document = ? ORDER BY updated_at DESC, device_id LIMIT 1'
-  ).get(userId, document) as { percentage: number; progress: string; updated_at: number } | undefined ?? null;
+  return (
+    (db
+      .prepare(
+        "SELECT percentage, progress, updated_at FROM progress WHERE user_id = ? AND document = ? ORDER BY updated_at DESC, device_id LIMIT 1",
+      )
+      .get(userId, document) as
+      | { percentage: number; progress: string; updated_at: number }
+      | undefined) ?? null
+  );
 }
 
-export function latestPercentage(db: DB, userId: number, document: string): number | null {
+export function latestPercentage(
+  db: DB,
+  userId: number,
+  document: string,
+): number | null {
   return latestProgress(db, userId, document)?.percentage ?? null;
 }
 
 /** All linked, enabled connector accounts across users (for the fan-in worker). */
-export function listAllEnabledAccounts(db: DB): { user_id: number; connector_id: string }[] {
+export function listAllEnabledAccounts(
+  db: DB,
+): { user_id: number; connector_id: string }[] {
   return db
-    .prepare(`SELECT user_id, connector_id FROM connector_accounts WHERE enabled = 1 AND status != 'error'`)
+    .prepare(
+      `SELECT user_id, connector_id FROM connector_accounts WHERE enabled = 1 AND status != 'error'`,
+    )
     .all() as { user_id: number; connector_id: string }[];
 }
 
-export function documentMeta(db: DB, userId: number, document: string): DocumentMeta {
+export function documentMeta(
+  db: DB,
+  userId: number,
+  document: string,
+): DocumentMeta {
   const row = db
-    .prepare('SELECT title, author, filename FROM documents WHERE user_id = ? AND document = ?')
+    .prepare(
+      "SELECT title, author, filename FROM documents WHERE user_id = ? AND document = ?",
+    )
     .get(userId, document) as
     | { title: string | null; author: string | null; filename: string | null }
     | undefined;

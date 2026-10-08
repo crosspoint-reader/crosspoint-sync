@@ -383,8 +383,8 @@ export async function pollJellyfin(
   http: HttpTransport = fetchTransport,
 ): Promise<number> {
   let total = 0;
-  for (const userId of usersWithMatches(db, 'jellyfin')) {
-    total += await pollConnector(db, userId, 'jellyfin', http);
+  for (const userId of usersWithMatches(db, "jellyfin")) {
+    total += await pollConnector(db, userId, "jellyfin", http);
   }
   return total;
 }
@@ -410,6 +410,20 @@ export async function spotifyFirstSync(
     finished: false,
   });
   return pollConnector(db, userId, "spotify", http);
+}
+
+/** After first Jellyfin link: match in-progress books, then pull remote progress. */
+export async function jellyfinFirstSync(
+  db: DB,
+  userId: number,
+  http: HttpTransport = fetchTransport,
+): Promise<number> {
+  for (const document of inProgressDocuments(db, userId)) {
+    await resolveMatch(db, "jellyfin", userId, document, http).catch(
+      () => null,
+    );
+  }
+  return pollConnector(db, userId, "jellyfin", http);
 }
 
 /** Start a periodic fan-in poller (pollAll by default); returns a stop function. */

@@ -65,9 +65,9 @@ function loginHeaders(c: JellyfinCred): Record<string, string> {
   };
 }
 
+const MAX_SESSIONS = 256;
 const sessions = new Map<string, Session>();
-const sessionKey = (c: JellyfinCred) =>
-  `${baseUrl(c.server)}\n${c.username}\n${c.password}`;
+const sessionKey = (c: JellyfinCred) => deviceId(c);
 
 function versionAtLeast(
   version: string,
@@ -131,6 +131,11 @@ async function login(http: HttpTransport, c: JellyfinCred): Promise<Session> {
     throw new ConnectorOperationError("Jellyfin returned no session", false);
   const session = { accessToken, userId };
   sessions.set(key, session);
+  while (sessions.size > MAX_SESSIONS) {
+    const oldest = sessions.keys().next().value;
+    if (oldest === undefined) break;
+    sessions.delete(oldest);
+  }
   return session;
 }
 
@@ -142,15 +147,19 @@ async function call(
   body?: unknown,
 ) {
   for (let attempt = 0; ; attempt++) {
+    const key = sessionKey(c);
+    const fromCache = sessions.has(key);
     const session = await login(http, c);
     const res = await http(`${baseUrl(c.server)}${path}`, {
       method,
       headers: authHeaders(session.accessToken),
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-    if ((res.status !== 401 && res.status !== 403) || attempt > 0)
-      return { res, session };
-    sessions.delete(sessionKey(c));
+    const authErr = res.status === 401 || res.status === 403;
+    if (!authErr) return { res, session };
+    if (res.status === 403 && !fromCache) return { res, session };
+    if (attempt > 0) return { res, session };
+    sessions.delete(key);
   }
 }
 
@@ -160,9 +169,10 @@ async function getJson(
   path: string,
 ): Promise<any> {
   const { res } = await call(http, c, "GET", path);
-  if (res.status === 401 || res.status === 403) {
+  if (res.status === 401) {
     throw new ConnectorOperationError("Jellyfin session expired", false, true);
   }
+  if (res.status === 403) return null;
   if (res.status < 200 || res.status >= 300) return null;
   try {
     return await res.json();
@@ -429,12 +439,19 @@ async function push(
   const itemPath = `/Users/${encodeURIComponent(session.userId)}/Items/${encodeURIComponent(m.externalId)}`;
 
   const getRes = await call(http, c, "GET", `${itemPath}/UserData`);
-  if (getRes.res.status === 401 || getRes.res.status === 403) {
+  if (getRes.res.status === 401) {
     return {
       ok: false,
       retryable: false,
       needsReauth: true,
       error: "unauthorized",
+    };
+  }
+  if (getRes.res.status === 403) {
+    return {
+      ok: false,
+      retryable: false,
+      error: "forbidden",
     };
   }
   let remote: Record<string, unknown> | null = null;
@@ -472,12 +489,19 @@ async function push(
   }
 
   const postRes = await call(http, c, "POST", `${itemPath}/UserData`, payload);
-  if (postRes.res.status === 401 || postRes.res.status === 403) {
+  if (postRes.res.status === 401) {
     return {
       ok: false,
       retryable: false,
       needsReauth: true,
       error: "unauthorized",
+    };
+  }
+  if (postRes.res.status === 403) {
+    return {
+      ok: false,
+      retryable: false,
+      error: "forbidden",
     };
   }
   if (postRes.res.status === 429)
