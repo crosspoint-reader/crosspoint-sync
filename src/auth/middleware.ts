@@ -40,6 +40,20 @@ export function invalidateAuthCache(username: string): void {
   verifiedCache.delete(username);
 }
 
+// Why a device was rejected, without the key itself: JSON-quoting the username
+// exposes stray whitespace/control chars; the key's shape shows MD5 vs raw.
+function logAuthFailure(username: string, key: string, reason: string): void {
+  console.warn(
+    JSON.stringify({
+      msg: 'kosync auth failed',
+      reason,
+      username,
+      keyLength: key.length,
+      keyIsMd5: /^[0-9a-f]{32}$/i.test(key),
+    })
+  );
+}
+
 export function authMiddleware(db: DB): MiddlewareHandler<AppEnv> {
   const getUser = db.prepare('SELECT id, username, key_hash FROM users WHERE username = ?');
   return async (c, next) => {
@@ -52,6 +66,7 @@ export function authMiddleware(db: DB): MiddlewareHandler<AppEnv> {
       | { id: number; username: string; key_hash: string }
       | undefined;
     if (!row) {
+      logAuthFailure(username, key, 'no such user');
       return kosyncError(c, 401, 2001, 'Unauthorized');
     }
     if (verifiedCache.get(row.username) !== key) {
@@ -59,6 +74,7 @@ export function authMiddleware(db: DB): MiddlewareHandler<AppEnv> {
       // clients (e.g. BookOrbit) send the raw password. Stored hashes are always
       // PBKDF2 of the MD5 form, so fall back to hashing the key before rejecting.
       if (!verifyKey(key, row.key_hash) && !verifyKey(md5Hex(key), row.key_hash)) {
+        logAuthFailure(username, key, 'wrong key');
         return kosyncError(c, 401, 2001, 'Unauthorized');
       }
       if (verifiedCache.size >= VERIFIED_CACHE_MAX) {
