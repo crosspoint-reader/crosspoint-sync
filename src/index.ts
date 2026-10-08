@@ -3,7 +3,7 @@ import { createApp } from "./app.js";
 import { loadSessionSecret } from "./auth/session.js";
 import { fromEnv } from "./config.js";
 import {
-  pollFanIn,
+  pollJellyfin,
   pollSpotify,
   startFanInWorker,
 } from "./connectors/fanin.js";
@@ -28,12 +28,10 @@ const connectorsEnabled = secretsEnabled();
 if (connectorsEnabled) {
   startQueueWorker(db);
   // Fan-in: pull position changes back from bidirectional connectors (e.g.
-  // Audiobookshelf audiobook -> ebook) and per-match pulls (Jellyfin).
-  startFanInWorker(
-    db,
-    Number(process.env.FANIN_INTERVAL_MS ?? 5 * 60_000),
-    pollFanIn,
-  );
+  // Audiobookshelf audiobook -> ebook)
+  startFanInWorker(db, Number(process.env.FANIN_INTERVAL_MS ?? 5 * 60_000));
+  // Jellyfin and Spotify per-match pulls (hourly).
+  startFanInWorker(db, 60 * 60_000, pollJellyfin);
   startFanInWorker(db, 60 * 60_000, pollSpotify);
 }
 // Daily: pause books with no progress for 30 days (reads also check lazily).

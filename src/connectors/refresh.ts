@@ -12,8 +12,8 @@ export type ProgressRefresh = (
 
 /**
  * Per-book fan-in pullers consulted when a device asks for progress. This is the
- * ONLY time these services hear from us (plus Spotify's hourly pollSpotify; there
- * is no other background polling), so request rates stay at human reading cadence.
+ * ONLY time these services hear from us (plus hourly pollJellyfin and pollSpotify;
+ * there is no other background polling), so request rates stay at human reading cadence.
  *
  * strict:        a puller whose failure fails the progress GET (BookFusion: its
  *                sidecar matches are treated as authoritative for the position).

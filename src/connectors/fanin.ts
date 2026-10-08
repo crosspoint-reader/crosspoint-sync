@@ -374,24 +374,19 @@ export async function pollSpotify(
   return total;
 }
 
-/** Jellyfin: per-match UserData pull on the main fan-in interval. */
+/**
+ * Jellyfin hourly pull (same shape as pollSpotify): per-match UserData for every
+ * user with at least one match. Progress GET refresh still runs on demand.
+ */
 export async function pollJellyfin(
   db: DB,
   http: HttpTransport = fetchTransport,
 ): Promise<number> {
   let total = 0;
-  for (const userId of usersWithMatches(db, "jellyfin")) {
-    total += await pollConnector(db, userId, "jellyfin", http);
+  for (const userId of usersWithMatches(db, 'jellyfin')) {
+    total += await pollConnector(db, userId, 'jellyfin', http);
   }
   return total;
-}
-
-/** Default fan-in tick: Audiobookshelf library scan plus Jellyfin match pulls. */
-export async function pollFanIn(
-  db: DB,
-  http: HttpTransport = fetchTransport,
-): Promise<number> {
-  return (await pollAll(db, http)) + (await pollJellyfin(db, http));
 }
 
 /**
