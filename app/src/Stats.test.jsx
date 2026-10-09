@@ -27,9 +27,8 @@ describe('daily reading time', () => {
 
   it.each([
     ['missing', undefined],
+    ['null', null],
     ['empty', []],
-    ['older than seven days', [{ date: '2026-09-23', seconds: 4200 }]],
-    ['future only', [{ date: '2026-10-01', seconds: 4200 }]],
   ])('hides both tiles when daily history is %s', (_, daily) => {
     const { queryByText, getByText } = render(<Stats session={{}} books={[]} summary={{ ...summary, daily }} />)
     expect(queryByText('Today')).toBeNull()
@@ -37,11 +36,35 @@ describe('daily reading time', () => {
     expect(getByText('Time read').nextElementSibling.textContent).toBe('1h')
   })
 
-  it('shows the weekly average without a missing Today stat', () => {
+  it('shows zero for Today when only earlier days have reading time', () => {
     const daily = [{ date: '2026-09-24', seconds: 4200 }]
-    const { queryByText, getByText } = render(<Stats session={{}} books={[]} summary={{ ...summary, daily }} />)
-    expect(queryByText('Today')).toBeNull()
+    const { getByText } = render(<Stats session={{}} books={[]} summary={{ ...summary, daily }} />)
+    expect(getByText('Today').nextElementSibling.textContent).toBe('0m')
     expect(getByText('7-day average').nextElementSibling.textContent).toBe('10m')
+  })
+
+  it.each(['2026-09-23', '2026-10-01'])('shows both zero tiles when history exists outside the past week: %s', (date) => {
+    const daily = [{ date, seconds: 4200 }]
+    const { getByText } = render(<Stats session={{}} books={[]} summary={{ ...summary, daily }} />)
+    expect(getByText('Today').nextElementSibling.textContent).toBe('0m')
+    expect(getByText('7-day average').nextElementSibling.textContent).toBe('0m')
+  })
+
+  it('reveals both tiles when the first daily record arrives and keeps them after it ages out', () => {
+    const props = { session: {}, books: [] }
+    const { queryByText, getByText, rerender } = render(<Stats {...props} summary={{ ...summary, daily: [] }} />)
+    expect(queryByText('Today')).toBeNull()
+    expect(queryByText('7-day average')).toBeNull()
+
+    const daily = [{ date: '2026-09-30', seconds: 4200 }]
+    rerender(<Stats {...props} summary={{ ...summary, daily }} />)
+    expect(getByText('Today').nextElementSibling.textContent).toBe('1h 10m')
+    expect(getByText('7-day average').nextElementSibling.textContent).toBe('10m')
+
+    vi.setSystemTime(new Date('2026-10-07T12:00:00Z'))
+    rerender(<Stats {...props} summary={{ ...summary, daily }} />)
+    expect(getByText('Today').nextElementSibling.textContent).toBe('0m')
+    expect(getByText('7-day average').nextElementSibling.textContent).toBe('0m')
   })
 
   it.each([0, 4200])('shows both tiles for a recorded Today value of %s seconds', (seconds) => {

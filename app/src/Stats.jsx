@@ -266,21 +266,14 @@ function Tiles({ tiles, action }) {
 const DAY_MS = 86400000
 const localDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
-// Missing stats stay unknown; a recorded week averages over all seven calendar days.
+// Once daily history exists, days without reading count as zero in the 7-day average.
 function dailyReading(daily) {
   const byDay = new Map(daily.map((d) => [d.date, d.seconds]))
   const now = new Date()
   now.setHours(12, 0, 0, 0)
   let total = 0
-  let hasWeek = false
-  for (let i = 0; i < 7; i++) {
-    const seconds = byDay.get(localDay(new Date(now.getTime() - i * DAY_MS)))
-    if (seconds != null) {
-      total += seconds
-      hasWeek = true
-    }
-  }
-  return { today: byDay.get(localDay(now)), average: hasWeek ? total / 7 : null }
+  for (let i = 0; i < 7; i++) total += byDay.get(localDay(new Date(now.getTime() - i * DAY_MS))) ?? 0
+  return { today: byDay.get(localDay(now)) ?? 0, average: total / 7 }
 }
 
 // Print pages per week (Monday start), newest week last.
@@ -779,7 +772,7 @@ function Timeline({ session, activity, books }) {
 
 export default function Stats({ session, tab = '', summary, activity, books }) {
   const hasTime = summary?.devices?.length > 0
-  // Only CrossInk firmware with daily tracking sends per-day reading time.
+  // Hide both tiles until the reader has sent any daily history, even a zero counter.
   const daily = summary?.daily?.length ? dailyReading(summary.daily) : null
   const [sharing, setSharing] = useState(false)
   const header = (
@@ -813,8 +806,12 @@ export default function Stats({ session, tab = '', summary, activity, books }) {
             tiles={[
               ['Current streak', `${summary.current_streak} days`],
               ['Longest streak', `${summary.streak} days`],
-              ...(daily?.today != null ? [['Today', duration(daily.today)]] : []),
-              ...(daily?.average != null ? [['7-day average', duration(daily.average)]] : []),
+              ...(daily
+                ? [
+                    ['Today', duration(daily.today)],
+                    ['7-day average', duration(daily.average)],
+                  ]
+                : []),
               ['Time read', duration(summary.seconds)],
               ['Pages turned', summary.pages.toLocaleString()],
               ['Sessions', summary.sessions.toLocaleString()],
