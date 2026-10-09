@@ -93,8 +93,10 @@ export function mergeDocuments(
     ).run(now, userId, into, userId, into);
     // The merge bypasses upsertProgress, so stamp the canonical rows itself;
     // otherwise devices never see the merged position until the next write.
-    db.prepare('UPDATE progress SET change_seq = ? WHERE user_id = ? AND document = ?').run(
-      nextChangeSeq(db),
+    const seq = nextChangeSeq(db);
+    db.prepare('UPDATE progress SET change_seq = ?, server_change_seq = ? WHERE user_id = ? AND document = ?').run(
+      seq,
+      seq,
       userId,
       into
     );

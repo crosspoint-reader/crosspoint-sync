@@ -106,6 +106,22 @@ describe('progress batch PUT', () => {
     expect((await batch(full)).status).toBe(200);
   });
 
+  it('rolls back earlier items and feed cursors when a later database write fails', async () => {
+    const { db, item, batch, rows } = await setup();
+    db.exec(`CREATE TRIGGER reject_second_book BEFORE INSERT ON progress
+      WHEN NEW.document = '${DOC2}' BEGIN SELECT RAISE(ABORT, 'test write failure'); END`);
+    const res = await batch([item(DOC, 0.4, { metadata: { title: 'First' } }), item(DOC2, 0.5)]);
+    expect(res.status).toBe(500);
+    expect(rows()).toEqual([]);
+    for (const table of ['progress_log', 'progress_samples', 'documents']) {
+      expect(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()).toEqual({ n: 0 });
+    }
+    expect(db.prepare('SELECT value FROM change_seq').get()).toEqual({ value: 0 });
+    db.exec('DROP TRIGGER reject_second_book');
+    expect((await batch([item(DOC, 0.4)])).status).toBe(200);
+    expect(rows()).toHaveLength(1);
+  });
+
   it('requires authentication', async () => {
     const { item, batch } = await setup();
     expect((await batch([item(DOC, 0.4)], false)).status).toBe(401);

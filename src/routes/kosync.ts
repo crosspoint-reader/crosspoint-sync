@@ -1,6 +1,6 @@
 import type { ProgressRefresh } from '../connectors/refresh.js';
 import { Hono } from 'hono';
-import type { DB } from '../db/db.js';
+import { withTransaction, type DB } from '../db/db.js';
 import type { Config } from '../config.js';
 import { autoFinish, autoPause, autoUnpause } from '../models/pause.js';
 import {
@@ -202,56 +202,75 @@ function previousPercentage(db: DB, p: ProgressUpsert): number | undefined {
 }
 
 export function upsertProgress(db: DB, p: ProgressUpsert): void {
-  // History for server-derived activity stats; skip re-pushes of the same spot.
-  if (previousPercentage(db, p) !== p.percentage) {
-    db.prepare('INSERT INTO progress_log (user_id, document, device_id, percentage, at) VALUES (?, ?, ?, ?, ?)').run(
+  withTransaction(db, () => {
+    const previous = db.prepare(
+      `SELECT device_id FROM progress WHERE user_id = ? AND document = ?
+       ORDER BY updated_at DESC, device_id LIMIT 1`
+    ).get(p.userId, p.document) as { device_id: string } | undefined;
+    const seq = nextChangeSeq(db);
+    // History for server-derived activity stats; skip re-pushes of the same spot.
+    if (previousPercentage(db, p) !== p.percentage) {
+      db.prepare('INSERT INTO progress_log (user_id, document, device_id, percentage, at) VALUES (?, ?, ?, ?, ?)').run(
+        p.userId,
+        p.document,
+        p.deviceId,
+        p.percentage,
+        p.updatedAt
+      );
+      autoUnpause(db, p.userId, p.document, p.updatedAt);
+      autoFinish(db, p.userId, p.document, p.percentage, p.updatedAt);
+    }
+    // Every write gets a fresh feed sequence number, even a same-spot re-push:
+    // it may have become the document's newest row.
+    db.prepare(
+      `INSERT INTO progress (user_id, document, device_id, device, percentage, progress, position, updated_at, change_seq)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id, document, device_id) DO UPDATE SET
+         device = excluded.device,
+         percentage = excluded.percentage,
+         progress = excluded.progress,
+         position = COALESCE(excluded.position, progress.position),
+         updated_at = excluded.updated_at,
+         change_seq = excluded.change_seq`
+    ).run(
       p.userId,
       p.document,
       p.deviceId,
+      p.device,
       p.percentage,
-      p.updatedAt
+      p.progress,
+      p.position,
+      p.updatedAt,
+      seq
     );
-    autoUnpause(db, p.userId, p.document, p.updatedAt);
-    autoFinish(db, p.userId, p.document, p.percentage, p.updatedAt);
-  }
-  // Every write gets a fresh feed sequence number, even a same-spot re-push:
-  // it may have become the document's newest row.
-  db.prepare(
-    `INSERT INTO progress (user_id, document, device_id, device, percentage, progress, position, updated_at, change_seq)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(user_id, document, device_id) DO UPDATE SET
-       device = excluded.device,
-       percentage = excluded.percentage,
-       progress = excluded.progress,
-       position = COALESCE(excluded.position, progress.position),
-       updated_at = excluded.updated_at,
-       change_seq = excluded.change_seq`
-  ).run(
-    p.userId,
-    p.document,
-    p.deviceId,
-    p.device,
-    p.percentage,
-    p.progress,
-    p.position,
-    p.updatedAt,
-    nextChangeSeq(db)
-  );
-  if (p.metadata) {
-    upsertDocumentMetadata(db, p.userId, p.document, p.metadata, p.updatedAt);
-    // Exact service ids from the plugin sidecar bypass fuzzy matching: seed the
-    // connector match cache so the runner pushes straight to that record.
-    if (Object.keys(p.metadata.externalIds).length > 0) {
-      seedSidecarMatches(
-        db,
-        p.userId,
-        p.document,
-        p.metadata.externalIds,
-        (id) => getConnector(id) !== undefined,
-        p.updatedAt
-      );
+    if (p.metadata) {
+      upsertDocumentMetadata(db, p.userId, p.document, p.metadata, p.updatedAt);
+      // Exact service ids from the plugin sidecar bypass fuzzy matching: seed the
+      // connector match cache so the runner pushes straight to that record.
+      if (Object.keys(p.metadata.externalIds).length > 0) {
+        seedSidecarMatches(
+          db,
+          p.userId,
+          p.document,
+          p.metadata.externalIds,
+          (id) => getConnector(id) !== undefined,
+          p.updatedAt
+        );
+      }
     }
-  }
+    // A write can lower the previous winner's timestamp (for example after a
+    // merge). If an untouched row now wins, give that effective position this
+    // write's sequence and mark it as a server-made change for every reader.
+    if (previous?.device_id === p.deviceId) {
+      db.prepare(
+        `UPDATE progress SET change_seq = ?, server_change_seq = ?
+         WHERE rowid = (
+           SELECT rowid FROM progress WHERE user_id = ? AND document = ?
+           ORDER BY updated_at DESC, device_id LIMIT 1
+         ) AND device_id <> ?`
+      ).run(seq, seq, p.userId, p.document, p.deviceId);
+    }
+  });
 }
 
 /**

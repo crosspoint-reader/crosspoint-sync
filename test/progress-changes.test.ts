@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { DOC, makeTestApp, md5, registerUser } from './helpers.js';
 import { upsertProgress } from '../src/routes/kosync.js';
 import { migrate, openDatabase } from '../src/db/db.js';
@@ -114,6 +114,68 @@ describe('progress change feed', () => {
     const page = await changes(`?since=${cursor}`);
     expect(page.changes).toMatchObject([{ document: DOC, aliases: [ALIAS], percentage: 0.6, device_id: 'kobo' }]);
   });
+
+  it('delivers a merge to its original reader even after another self-written update', async () => {
+    const { app, headers, push, changes } = await setup();
+    await push(DOC, 0.2, 'reader');
+    await push(ALIAS, 0.6, 'reader');
+    const { cursor } = await changes('?device=reader');
+    const merged = await app.request('/api/v1/documents/merge', {
+      method: 'POST', headers, body: JSON.stringify({ document: ALIAS, into: DOC }),
+    });
+    expect(merged.status).toBe(200);
+    const page = await changes(`?since=${cursor}&device=reader`);
+    expect(page.changes).toMatchObject([{ document: DOC, aliases: [ALIAS], percentage: 0.6, device_id: 'reader' }]);
+    expect(page.cursor).toBeGreaterThan(cursor);
+
+    await push(DOC, 0.65, 'reader');
+    // A write must not erase a merge that this caller has not consumed yet.
+    expect((await changes(`?since=${cursor}&device=reader`)).changes).toMatchObject([
+      { document: DOC, aliases: [ALIAS], percentage: 0.65 },
+    ]);
+    expect((await changes(`?since=${page.cursor}&device=reader`)).changes).toEqual([]);
+
+    // Even a newly inserted winning row must preserve the document's pending
+    // merge notification; that row did not exist when the merge was stamped.
+    await push(DOC, 0.7, 'aaa-new-reader');
+    expect((await changes(`?since=${cursor}&device=aaa-new-reader`)).changes).toMatchObject([
+      { document: DOC, aliases: [ALIAS], percentage: 0.7 },
+    ]);
+  });
+
+  it.each(['/syncs/progress', '/api/v1/progress', '/api/v1/progress/batch'])(
+    'reports an existing row becoming newest after a write via %s', async (route) => {
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000);
+      try {
+        const { app, headers, push, changes } = await setup();
+        await push(DOC, 0.2, 'aaa-phone');
+        await push(ALIAS, 0.6, 'zzz-reader');
+        const merged = await app.request('/api/v1/documents/merge', {
+          method: 'POST', headers, body: JSON.stringify({ document: ALIAS, into: DOC }),
+        });
+        expect(merged.status).toBe(200);
+        const before = await changes();
+        expect(before.changes).toMatchObject([{ document: DOC, percentage: 0.6 }]);
+        // Merge raised the reader's timestamp to now+1. Its next upload resets
+        // that to now, making the phone win the same-second device-id tie.
+        const item = { document: DOC, percentage: 0.7, progress: '/body/p[70]', device_id: 'zzz-reader' };
+        const pushed = await app.request(route, {
+          method: 'PUT', headers, body: JSON.stringify(route.endsWith('/batch') ? { items: [item] } : item),
+        });
+        expect(pushed.status).toBe(200);
+        const current = await app.request(`/syncs/progress/${DOC}`, { headers });
+        expect(await current.json()).toMatchObject({ percentage: 0.2, device_id: 'aaa-phone' });
+        for (const device of ['observer', 'aaa-phone']) {
+          const page = await changes(`?since=${before.cursor}&device=${device}`);
+          expect(page.changes).toMatchObject([{ document: DOC, percentage: 0.2, device_id: 'aaa-phone' }]);
+          expect(page.cursor).toBeGreaterThan(before.cursor);
+          expect((await changes(`?since=${page.cursor}&device=${device}`)).changes).toEqual([]);
+        }
+      } finally {
+        clock.mockRestore();
+      }
+    }
+  );
 
   it("leaves out documents whose newest row is the requesting device's own", async () => {
     const { push, changes } = await setup();
@@ -287,6 +349,13 @@ describe('change_seq migration', () => {
     expect(new Set(seqs).size).toBe(2);
     const counter = (db.prepare('SELECT value FROM change_seq').get() as { value: number }).value;
     expect(counter).toBe(seqs[1]);
+    fs.copyFileSync(path.join(migrations, '0025_progress_server_change_seq.sql'), path.join(dir, '0025_progress_server_change_seq.sql'));
+    migrate(db, dir);
+    expect(db.prepare('SELECT change_seq, server_change_seq FROM progress ORDER BY change_seq').all()).toEqual(
+      seqs.map((change_seq) => ({ change_seq, server_change_seq: 0 }))
+    );
+    expect(db.prepare('SELECT value FROM change_seq').get()).toEqual({ value: counter });
+    db.close();
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });

@@ -233,6 +233,16 @@ devices until the next progress write. The migration stamps existing rows with t
 starts the counter at the highest one), so they are returned by `since=0` and a device's cursor moves
 past them instead of replaying them on every sync.
 
+Migration `0025_progress_server_change_seq.sql` adds `progress.server_change_seq` (default 0).
+Merges stamp both sequence columns. When an upload lowers the previous winner's timestamp and
+another existing row becomes newest, that winning row also receives the write's sequence in both
+columns. This records a change to the effective position even though its original row was not
+uploaded again. Progress writes use nested savepoints so the cursor and selected position change
+atomically both individually and inside a batch.
+
+Ordinary uploads preserve `server_change_seq`. The feed checks its maximum across the document's
+rows, so a later upload (including a new device row) cannot hide an unconsumed merge notification.
+
 ### History check for a device's first write
 
 `upsertProgress` only writes a `progress_log` entry (and runs auto-unpause/auto-finish) when the
@@ -288,6 +298,8 @@ Response:
   written by the requesting device id, the document is left out of the page. It does **not** fall
   back to the newest row from another device (that older position would make the reader mark itself
   pending and re-push for nothing). Relies on per-reader ids (Decisions 1).
+  Server-side changes bypass self-exclusion while the document's `server_change_seq > since`:
+  the original uploader still needs to learn about merges and changes in the selected row.
 - The route sits behind the same auth middleware as the rest of `/api/v1`.
 - `cursor` is the highest `change_seq` in this page. `more` tells the device to request again.
 - `limit` defaults to 20, max 50. The server also stops adding changes once the response body passes

@@ -306,9 +306,11 @@ Query: `since` (cursor from the previous page, default `0` for a full snapshot),
   row changed after `since`. `document` is canonical; `aliases` lists merged hashes.
 - Every progress write (kosync and v1 PUTs, connector fan-in, document merges) stamps a server-wide
   sequence number on the row, so the cursor does not depend on `updated_at` (fan-in keeps the
-  external service's timestamp).
+  external service's timestamp). If a write makes an existing row become newest, that winning row
+  also receives a fresh sequence so the feed reports the effective position change.
 - A document whose newest row was written by `device` is left out; there is no fallback to an older
-  row from another device. The cursor still moves past it.
+  row from another device. Server-side merges and switches to an existing row bypass this exclusion
+  until the cursor passes that server-side change. The cursor still moves past excluded rows.
 - `cursor` is where the next request should start; repeat with `since = cursor` while `more` is
   true. A page also stops before its body passes 8 KB, but always holds at least one change.
 - Servers without this route (stock kosync, older crosspoint-sync) return 404; devices fall back to
