@@ -1,4 +1,4 @@
-import type { DB } from '../db/db.js';
+import type { DB } from "../db/db.js";
 
 /**
  * Connector framework types. A connector adapts crosspoint-sync's canonical
@@ -8,12 +8,22 @@ import type { DB } from '../db/db.js';
 export type Capability = { read: boolean; write: boolean };
 
 /** Per-user storage a connector may use for derived book data (e.g. EPUB position maps). */
-export interface ConnectorContext { db: DB; userId: number; }
+export interface ConnectorContext {
+  db: DB;
+  userId: number;
+}
 
 /** What data types a connector carries (progress/shelves vs highlights). */
-export type DataKind = 'progress' | 'finished' | 'highlight';
+export type DataKind = "progress" | "finished" | "highlight";
 
-export type CredentialKind = 'token' | 'oauth' | 'cookies' | 'kosync' | 'device_code' | 'abs';
+export type CredentialKind =
+  | "token"
+  | "oauth"
+  | "cookies"
+  | "kosync"
+  | "device_code"
+  | "abs"
+  | "jellyfin";
 
 /** Interactive OAuth device-code link handshake (BookFusion). */
 export interface DeviceLinkStart {
@@ -26,7 +36,7 @@ export interface DeviceLinkStart {
   expiresIn: number;
 }
 export interface DeviceLinkPoll {
-  status: 'pending' | 'ok' | 'denied' | 'expired' | 'error';
+  status: "pending" | "ok" | "denied" | "expired" | "error";
   credential?: Record<string, unknown>;
   accountLabel?: string;
   error?: string;
@@ -144,10 +154,10 @@ export class ConnectorOperationError extends Error {
   constructor(
     message: string,
     public readonly retryable: boolean,
-    public readonly needsReauth = false
+    public readonly needsReauth = false,
   ) {
     super(message);
-    this.name = 'ConnectorOperationError';
+    this.name = "ConnectorOperationError";
   }
 }
 
@@ -162,13 +172,16 @@ export interface ValidateResult {
  * without real network access. Mirrors the subset of fetch we use.
  */
 export interface HttpTransport {
-  (url: string, init: {
-    method: string;
-    headers?: Record<string, string>;
-    body?: string;
-    signal?: AbortSignal;
-    redirect?: 'error' | 'follow' | 'manual';
-  }): Promise<{
+  (
+    url: string,
+    init: {
+      method: string;
+      headers?: Record<string, string>;
+      body?: string;
+      signal?: AbortSignal;
+      redirect?: "error" | "follow" | "manual";
+    },
+  ): Promise<{
     status: number;
     text(): Promise<string>;
     json(): Promise<unknown>;
@@ -185,7 +198,7 @@ export type Credential = Record<string, unknown>;
  * current fields (e.g. after an OAuth refresh rotated its tokens). A symbol, so
  * it never reaches JSON.
  */
-export const SAVE_CREDENTIAL = Symbol('saveCredential');
+export const SAVE_CREDENTIAL = Symbol("saveCredential");
 export type SavableCredential = Credential & { [SAVE_CREDENTIAL]?: () => void };
 
 export interface Connector {
@@ -214,12 +227,16 @@ export interface Connector {
    *  - 'document': keyed by our document id directly (e.g. a kosync mirror), so it
    *    always applies regardless of metadata.
    */
-  matchBy?: 'document' | 'metadata';
+  matchBy?: "document" | "metadata";
 
   /** PKCE sign-in details. */
   oauth?(): OAuthConfig;
   /** Whether the provider knows a user-supplied client id. Optional. */
-  checkClientId?(clientId: string, redirectUri: string, http: HttpTransport): Promise<'ok' | 'rejected' | 'unknown'>;
+  checkClientId?(
+    clientId: string,
+    redirectUri: string,
+    http: HttpTransport,
+  ): Promise<"ok" | "rejected" | "unknown">;
 
   /** Validate a credential and return the account label if possible. */
   validate(cred: Credential, http: HttpTransport): Promise<ValidateResult>;
@@ -232,7 +249,7 @@ export interface Connector {
     cred: Credential,
     doc: DocumentMeta,
     http: HttpTransport,
-    ev?: OutboundEvent
+    ev?: OutboundEvent,
   ): Promise<Match | null>;
 
   /** Create an external book only after matching found no existing record. */
@@ -240,35 +257,55 @@ export interface Connector {
     cred: Credential,
     doc: DocumentMeta,
     ev: OutboundEvent,
-    http: HttpTransport
+    http: HttpTransport,
   ): Promise<Match | null>;
 
   /** Push one outbound event. Only called for write-capable connectors. */
-  push(cred: Credential, match: Match, ev: OutboundEvent, http: HttpTransport, ctx?: ConnectorContext): Promise<PushResult>;
+  push(
+    cred: Credential,
+    match: Match,
+    ev: OutboundEvent,
+    http: HttpTransport,
+    ctx?: ConnectorContext,
+  ): Promise<PushResult>;
 
   /**
    * The user's "currently reading" / "in progress" books at this service.
    * A small, high-signal candidate pool tried before catalog search, and shown
    * in the manual-match picker. Optional.
    */
-  listCurrentlyReading?(cred: Credential, http: HttpTransport): Promise<ExternalBook[]>;
+  listCurrentlyReading?(
+    cred: Credential,
+    http: HttpTransport,
+  ): Promise<ExternalBook[]>;
 
   /** Free-text catalog search for the manual-match picker. Optional. */
-  search?(cred: Credential, query: string, http: HttpTransport): Promise<ExternalBook[]>;
+  search?(
+    cred: Credential,
+    query: string,
+    http: HttpTransport,
+  ): Promise<ExternalBook[]>;
 
   /**
    * Resolve the opaque `externalEdition` hint for an already-chosen book (e.g.
    * an audiobook's duration). Called when a match is saved without one so push
    * has what it needs. Optional; returns null if it can't be determined.
    */
-  resolveEdition?(cred: Credential, externalId: string, http: HttpTransport): Promise<string | null>;
+  resolveEdition?(
+    cred: Credential,
+    externalId: string,
+    http: HttpTransport,
+  ): Promise<string | null>;
 
   /**
    * Force-refresh the connector's server-side library list (for a dashboard
    * "refresh library" button). Returns the new item count. Optional — most
    * connectors search a live catalog and have nothing to refresh.
    */
-  refreshLibrary?(cred: Credential, http: HttpTransport): Promise<{ count: number } | null>;
+  refreshLibrary?(
+    cred: Credential,
+    http: HttpTransport,
+  ): Promise<{ count: number } | null>;
 
   /**
    * Verify an externally-supplied book id against the user's account at this
@@ -280,7 +317,7 @@ export interface Connector {
   lookup?(
     cred: Credential,
     externalId: string,
-    http: HttpTransport
+    http: HttpTransport,
   ): Promise<(ExternalBook & { edition?: string | null }) | null>;
 
   /**
@@ -288,11 +325,19 @@ export interface Connector {
    * Only read-capable connectors implement it. The runner maps each change back
    * to a document and writes it into canonical progress. Optional.
    */
-  pullChanges?(cred: Credential, http: HttpTransport, sinceMs: number): Promise<InboundChange[]>;
+  pullChanges?(
+    cred: Credential,
+    http: HttpTransport,
+    sinceMs: number,
+  ): Promise<InboundChange[]>;
 
   /** Poll a known book instead of scanning the provider library; sinceMs is its canonical timestamp. */
   pullProgress?(
-    cred: Credential, match: Match, http: HttpTransport, sinceMs: number, ctx?: ConnectorContext
+    cred: Credential,
+    match: Match,
+    http: HttpTransport,
+    sinceMs: number,
+    ctx?: ConnectorContext,
   ): Promise<InboundChange | null>;
 
   /**
@@ -301,7 +346,10 @@ export interface Connector {
    * known ones (which can mean downloading the EPUB). Optional.
    */
   pullHighlights?(
-    cred: Credential, match: Match, http: HttpTransport, skip: (text: string) => boolean
+    cred: Credential,
+    match: Match,
+    http: HttpTransport,
+    skip: (text: string) => boolean,
   ): Promise<InboundHighlight[]>;
 
   /** Begin an interactive device-code link (OAuth device grant). Optional. */

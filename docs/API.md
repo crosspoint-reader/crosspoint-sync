@@ -652,9 +652,10 @@ Body `{"external_id": "…"}`. `{"found": true, "book": {"externalId", "title",
 so connectors need "Send Metadata" on). **Fan-out** is automatic: a progress PUT enqueues a
 progress/finished event to write-connectors that carry it; a clippings PUT enqueues highlight events
 to highlight-connectors (Readwise). A background worker delivers them with retry/backoff.
-**Fan-in** (read connectors: Audiobookshelf, BookOrbit, Readwise Reader, BookFusion) is pulled on a
-background interval for library-wide providers, and on-demand — when a device asks for progress on a
-matched book — for per-book providers.
+**Fan-in** (read connectors: Audiobookshelf, Jellyfin, BookOrbit, Readwise Reader, BookFusion): Audiobookshelf
+is polled on a background interval (library-wide `pullChanges`); Jellyfin and Spotify run hourly per-match
+`pullProgress` for users with matches; BookOrbit, BookFusion, Kindle, and Jellyfin also pull on-demand when
+a device asks for progress on a matched book.
 BookOrbit also pulls highlights on that refresh: each one is placed by its CFI in BookOrbit's copy of
 the EPUB and stored as a clipping (chapter codepoint offsets, firmware-style id), skipped when the same
 quote is already a clipping on the book, live or deleted.

@@ -43,9 +43,16 @@ const HINTS = {
   kosync: 'Mirrors your reading progress to another KOReader-compatible (KOSync) server.',
   bookfusion: 'Syncs reading progress with BookFusion. You approve the request on bookfusion.com.',
   audiobookshelf: 'Keeps your place between the ebook and the audiobook. Create an API key in Audiobookshelf under Settings, Users, API Keys.',
+  jellyfin: 'Syncs reading progress with your Jellyfin book library (Jellyfin 12.0 or newer). Sign in with your Jellyfin username and password.',
   bookorbit: 'Syncs progress both ways with your BookOrbit server, and adds your clippings as highlights.',
   spotify: 'Moves your progress forward when you listen ahead in the Spotify audiobook, and resumes it there. Audiobooks are in the US, UK, Canada, Ireland, Australia and New Zealand.',
   kindle: 'Linking needs the CrossPoint Kindle Link browser extension.',
+}
+
+const SERVER_URL_EXAMPLE = {
+  jellyfin: 'https://jellyfin.example.com',
+  bookorbit: 'https://books.example.com',
+  kosync: 'https://sync.koreader.rocks',
 }
 // Where to get a token, for the services that use one.
 const TOKEN_HELP = {
@@ -394,12 +401,14 @@ export function LinkForm({ session, conn, onLinked }) {
         {conn.id === 'hardcover' && tokenForm}
       </div>
     )
-  } else if (conn.credential_kind === 'kosync') {
+  } else if (conn.credential_kind === 'kosync' || conn.credential_kind === 'jellyfin') {
+    const serverPlaceholder = SERVER_URL_EXAMPLE[conn.id] ?? SERVER_URL_EXAMPLE.kosync
+    const connectLabel = conn.id === 'jellyfin' ? 'Connect Jellyfin' : 'Connect'
     body = (
       <form className="space-y-2">
         <input
           className={`${field} font-mono`}
-          placeholder={conn.id === 'bookorbit' ? 'https://books.example.com' : 'https://sync.koreader.rocks'}
+          placeholder={serverPlaceholder}
           value={v.server ?? ''}
           onChange={set('server')}
           inputMode="url"
@@ -407,7 +416,7 @@ export function LinkForm({ session, conn, onLinked }) {
         />
         <input className={field} placeholder="Username" value={v.username ?? ''} onChange={set('username')} autoCapitalize="none" autoComplete="off" />
         <input className={field} type="password" placeholder="Password" value={v.password ?? ''} onChange={set('password')} autoComplete="off" />
-        {submit('Connect', () => ({
+        {submit(connectLabel, () => ({
           server: (v.server ?? '').trim(),
           username: (v.username ?? '').trim(),
           password: v.password ?? '',

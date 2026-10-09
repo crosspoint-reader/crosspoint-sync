@@ -7,7 +7,10 @@ import type { AppEnv } from '../auth/middleware.js';
 import { SESSION_COOKIE, verifySession } from '../auth/session.js';
 import { extensionZip } from '../kindle-zip.js';
 import { HARDCOVER_NEW_KEY_URL, HARDCOVER_SCOPES } from '../connectors/hardcover.js';
+import { SERVER_URL_EXAMPLES } from '../connectors/server-url-examples.js';
 import { landingPage } from './landing.js';
+
+const SERVER_URL_EXAMPLES_JS = JSON.stringify(SERVER_URL_EXAMPLES);
 
 /**
  * Minimal server-rendered web UI (no framework, no build step, no deps). Styled
@@ -24,7 +27,7 @@ const FAVICON = fs.readFileSync(path.join(ASSETS_DIR, 'favicon.png'));
 // Service app icons, served at /icons/:id.png. Loaded once at boot; a missing
 // file just means no icon for that service (the UI falls back gracefully).
 const SERVICE_ICONS = new Map<string, Buffer>();
-for (const id of ['kosync', 'hardcover', 'audiobookshelf', 'bookfusion', 'readwise', 'microblog', 'bookorbit', 'spotify', 'kindle']) {
+for (const id of ['kosync', 'hardcover', 'audiobookshelf', 'jellyfin', 'bookfusion', 'readwise', 'microblog', 'bookorbit', 'spotify', 'kindle']) {
   try {
     SERVICE_ICONS.set(id, fs.readFileSync(path.join(ASSETS_DIR, 'icons', `${id}.png`)));
   } catch {
@@ -281,6 +284,9 @@ const LANDING = shell(
      <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/audiobookshelf.png" alt="" width="34" height="34"><div><div class="name">Audiobookshelf</div>
        <div class="desc">Keep your place between the ebook and the audiobook, both ways. Read some, then pick up listening right where you left off.</div></div></div>
        <span class="pill">ready</span></div>
+     <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/jellyfin.png" alt="" width="34" height="34"><div><div class="name">Jellyfin</div>
+       <div class="desc">Sync reading progress with books on your Jellyfin server (12.0+).</div></div></div>
+       <span class="pill warn">beta</span></div>
      <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/bookorbit.png" alt="" width="34" height="34"><div><div class="name">BookOrbit</div>
        <div class="desc">Keep your place in sync, both ways, with your own BookOrbit library. Clippings show up as highlights, and finished books are marked Read.</div></div></div>
        <span class="pill warn">beta</span></div>
@@ -604,6 +610,7 @@ const HINTS = {
   kosync: 'Mirror your reading progress to another KOReader-compatible (KOSync) server, so your other devices see it too.',
   bookfusion: 'Connect your BookFusion account to sync reading progress. You will approve the request on bookfusion.com.',
   audiobookshelf: 'Sync your reading position to the matching audiobook on your Audiobookshelf server. Create an API key in Audiobookshelf under Settings, Users, API Keys.',
+  jellyfin: 'Sync reading progress with books in your Jellyfin library. Requires Jellyfin 12.0 or newer. Sign in with your Jellyfin username and password.',
   bookorbit: 'Sync reading progress both ways with your BookOrbit server. Books are matched by title and author, finishing a book marks it Read, and your clippings appear as highlights in the right spot. Sign in with your BookOrbit account.'
 };
 
@@ -662,11 +669,13 @@ function render(conn) {
       const r = await linkCredential({ token: $('tok').value.trim() });
       if (r.ok) done(); else $('e').textContent = r.data.message || 'Could not link';
     };
-  } else if (conn.credential_kind === 'kosync') {
-    f.innerHTML = '<label>Server URL</label><input id="srv" class="mono" placeholder="' + (ID === 'bookorbit' ? 'https://books.example.com' : 'https://sync.koreader.rocks:443') + '">'
+  } else if (conn.credential_kind === 'kosync' || conn.credential_kind === 'jellyfin') {
+    const srvPh = (${SERVER_URL_EXAMPLES_JS}[ID] || ${SERVER_URL_EXAMPLES_JS}.kosync);
+    const goLabel = ID === 'jellyfin' ? 'Connect Jellyfin' : 'Connect server';
+    f.innerHTML = '<label>Server URL</label><input id="srv" class="mono" placeholder="' + srvPh + '">'
       + '<div style="margin-top:10px"><label>Username</label><input id="u" autocomplete="off"></div>'
       + '<div style="margin-top:10px"><label>Password</label><input id="p" type="password" autocomplete="off"></div>'
-      + '<button class="primary full mt" id="go">Connect server</button><div class="err" id="e"></div>';
+      + '<button class="primary full mt" id="go">' + goLabel + '</button><div class="err" id="e"></div>';
     $('go').onclick = async () => {
       $('e').textContent = '';
       const r = await linkCredential({ server: $('srv').value.trim(), username: $('u').value.trim(), password: $('p').value });
