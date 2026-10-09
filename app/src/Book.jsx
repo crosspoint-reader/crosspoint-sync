@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, CalendarDays, Hash, MoreHorizontal, Split, Trash2, Image as ImageIcon, Loader2, Merge, Quote, Search, Share2, Star, X } from 'lucide-react'
+import { ArrowLeft, CalendarDays, Hash, MoreHorizontal, PenLine, Split, Trash2, Image as ImageIcon, Loader2, Merge, Quote, Search, Share2, Star, X } from 'lucide-react'
 import { api, isApp } from './api.js'
 import { renderCard } from './shareCard.js'
 import { isPace, moodEmoji } from './moods.js'
@@ -472,9 +472,49 @@ function DatesSheet({ session, book, activity: a, onDone, onClose }) {
   )
 }
 
+// Title and author by hand, for books the reader synced with a title the lookups can't
+// find (say, a translation). The edit sticks over later device syncs, and the cover,
+// page count and catalog details are looked up again with it.
+function DetailsSheet({ session, book, onDone, onClose }) {
+  const [title, setTitle] = useState(book.title ?? '')
+  const [author, setAuthor] = useState(book.author ?? '')
+  const [saving, setSaving] = useState(false)
+  async function save(e) {
+    e.preventDefault()
+    if (!title.trim()) return notify({ error: true, title: 'A title is needed' })
+    setSaving(true)
+    try {
+      await api.setInfo(session, book.document, { title: title.trim(), author: author.trim() })
+      notify({ title: 'Saved', detail: 'Looking up the cover and details again.' })
+      onDone()
+    } catch (e) {
+      notify({ error: true, title: "Couldn't save", detail: e.message })
+      setSaving(false)
+    }
+  }
+  return (
+    <Sheet title="Title & author" onClose={onClose}>
+      <p className="mt-1 text-sm text-stone-500">Use the name the book is known by, like its English title, if the cover or details can&apos;t be found.</p>
+      <form onSubmit={save} className="mt-4 space-y-3">
+        <label className="block text-sm font-medium text-stone-700">
+          Title
+          <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} className={`${field} mt-1.5`} />
+        </label>
+        <label className="block text-sm font-medium text-stone-700">
+          Author
+          <input value={author} onChange={(e) => setAuthor(e.target.value)} className={`${field} mt-1.5`} />
+        </label>
+        <button disabled={saving} className="flex h-11 w-full items-center justify-center rounded-xl bg-brand-500 text-sm font-semibold text-white disabled:opacity-60">
+          {saving ? <Loader2 className="size-4 animate-spin" /> : 'Save'}
+        </button>
+      </form>
+    </Sheet>
+  )
+}
+
 function BookMenu({ session, book, books, activity, onChange }) {
   const [menu, setMenu] = useState(false)
-  const [open, setOpen] = useState(null) // 'cover' | 'pages' | 'dates' | 'merge'
+  const [open, setOpen] = useState(null) // 'cover' | 'details' | 'pages' | 'dates' | 'merge'
   const [pages, setPages] = useState(book.page_count ?? '')
   const [saving, setSaving] = useState(false)
   const dupes = books.filter((b) => looksLikeSame(book, b)).length
@@ -540,6 +580,7 @@ function BookMenu({ session, book, books, activity, onChange }) {
         <>
           <div className="fixed inset-0 z-30" onClick={() => setMenu(false)} />
           <div role="menu" className="absolute top-12 right-0 z-30 w-64 divide-y divide-stone-100 overflow-hidden rounded-xl bg-surface shadow-lg ring-1 ring-stone-950/10">
+            {item(PenLine, 'Edit title & author', () => setOpen('details'))}
             {item(ImageIcon, 'Change cover', () => setOpen('cover'))}
             {item(CalendarDays, 'Reading dates', () => setOpen('dates'))}
             {item(Hash, 'Print pages', () => setOpen('pages'), <span className="ml-auto font-mono text-xs text-stone-500">{book.page_count ?? '?'}</span>)}
@@ -558,6 +599,7 @@ function BookMenu({ session, book, books, activity, onChange }) {
       {open === 'cover' && <CoverPicker session={session} book={book} onDone={done} onClose={() => setOpen(null)} />}
       {open === 'dates' && <DatesSheet session={session} book={book} activity={activity} onDone={done} onClose={() => setOpen(null)} />}
       {open === 'merge' && <MergePicker session={session} book={book} books={books} onDone={done} onClose={() => setOpen(null)} />}
+      {open === 'details' && <DetailsSheet session={session} book={book} onDone={done} onClose={() => setOpen(null)} />}
       {open === 'pages' && (
         <Sheet title="Print pages" onClose={() => setOpen(null)}>
           <p className="mt-1 text-sm text-stone-500">The printed edition&apos;s page count, used for pages read and stats.</p>

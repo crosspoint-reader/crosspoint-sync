@@ -90,8 +90,8 @@ export function upsertDocumentMetadata(
     `INSERT INTO documents (user_id, document, title, author, filename, updated_at)
      VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(user_id, document) DO UPDATE SET
-       title = COALESCE(excluded.title, documents.title),
-       author = COALESCE(excluded.author, documents.author),
+       title = CASE WHEN documents.meta_manual THEN documents.title ELSE COALESCE(excluded.title, documents.title) END,
+       author = CASE WHEN documents.meta_manual THEN documents.author ELSE COALESCE(excluded.author, documents.author) END,
        filename = COALESCE(excluded.filename, documents.filename),
        updated_at = excluded.updated_at`
   ).run(userId, document, meta.title, meta.authors, meta.filename, updatedAt);

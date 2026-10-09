@@ -48,8 +48,8 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
       `INSERT INTO documents (user_id, document, title, author, filename, filesize, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(user_id, document) DO UPDATE SET
-         title = COALESCE(excluded.title, documents.title),
-         author = COALESCE(excluded.author, documents.author),
+         title = CASE WHEN documents.meta_manual THEN documents.title ELSE COALESCE(excluded.title, documents.title) END,
+         author = CASE WHEN documents.meta_manual THEN documents.author ELSE COALESCE(excluded.author, documents.author) END,
          filename = COALESCE(excluded.filename, documents.filename),
          filesize = COALESCE(excluded.filesize, documents.filesize),
          updated_at = excluded.updated_at`
@@ -271,8 +271,9 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     return c.json({ items: await coverCandidates(http ?? fetchTransport, title, q ? '' : (meta?.author ?? '')) });
   });
 
-  // Manual cover / print page count when the lookup got it wrong. Manual values stick
-  // (lookups only fill blanks); null clears a field so it's looked up again.
+  // Manual cover / print page count / title and author when lookups got it wrong.
+  // Manual values stick (lookups only fill blanks, and device syncs don't replace an
+  // edited title); null clears cover or page count so it's looked up again.
   app.put('/documents/:document/info', async (c) => {
     const param = c.req.param('document');
     let body: unknown;
@@ -284,9 +285,15 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     const o = (body ?? {}) as Record<string, unknown>;
     const cover = o.cover_url;
     const pages = o.page_count;
+    const text = (v: unknown) => (typeof v === 'string' ? v.trim().slice(0, 500) : v);
+    const title = text(o.title);
+    const author = text(o.author);
+    // A title is required once edited; an empty author means "no author".
+    const titleOk = title === undefined || (typeof title === 'string' && title.length > 0);
+    const authorOk = author === undefined || typeof author === 'string';
     const coverOk = cover === undefined || cover === null || (typeof cover === 'string' && /^https?:\/\/\S{1,2000}$/.test(cover));
     const pagesOk = pages === undefined || pages === null || (Number.isInteger(pages) && (pages as number) > 0 && (pages as number) <= 100000);
-    if (!isValidDocument(param) || !coverOk || !pagesOk) {
+    if (!isValidDocument(param) || !coverOk || !pagesOk || !titleOk || !authorOk) {
       return kosyncError(c, 403, 2003, 'Invalid request');
     }
     const user = c.get('user');
@@ -299,8 +306,21 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     if (pages !== undefined) {
       db.prepare('UPDATE documents SET page_count = ?, cover_checked_at = CASE WHEN ? IS NULL THEN NULL ELSE cover_checked_at END WHERE user_id = ? AND document = ?').run(pages as number | null, pages as number | null, user.id, document);
     }
-    const row = db.prepare('SELECT cover_url, page_count FROM documents WHERE user_id = ? AND document = ?').get(user.id, document) as { cover_url: string | null; page_count: number | null };
-    return c.json({ document, cover_url: row.cover_url, page_count: row.page_count });
+    if (title !== undefined || author !== undefined) {
+      // New title/author: everything found with the old one is looked up again
+      // (blank cover and page count, Hardcover details, automatic service matches).
+      // A cover or page count the user set stays; so do matches they picked.
+      db.prepare(
+        `UPDATE documents SET title = COALESCE(?, title), author = CASE WHEN ? THEN NULLIF(?, '') ELSE author END,
+           meta_manual = 1, cover_checked_at = NULL, hc_checked_at = NULL
+         WHERE user_id = ? AND document = ?`
+      ).run((title as string | undefined) ?? null, author !== undefined ? 1 : 0, (author as string | undefined) ?? '', user.id, document);
+      db.prepare("DELETE FROM connector_matches WHERE user_id = ? AND document = ? AND source IN ('auto', 'none')").run(user.id, document);
+    }
+    const row = db.prepare('SELECT cover_url, page_count, title, author FROM documents WHERE user_id = ? AND document = ?').get(user.id, document) as {
+      cover_url: string | null; page_count: number | null; title: string | null; author: string | null;
+    };
+    return c.json({ document, cover_url: row.cover_url, page_count: row.page_count, title: row.title, author: row.author });
   });
 
   app.get('/documents', (c) => {

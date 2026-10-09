@@ -167,3 +167,36 @@ describe('covers for non-Latin titles', () => {
     expect(scoreCandidate('変な家２ ～11の間取り図～', '雨穴', { externalId: 'x', title: '変な家(6)', author: '雨穴 & 綾野暁' })).toBeLessThan(0.6);
   });
 });
+
+describe('editing a book\'s title and author', () => {
+  it('sticks over device syncs and looks the book up again', async () => {
+    const { app, db } = makeTestApp();
+    const { headers } = await registerUser(app);
+    const sync = (title: string, author: string) => app.request('/syncs/progress', {
+      method: 'PUT', headers, body: JSON.stringify({ ...PUT_BODY, metadata: { title, authors: author } }),
+    });
+    await sync('変な家２ ～11の間取り図～', '雨穴');
+    // A lookup already happened (and missed); an auto match and a manual one exist.
+    db.prepare('UPDATE documents SET cover_checked_at = 1, hc_checked_at = 1').run();
+    db.prepare("INSERT INTO connector_matches (user_id, connector_id, document, source, confidence, updated_at) VALUES (1, 'hardcover', ?, 'none', 0, 0)").run(DOC);
+    db.prepare("INSERT INTO connector_matches (user_id, connector_id, document, external_id, source, confidence, updated_at) VALUES (1, 'kosync', ?, 'x', 'manual', 1, 0)").run(DOC);
+
+    const res = await app.request(`/api/v1/documents/${DOC}/info`, {
+      method: 'PUT', headers, body: JSON.stringify({ title: '  Strange Houses 2 ', author: 'Uketsu' }),
+    });
+    expect(await res.json()).toMatchObject({ title: 'Strange Houses 2', author: 'Uketsu' });
+    const doc = db.prepare('SELECT cover_checked_at, hc_checked_at, meta_manual FROM documents WHERE document = ?').get(DOC);
+    expect(doc).toEqual({ cover_checked_at: null, hc_checked_at: null, meta_manual: 1 });
+    const matches = db.prepare('SELECT connector_id FROM connector_matches WHERE document = ?').all(DOC);
+    expect(matches).toEqual([{ connector_id: 'kosync' }]); // only the user's own pick survives
+
+    // The reader keeps sending its own metadata; the edit wins.
+    await sync('変な家２ ～11の間取り図～', '雨穴');
+    const items = (await (await app.request('/api/v1/progress', { headers })).json()).items;
+    expect(items[0]).toMatchObject({ title: 'Strange Houses 2', author: 'Uketsu' });
+
+    // A title can't be blanked.
+    const blank = await app.request(`/api/v1/documents/${DOC}/info`, { method: 'PUT', headers, body: JSON.stringify({ title: '  ' }) });
+    expect(blank.status).toBe(403);
+  });
+});
