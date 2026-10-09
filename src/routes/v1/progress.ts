@@ -2,7 +2,15 @@ import type { ProgressRefresh } from '../../connectors/refresh.js';
 import { Hono } from 'hono';
 import type { DB } from '../../db/db.js';
 import { kosyncError, type AppEnv } from '../../auth/middleware.js';
-import { isValidDocument, parseProgressBody, upsertProgress } from '../kosync.js';
+import {
+  fanOutDeviceProgress,
+  isValidDocument,
+  parseProgressBody,
+  upsertProgress,
+  writeDeviceProgress,
+  type ProgressUpsert,
+} from '../kosync.js';
+import { withTransaction } from '../../db/db.js';
 import { deleteDocumentData, hasDocumentData } from '../../models/document.js';
 import { fanOutProgress } from '../../connectors/fanout.js';
 import { aliasesByDocument, resolveDocument } from '../../models/merge.js';
@@ -10,6 +18,9 @@ import { enrichSoon } from '../../models/cover.js';
 import { autoPause } from '../../models/pause.js';
 import { completedBookStatsSql } from '../../models/stats.js';
 import { CHANGES_DEFAULT_LIMIT, CHANGES_MAX_LIMIT, listProgressChanges } from '../../models/changes.js';
+
+// Positions per batch PUT: readers send a handful of changed books at a time.
+export const MAX_PROGRESS_BATCH = 20;
 
 export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async () => {}): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -31,6 +42,40 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
     upsertProgress(db, parsed.record);
     fanOutProgress(db, user.id, parsed.record.document, parsed.record.percentage, parsed.record.updatedAt, parsed.record.progress, parsed.record.position);
     return c.json({ document: clientDocument, timestamp: parsed.record.updatedAt });
+  });
+
+  // Several books' progress in one request (a reader's bulk sync push): each
+  // item is a kosync progress body, stored exactly as the kosync PUT stores it.
+  // All or nothing: any invalid item rejects the request before anything is
+  // written. Servers without this route answer 404; readers then fall back to
+  // one PUT /syncs/progress per book.
+  app.put('/progress/batch', async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return kosyncError(c, 403, 2003, 'Invalid request');
+    }
+    const items = ((body ?? {}) as Record<string, unknown>).items;
+    if (!Array.isArray(items) || items.length === 0 || items.length > MAX_PROGRESS_BATCH) {
+      return kosyncError(c, 403, 2003, 'Invalid request');
+    }
+    const user = c.get('user');
+    const records: ProgressUpsert[] = [];
+    for (const item of items) {
+      const parsed = parseProgressBody(user.id, item);
+      if (!parsed.ok) return kosyncError(c, 403, parsed.code, parsed.message);
+      records.push(parsed.record);
+    }
+    const accepted: { document: string; timestamp: number }[] = [];
+    withTransaction(db, () => {
+      for (const record of records) {
+        accepted.push({ document: writeDeviceProgress(db, record), timestamp: record.updatedAt });
+      }
+    });
+    // External services only after every row is stored.
+    for (const record of records) fanOutDeviceProgress(db, record);
+    return c.json({ accepted: accepted.length, items: accepted });
   });
 
   // List every synced document with its newest progress (joined with any known

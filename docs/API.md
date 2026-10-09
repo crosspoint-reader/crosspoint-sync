@@ -220,6 +220,25 @@ Response: `{"document": "...", "timestamp": 1752345678}`.
 An invalid `position` is ignored (the kosync fields still sync); a missing `position` on a later
 PUT keeps the previously stored one for that device.
 
+#### PUT /api/v1/progress/batch
+
+Several books' progress in one request, for a reader's bulk sync push: `{"items": [...]}` with 1 to
+20 items, each a `PUT /syncs/progress` body (including the optional `position` and `metadata`).
+Every item is stored exactly as that route stores it: under the document's canonical hash after a
+merge, with a feed sequence number, reading history, and connector fan-out.
+
+All or nothing: if any item is invalid the request is rejected (403, kosync error body) and nothing
+is written. Response:
+
+```json
+{"accepted": 2, "items": [{"document": "a1b2...", "timestamp": 1752345678},
+                          {"document": "25f8...", "timestamp": 1752345678}]}
+```
+
+`items[].document` echoes the hash each item was sent with, in request order. Servers without this
+route (stock kosync, older crosspoint-sync) return 404; readers then send one `PUT /syncs/progress`
+per book.
+
 #### GET /api/v1/progress
 
 Lists every synced document — newest progress across devices, joined with any stored metadata.

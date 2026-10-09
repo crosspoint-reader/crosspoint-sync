@@ -303,6 +303,35 @@ export function parseProgressBody(
   };
 }
 
+/**
+ * Stores a device's progress write the way the kosync PUT does: under the
+ * document's canonical hash, as a position sample for fan-in replays, and fanned
+ * out to connected services. Returns the hash the client sent, which responses
+ * echo so the device recognizes them. Shared by the kosync PUT and the batch
+ * route, so both writes behave identically.
+ */
+export function writeDeviceProgress(db: DB, record: ProgressUpsert): string {
+  const clientDocument = record.document;
+  record.document = resolveDocument(db, record.userId, clientDocument);
+  upsertProgress(db, record);
+  // Harvest this real device position as a (percentage -> position) sample so
+  // fan-in can later replay a real position for a percentage-only update.
+  recordProgressSample(
+    db,
+    record.userId,
+    record.document,
+    record.percentage,
+    record.progress,
+    record.position,
+    record.updatedAt
+  );
+  return clientDocument;
+}
+
+export function fanOutDeviceProgress(db: DB, record: ProgressUpsert): void {
+  fanOutProgress(db, record.userId, record.document, record.percentage, record.updatedAt, record.progress, record.position);
+}
+
 export function kosyncRoutes(db: DB, config: Config, refreshProgress: ProgressRefresh = async () => {}): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   const auth = authMiddleware(db);
@@ -363,21 +392,8 @@ export function kosyncRoutes(db: DB, config: Config, refreshProgress: ProgressRe
     }
     // A merged document stores under its canonical hash; echo the client's own
     // hash back so the device recognizes the response.
-    const clientDocument = parsed.record.document;
-    parsed.record.document = resolveDocument(db, user.id, clientDocument);
-    upsertProgress(db, parsed.record);
-    // Harvest this real device position as a (percentage -> position) sample so
-    // fan-in can later replay a real position for a percentage-only update.
-    recordProgressSample(
-      db,
-      user.id,
-      parsed.record.document,
-      parsed.record.percentage,
-      parsed.record.progress,
-      parsed.record.position,
-      parsed.record.updatedAt
-    );
-    fanOutProgress(db, user.id, parsed.record.document, parsed.record.percentage, parsed.record.updatedAt, parsed.record.progress, parsed.record.position);
+    const clientDocument = writeDeviceProgress(db, parsed.record);
+    fanOutDeviceProgress(db, parsed.record);
     return c.json({ document: clientDocument, timestamp: parsed.record.updatedAt });
   });
 

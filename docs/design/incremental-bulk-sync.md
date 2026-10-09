@@ -629,7 +629,9 @@ Sync Books or Sync Folder against a server that supports the CrossPoint API:
       `sync_ids.bin` unless the book is finished).
    2. Backup parked check (section 4).
    3. Progress PUT if `PROGRESS` is set, unless step 4 or the parked check applied a newer remote
-      position, or the book still has a parked entry (skipped).
+      position, or the book still has a parked entry (skipped). Positions are queued and sent up to
+      8 at a time with `PUT /api/v1/progress/batch`; a 404 switches the rest of the run to one
+      `PUT /syncs/progress` per book.
    4. Stats PUT if `STATS` is set (batched across books); clippings upload if `CLIPPINGS` is set.
    5. Clear each bit that succeeded; remove the entry when none remain.
 6. **Result.** Counts screen, Wi-Fi off.
