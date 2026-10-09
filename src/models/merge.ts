@@ -1,4 +1,5 @@
 import { withTransaction, type DB } from '../db/db.js';
+import { nextChangeSeq } from './changes.js';
 
 /**
  * Manual document merges. The kosync document key is client-computed and
@@ -90,6 +91,15 @@ export function mergeDocuments(
          SELECT rowid FROM progress WHERE user_id = ? AND document = ?
          ORDER BY percentage DESC, updated_at DESC LIMIT 1)`
     ).run(now, userId, into, userId, into);
+    // The merge bypasses upsertProgress, so stamp the canonical rows itself;
+    // otherwise devices never see the merged position until the next write.
+    const seq = nextChangeSeq(db);
+    db.prepare('UPDATE progress SET change_seq = ?, server_change_seq = ? WHERE user_id = ? AND document = ?').run(
+      seq,
+      seq,
+      userId,
+      into
+    );
 
     // progress_samples PK (user, document, pct_bucket): newest sample per bucket.
     db.prepare(

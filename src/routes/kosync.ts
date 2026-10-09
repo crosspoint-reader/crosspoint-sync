@@ -1,6 +1,6 @@
 import type { ProgressRefresh } from '../connectors/refresh.js';
 import { Hono } from 'hono';
-import type { DB } from '../db/db.js';
+import { withTransaction, type DB } from '../db/db.js';
 import type { Config } from '../config.js';
 import { autoFinish, autoPause, autoUnpause } from '../models/pause.js';
 import {
@@ -14,6 +14,7 @@ import { hashKey, looksLikeMd5, md5Hex } from '../auth/password.js';
 import { parsePosition } from '../models/position.js';
 import { resolveDocument } from '../models/merge.js';
 import { nowSeconds } from '../models/sync.js';
+import { nextChangeSeq } from '../models/changes.js';
 import { fanOutProgress } from '../connectors/fanout.js';
 import { seedSidecarMatches } from '../connectors/store.js';
 import { getConnector } from '../connectors/registry.js';
@@ -168,47 +169,108 @@ export function nearestProgressSample(
   return row && Math.abs(row.percentage - pct) <= SAMPLE_REACH ? row : null;
 }
 
-export function upsertProgress(db: DB, p: ProgressUpsert): void {
-  // History for server-derived activity stats; skip re-pushes of the same spot.
-  const prev = db
+/** The shared device id every CrossInk reader sent before per-reader ids. */
+export const LEGACY_CROSSINK_DEVICE_ID = 'crossink-device';
+
+/**
+ * The percentage a progress write is compared against to decide whether it is
+ * a new history entry. Normally that device's own previous row. A device with
+ * no row yet compares against:
+ * 1. the legacy shared CrossInk row, for a per-reader CrossInk id, so switching
+ *    ids logs exactly what the shared row would have; otherwise
+ * 2. the document's newest row from any device, so a new reader re-pushing a
+ *    position another device already reported adds no reading day.
+ */
+function previousPercentage(db: DB, p: ProgressUpsert): number | undefined {
+  const own = db
     .prepare('SELECT percentage FROM progress WHERE user_id = ? AND document = ? AND device_id = ?')
     .get(p.userId, p.document, p.deviceId) as { percentage: number } | undefined;
-  if (prev?.percentage !== p.percentage) {
-    db.prepare('INSERT INTO progress_log (user_id, document, device_id, percentage, at) VALUES (?, ?, ?, ?, ?)').run(
+  if (own) return own.percentage;
+  if (p.deviceId.startsWith('crossink-') && p.deviceId !== LEGACY_CROSSINK_DEVICE_ID) {
+    const legacy = db
+      .prepare('SELECT percentage FROM progress WHERE user_id = ? AND document = ? AND device_id = ?')
+      .get(p.userId, p.document, LEGACY_CROSSINK_DEVICE_ID) as { percentage: number } | undefined;
+    if (legacy) return legacy.percentage;
+  }
+  const newest = db
+    .prepare(
+      `SELECT percentage FROM progress WHERE user_id = ? AND document = ?
+       ORDER BY updated_at DESC, device_id LIMIT 1`
+    )
+    .get(p.userId, p.document) as { percentage: number } | undefined;
+  return newest?.percentage;
+}
+
+export function upsertProgress(db: DB, p: ProgressUpsert): void {
+  withTransaction(db, () => {
+    const previous = db.prepare(
+      `SELECT device_id FROM progress WHERE user_id = ? AND document = ?
+       ORDER BY updated_at DESC, device_id LIMIT 1`
+    ).get(p.userId, p.document) as { device_id: string } | undefined;
+    const seq = nextChangeSeq(db);
+    // History for server-derived activity stats; skip re-pushes of the same spot.
+    if (previousPercentage(db, p) !== p.percentage) {
+      db.prepare('INSERT INTO progress_log (user_id, document, device_id, percentage, at) VALUES (?, ?, ?, ?, ?)').run(
+        p.userId,
+        p.document,
+        p.deviceId,
+        p.percentage,
+        p.updatedAt
+      );
+      autoUnpause(db, p.userId, p.document, p.updatedAt);
+      autoFinish(db, p.userId, p.document, p.percentage, p.updatedAt);
+    }
+    // Every write gets a fresh feed sequence number, even a same-spot re-push:
+    // it may have become the document's newest row.
+    db.prepare(
+      `INSERT INTO progress (user_id, document, device_id, device, percentage, progress, position, updated_at, change_seq)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id, document, device_id) DO UPDATE SET
+         device = excluded.device,
+         percentage = excluded.percentage,
+         progress = excluded.progress,
+         position = COALESCE(excluded.position, progress.position),
+         updated_at = excluded.updated_at,
+         change_seq = excluded.change_seq`
+    ).run(
       p.userId,
       p.document,
       p.deviceId,
+      p.device,
       p.percentage,
-      p.updatedAt
+      p.progress,
+      p.position,
+      p.updatedAt,
+      seq
     );
-    autoUnpause(db, p.userId, p.document, p.updatedAt);
-    autoFinish(db, p.userId, p.document, p.percentage, p.updatedAt);
-  }
-  db.prepare(
-    `INSERT INTO progress (user_id, document, device_id, device, percentage, progress, position, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(user_id, document, device_id) DO UPDATE SET
-       device = excluded.device,
-       percentage = excluded.percentage,
-       progress = excluded.progress,
-       position = COALESCE(excluded.position, progress.position),
-       updated_at = excluded.updated_at`
-  ).run(p.userId, p.document, p.deviceId, p.device, p.percentage, p.progress, p.position, p.updatedAt);
-  if (p.metadata) {
-    upsertDocumentMetadata(db, p.userId, p.document, p.metadata, p.updatedAt);
-    // Exact service ids from the plugin sidecar bypass fuzzy matching: seed the
-    // connector match cache so the runner pushes straight to that record.
-    if (Object.keys(p.metadata.externalIds).length > 0) {
-      seedSidecarMatches(
-        db,
-        p.userId,
-        p.document,
-        p.metadata.externalIds,
-        (id) => getConnector(id) !== undefined,
-        p.updatedAt
-      );
+    if (p.metadata) {
+      upsertDocumentMetadata(db, p.userId, p.document, p.metadata, p.updatedAt);
+      // Exact service ids from the plugin sidecar bypass fuzzy matching: seed the
+      // connector match cache so the runner pushes straight to that record.
+      if (Object.keys(p.metadata.externalIds).length > 0) {
+        seedSidecarMatches(
+          db,
+          p.userId,
+          p.document,
+          p.metadata.externalIds,
+          (id) => getConnector(id) !== undefined,
+          p.updatedAt
+        );
+      }
     }
-  }
+    // A write can lower the previous winner's timestamp (for example after a
+    // merge). If an untouched row now wins, give that effective position this
+    // write's sequence and mark it as a server-made change for every reader.
+    if (previous?.device_id === p.deviceId) {
+      db.prepare(
+        `UPDATE progress SET change_seq = ?, server_change_seq = ?
+         WHERE rowid = (
+           SELECT rowid FROM progress WHERE user_id = ? AND document = ?
+           ORDER BY updated_at DESC, device_id LIMIT 1
+         ) AND device_id <> ?`
+      ).run(seq, seq, p.userId, p.document, p.deviceId);
+    }
+  });
 }
 
 /**
@@ -258,6 +320,35 @@ export function parseProgressBody(
       updatedAt: nowSeconds(),
     },
   };
+}
+
+/**
+ * Stores a device's progress write the way the kosync PUT does: under the
+ * document's canonical hash, as a position sample for fan-in replays, and fanned
+ * out to connected services. Returns the hash the client sent, which responses
+ * echo so the device recognizes them. Shared by the kosync PUT and the batch
+ * route, so both writes behave identically.
+ */
+export function writeDeviceProgress(db: DB, record: ProgressUpsert): string {
+  const clientDocument = record.document;
+  record.document = resolveDocument(db, record.userId, clientDocument);
+  upsertProgress(db, record);
+  // Harvest this real device position as a (percentage -> position) sample so
+  // fan-in can later replay a real position for a percentage-only update.
+  recordProgressSample(
+    db,
+    record.userId,
+    record.document,
+    record.percentage,
+    record.progress,
+    record.position,
+    record.updatedAt
+  );
+  return clientDocument;
+}
+
+export function fanOutDeviceProgress(db: DB, record: ProgressUpsert): void {
+  fanOutProgress(db, record.userId, record.document, record.percentage, record.updatedAt, record.progress, record.position);
 }
 
 export function kosyncRoutes(db: DB, config: Config, refreshProgress: ProgressRefresh = async () => {}): Hono<AppEnv> {
@@ -321,21 +412,8 @@ export function kosyncRoutes(db: DB, config: Config, refreshProgress: ProgressRe
     }
     // A merged document stores under its canonical hash; echo the client's own
     // hash back so the device recognizes the response.
-    const clientDocument = parsed.record.document;
-    parsed.record.document = resolveDocument(db, user.id, clientDocument);
-    upsertProgress(db, parsed.record);
-    // Harvest this real device position as a (percentage -> position) sample so
-    // fan-in can later replay a real position for a percentage-only update.
-    recordProgressSample(
-      db,
-      user.id,
-      parsed.record.document,
-      parsed.record.percentage,
-      parsed.record.progress,
-      parsed.record.position,
-      parsed.record.updatedAt
-    );
-    fanOutProgress(db, user.id, parsed.record.document, parsed.record.percentage, parsed.record.updatedAt, parsed.record.progress, parsed.record.position);
+    const clientDocument = writeDeviceProgress(db, parsed.record);
+    fanOutDeviceProgress(db, parsed.record);
     return c.json({ document: clientDocument, timestamp: parsed.record.updatedAt });
   });
 

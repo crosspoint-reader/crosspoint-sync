@@ -220,6 +220,25 @@ Response: `{"document": "...", "timestamp": 1752345678}`.
 An invalid `position` is ignored (the kosync fields still sync); a missing `position` on a later
 PUT keeps the previously stored one for that device.
 
+#### PUT /api/v1/progress/batch
+
+Several books' progress in one request, for a reader's bulk sync push: `{"items": [...]}` with 1 to
+20 items, each a `PUT /syncs/progress` body (including the optional `position` and `metadata`).
+Every item is stored exactly as that route stores it: under the document's canonical hash after a
+merge, with a feed sequence number, reading history, and connector fan-out.
+
+All or nothing: if any item is invalid the request is rejected (403, kosync error body) and nothing
+is written. Response:
+
+```json
+{"accepted": 2, "items": [{"document": "a1b2...", "timestamp": 1752345678},
+                          {"document": "25f8...", "timestamp": 1752345678}]}
+```
+
+`items[].document` echoes the hash each item was sent with, in request order. Servers without this
+route (stock kosync, older crosspoint-sync) return 404; readers then send one `PUT /syncs/progress`
+per book.
+
 #### GET /api/v1/progress
 
 Lists every synced document — newest progress across devices, joined with any stored metadata.
@@ -262,6 +281,45 @@ All device rows, newest first — the client decides what to apply:
 ```
 
 `position` is `null` for rows written by plain kosync clients.
+
+#### GET /api/v1/progress/changes
+
+Progress change feed for incremental device sync: documents whose current position changed since a
+cursor, oldest change first.
+
+Query: `since` (cursor from the previous page, default `0` for a full snapshot), `limit` (default
+20, max 50; `0` returns only the current `cursor`), `device` (the caller's `device_id`).
+
+```json
+{
+  "cursor": 4812,
+  "more": false,
+  "changes": [
+    {"document": "a1b2c3d4e5f60718293a4b5c6d7e8f90", "aliases": ["ffeeddccbbaa99887766554433221100"],
+     "percentage": 0.4213, "progress": "/body/DocFragment[12]/body/p[3]/text().0",
+     "position": null, "device": "Phone", "device_id": "phone", "timestamp": 1791234567}
+  ]
+}
+```
+
+- One entry per document: its newest row (same tie-break as the kosync GET), included only when that
+  row changed after `since`. `document` is canonical; `aliases` lists merged hashes.
+- Every progress write (kosync and v1 PUTs, connector fan-in, document merges) stamps a server-wide
+  sequence number on the row, so the cursor does not depend on `updated_at` (fan-in keeps the
+  external service's timestamp). If a write makes an existing row become newest, that winning row
+  also receives a fresh sequence so the feed reports the effective position change.
+- A document whose newest row was written by `device` is left out; there is no fallback to an older
+  row from another device. Server-side merges and switches to an existing row bypass this exclusion
+  until the cursor passes that server-side change. The cursor still moves past excluded rows.
+- `cursor` is where the next request should start; repeat with `since = cursor` while `more` is
+  true. A page also stops before its body passes 8 KB, but always holds at least one change.
+- Servers without this route (stock kosync, older crosspoint-sync) return 404; devices fall back to
+  per-book requests.
+
+Progress history (`progress_log`, which feeds reading days and streaks) only records a write whose
+percentage differs from the previous value. A device's first write for a document compares against
+the legacy shared `crossink-device` row when the id is a per-reader `crossink-…` id and that row
+exists, otherwise against the document's newest row from any device.
 
 #### DELETE /api/v1/progress/{document}
 

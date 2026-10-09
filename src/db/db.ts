@@ -24,12 +24,15 @@ export function openDatabase(dbPath: string): DB {
 }
 
 export function withTransaction(db: DB, fn: () => void): void {
-  db.exec('BEGIN');
+  // Savepoints also nest: an individual progress write can be atomic inside a
+  // batch. SQLite resolves repeated names to the innermost active savepoint.
+  db.exec('SAVEPOINT transaction_scope');
   try {
     fn();
-    db.exec('COMMIT');
+    db.exec('RELEASE transaction_scope');
   } catch (err) {
-    db.exec('ROLLBACK');
+    db.exec('ROLLBACK TO transaction_scope');
+    db.exec('RELEASE transaction_scope');
     throw err;
   }
 }
