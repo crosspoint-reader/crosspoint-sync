@@ -651,7 +651,17 @@ async function pushQuote(
          reading_journal { id }
        }
      }`,
-    { object: { book_id: bookId, event: 'quote', entry, privacy_setting_id: privacySettingId, tags: [] } }
+    {
+      object: {
+        book_id: bookId,
+        event: 'quote',
+        entry,
+        privacy_setting_id: privacySettingId,
+        tags: [],
+        // Date the quote by when it was highlighted, so a backfill doesn't stamp them all today.
+        ...(h.highlightedAt ? { action_at: new Date(h.highlightedAt * 1000).toISOString().slice(0, 10) } : {}),
+      },
+    }
   );
   // A key without journal access (403) must not flag the whole link for
   // re-auth while progress still syncs, so it only fails this quote.

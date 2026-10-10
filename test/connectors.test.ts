@@ -468,6 +468,7 @@ describe('hardcover highlight quotes', () => {
       entry: 'second line\n\nso good',
       privacy_setting_id: 2,
       tags: [],
+      action_at: '2025-07-12',
     });
     expect(claimReady(db, 10)).toHaveLength(0);
 
