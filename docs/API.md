@@ -615,6 +615,15 @@ connector-specific (`{"token": "..."}` for Hardcover and Readwise). The server v
 service before storing; returns `400` if rejected. `{"id": "hardcover", "linked": true,
 "account": "julia"}` on success.
 
+#### PUT /api/v1/connectors/{id}/options
+
+Change a linked connector's per-account options. Connectors with options list them in
+`GET /connectors` as `options` (`{key, label, default, choices?, gates?}`) with the current
+`option_values`. Body: a partial `{"key": value}`; unknown keys and bad values are ignored.
+Returns `{"id", "option_values"}`. Turning off a toggle that `gates` a kind drops that kind's
+pending queue rows. Hardcover: `highlights` (bool, default `false`) posts clippings as journal
+quotes; `privacy` is `private` (default), `follows`, or `public`.
+
 #### DELETE /api/v1/connectors/{id}
 
 Unlink; wipes the stored credential, all matches, and queued work.
@@ -651,7 +660,7 @@ Body `{"external_id": "…"}`. `{"found": true, "book": {"externalId", "title",
 **Matching** is server-side from the document's title/author (the EPUB metadata the firmware sends —
 so connectors need "Send Metadata" on). **Fan-out** is automatic: a progress PUT enqueues a
 progress/finished event to write-connectors that carry it; a clippings PUT enqueues highlight events
-to highlight-connectors (Readwise). A background worker delivers them with retry/backoff.
+to highlight-connectors (Readwise, BookOrbit, and Hardcover when its `highlights` option is on). A background worker delivers them with retry/backoff.
 **Fan-in** (read connectors: Audiobookshelf, BookOrbit, Readwise Reader, BookFusion) is pulled on a
 background interval for library-wide providers, and on-demand — when a device asks for progress on a
 matched book — for per-book providers.

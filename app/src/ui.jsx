@@ -346,3 +346,18 @@ export function EmptyAction({ href, onClick, children }) {
     </button>
   )
 }
+
+export function Toggle({ checked, onChange, label }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+      className={`relative h-7 w-12 shrink-0 rounded-full transition ${checked ? 'bg-brand-500' : 'bg-stone-300'}`}
+    >
+      <span className={`absolute top-0.5 size-6 rounded-full bg-surface shadow transition-all ${checked ? 'left-[1.4rem]' : 'left-0.5'}`} />
+    </button>
+  )
+}

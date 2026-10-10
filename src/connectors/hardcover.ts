@@ -1,8 +1,10 @@
 import { decideMatch, extractTitleAuthor, type Candidate } from './matching.js';
+import { connectorOptions } from './store.js';
 import {
   ConnectorOperationError,
   SAVE_CREDENTIAL,
   type Connector,
+  type ConnectorContext,
   type Credential,
   type DeviceLinkPoll,
   type DeviceLinkStart,
@@ -43,6 +45,9 @@ const SCOPE_HINT = `Create a Hardcover API key with ${HARDCOVER_SCOPES.join(', '
 // GATE: confirm Hardcover's user_book status ids (want-to-read/reading/read).
 const STATUS_READING = 2;
 const STATUS_READ = 3;
+
+// Journal privacy ids (privacy_setting_id), as Hardcover's KOReader plugin uses them.
+const PRIVACY = { public: 1, follows: 2, private: 3 } as const;
 
 interface HardcoverCred extends Credential {
   token: string;
@@ -390,7 +395,8 @@ async function push(
   cred: Credential,
   m: Match,
   ev: OutboundEvent,
-  http: HttpTransport
+  http: HttpTransport,
+  context?: ConnectorContext
 ): Promise<PushResult> {
   let token: string;
   try {
@@ -403,6 +409,10 @@ async function push(
   }
   const bookId = Number(m.externalId);
   if (!Number.isFinite(bookId)) return { ok: false, retryable: false, error: 'bad book id' };
+  if (ev.kind === 'highlight') {
+    const privacy = context ? connectorOptions(context.db, context.userId, hardcoverConnector).privacy : 'private';
+    return pushQuote(http, token, bookId, ev, PRIVACY[privacy as keyof typeof PRIVACY] ?? PRIVACY.private);
+  }
   const pct = Math.max(0, Math.min(1, ev.percentage ?? 0));
   const finished = ev.kind === 'finished' || pct >= 0.999;
   const desiredStatus = finished ? STATUS_READ : STATUS_READING;
@@ -617,12 +627,62 @@ async function push(
   return { ok: true };
 }
 
+/**
+ * A clipping becomes a "quote" reading-journal entry on the book, with the
+ * reader's note (if any) after it. Modeled on Billiam/hardcoverapp.koplugin.
+ * ponytail: insert-only, so a retry after a lost response or an edited clipping
+ * posts the quote again; look up existing entries first if that shows up.
+ */
+async function pushQuote(
+  http: HttpTransport,
+  token: string,
+  bookId: number,
+  ev: OutboundEvent,
+  privacySettingId: number
+): Promise<PushResult> {
+  const h = ev.highlight;
+  if (!h?.text?.trim()) return { ok: true };
+  const entry = h.note?.trim() ? `${h.text}\n\n${h.note.trim()}` : h.text;
+  const res = await gql(
+    http,
+    token,
+    `mutation InsQuote($object: ReadingJournalCreateType!) {
+       insert_reading_journal(object: $object) {
+         reading_journal { id }
+       }
+     }`,
+    { object: { book_id: bookId, event: 'quote', entry, privacy_setting_id: privacySettingId, tags: [] } }
+  );
+  // A key without journal access (403) must not flag the whole link for
+  // re-auth while progress still syncs, so it only fails this quote.
+  if (res.status === 403) return { ok: false, retryable: false, error: res.errors?.[0]?.message ?? 'forbidden' };
+  const auth = classify(res);
+  if (auth) return auth;
+  if (res.data?.insert_reading_journal?.reading_journal?.id == null) {
+    return { ok: false, retryable: true, error: 'quote write not confirmed (empty response)' };
+  }
+  return { ok: true };
+}
+
 export const hardcoverConnector: Connector = {
   id: 'hardcover',
   displayName: 'Hardcover',
   tier: 1,
   capabilities: { read: false, write: true },
-  carries: ['progress', 'finished'],
+  carries: ['progress', 'finished', 'highlight'],
+  options: [
+    { key: 'highlights', label: 'Post highlights as journal quotes', default: false, gates: 'highlight' },
+    {
+      key: 'privacy',
+      label: 'Who can see them',
+      choices: [
+        { value: 'private', label: 'Only me' },
+        { value: 'follows', label: 'People I follow' },
+        { value: 'public', label: 'Everyone' },
+      ],
+      default: 'private',
+    },
+  ],
   credentialKind: 'device_code',
   beta: false,
   validate,

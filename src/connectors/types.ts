@@ -13,6 +13,17 @@ export interface ConnectorContext { db: DB; userId: number; }
 /** What data types a connector carries (progress/shelves vs highlights). */
 export type DataKind = 'progress' | 'finished' | 'highlight';
 
+/** A per-account setting on a connector, stored in connector_accounts.options. */
+export interface ConnectorOption {
+  key: string;
+  label: string;
+  /** Present = pick one of these; absent = an on/off toggle. */
+  choices?: { value: string; label: string }[];
+  default: boolean | string;
+  /** For a toggle: the data kind it turns on. Off = those events are never queued. */
+  gates?: DataKind;
+}
+
 export type CredentialKind = 'token' | 'oauth' | 'cookies' | 'kosync' | 'device_code' | 'abs';
 
 /** Interactive OAuth device-code link handshake (BookFusion). */
@@ -223,6 +234,9 @@ export interface Connector {
 
   /** Validate a credential and return the account label if possible. */
   validate(cred: Credential, http: HttpTransport): Promise<ValidateResult>;
+
+  /** Per-account settings shown under the linked connector. */
+  options?: ConnectorOption[];
 
   /** Return false to acknowledge an event without matching or pushing it. */
   shouldPush?(ev: OutboundEvent, canonicalPercentage?: number | null): boolean;

@@ -4,6 +4,7 @@ import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
 import type { HttpTransport } from '../src/connectors/types.js';
 import { drainQueue } from '../src/connectors/runner.js';
 import { claimReady } from '../src/connectors/queue.js';
+import { saveMatch } from '../src/connectors/store.js';
 
 // A programmable fake transport. Records requests; returns queued responses by
 // URL substring match.
@@ -417,5 +418,69 @@ describe('readwise highlight fan-out', () => {
     await drainQueue(db, fake.transport, 10);
     expect(fake.calls.some((c) => c.url.includes('/highlights/') && c.method === 'POST')).toBe(true);
     expect(claimReady(db, 10)).toHaveLength(0);
+  });
+});
+
+describe('hardcover highlight quotes', () => {
+  it('posts clippings as journal quotes only when turned on, with the chosen privacy', async () => {
+    const fake = fakeTransport();
+    fake.on('graphql', 200, { data: { me: [{ username: 'julia' }] } });
+    const { app, db } = makeTestApp({}, { connectorTransport: fake.transport });
+    const { headers, username } = await registerUser(app);
+    const userId = (db.prepare('SELECT id FROM users WHERE username = ?').get(username) as { id: number }).id;
+    await app.request('/api/v1/connectors/hardcover', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ credential: { token: 'hc-token' } }),
+    });
+    saveMatch(db, userId, 'hardcover', DOC, { externalId: '42', confidence: 1 }, 'manual');
+    const clip = (id: string, text: string) =>
+      app.request(`/api/v1/clippings/${DOC}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ items: [{ id, spine: 1, text, note: 'so good', created_at: 1752300000 }] }),
+      });
+    const queued = () =>
+      (db.prepare(`SELECT COUNT(*) AS n FROM connector_queue WHERE connector_id = 'hardcover' AND kind LIKE 'highlight%' AND status = 'pending'`).get() as { n: number }).n;
+
+    // Off by default: nothing queued.
+    await clip('c0ffee0011223344', 'first line');
+    expect(queued()).toBe(0);
+    const list = await (await app.request('/api/v1/connectors', { headers })).json();
+    const hc = list.connectors.find((c: { id: string }) => c.id === 'hardcover');
+    expect(hc.option_values).toEqual({ highlights: false, privacy: 'private' });
+
+    const set = await app.request('/api/v1/connectors/hardcover/options', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ highlights: true, privacy: 'follows', bogus: 1 }),
+    });
+    expect((await set.json()).option_values).toEqual({ highlights: true, privacy: 'follows' });
+
+    await clip('c0ffee0011223355', 'second line');
+    expect(queued()).toBe(1);
+    fake.on('InsQuote', 200, { data: { insert_reading_journal: { reading_journal: { id: 7 } } } });
+    await drainQueue(db, fake.transport, 10);
+    const call = fake.calls.find((c) => c.body?.includes('InsQuote'));
+    expect(JSON.parse(call!.body!).variables.object).toEqual({
+      book_id: 42,
+      event: 'quote',
+      entry: 'second line\n\nso good',
+      privacy_setting_id: 2,
+      tags: [],
+    });
+    expect(claimReady(db, 10)).toHaveLength(0);
+
+    // Turning it off drops anything still queued.
+    await clip('c0ffee0011223366', 'third line');
+    expect(queued()).toBeGreaterThan(0);
+    await app.request('/api/v1/connectors/hardcover/options', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ highlights: false }),
+    });
+    expect(
+      (db.prepare(`SELECT COUNT(*) AS n FROM connector_queue WHERE connector_id = 'hardcover' AND kind LIKE 'highlight%' AND status = 'pending'`).get() as { n: number }).n
+    ).toBe(0);
   });
 });

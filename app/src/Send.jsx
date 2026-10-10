@@ -22,7 +22,7 @@ import {
 import { isApp } from './api.js'
 import { DEFAULT_HOST, EXTENSIONS, connect, deleteFiles, folders, isBook, joinPath, listFiles, loadDevicePrefs, makeFolder, renameFile, saveDevicePrefs } from './device.js'
 import { downloads as listDownloads, removeDownload, sendDownload, sendFile } from './catalogs.js'
-import { Card, EmptyState, Eyebrow, folderLabel, notify } from './ui.jsx'
+import { Card, EmptyState, Eyebrow, folderLabel, notify, Toggle } from './ui.jsx'
 
 const size = (n) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`)
 // Android's picker filters by MIME type and has none for .md, so let it show everything there.
@@ -34,21 +34,6 @@ export function progressLabel(p) {
   if (p.stage === 'downloading') return p.total ? `Downloading ${Math.round((p.done / p.total) * 100)}%` : `Downloading ${size(p.done)}`
   if (p.stage === 'optimizing') return p.total ? `Shrinking images ${p.done}/${p.total}` : 'Shrinking images…'
   return 'Sending to reader…'
-}
-
-function Toggle({ checked, onChange, label }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      onClick={() => onChange(!checked)}
-      className={`relative h-7 w-12 shrink-0 rounded-full transition ${checked ? 'bg-brand-500' : 'bg-stone-300'}`}
-    >
-      <span className={`absolute top-0.5 size-6 rounded-full bg-surface shadow transition-all ${checked ? 'left-[1.4rem]' : 'left-0.5'}`} />
-    </button>
-  )
 }
 
 function Device({ prefs, setPrefs, device, onRetry }) {

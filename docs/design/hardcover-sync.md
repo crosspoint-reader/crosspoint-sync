@@ -15,8 +15,9 @@ server-side: devices keep speaking plain kosync and never talk to Hardcover.
   metadata PR) alike.
 - Hardcover being slow, down, or rate-limiting must never affect device sync.
 
-Non-goals (v1): syncing clippings/notes to Hardcover, importing Hardcover state back to devices,
-StoryGraph (no public API), ratings/reviews.
+Non-goals (v1): importing Hardcover state back to devices,
+StoryGraph (no public API), ratings/reviews. (Clippings now post as journal quotes when the
+user turns on the `highlights` connector option; private by default.)
 
 ## Architecture
 

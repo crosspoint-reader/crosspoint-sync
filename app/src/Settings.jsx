@@ -4,7 +4,7 @@ import { onOpenUrl } from '@tauri-apps/plugin-deep-link'
 import { ArrowLeft, ChevronRight, Copy, KeyRound, ListChecks, Loader2, LogOut, Monitor, Moon, RefreshCw, Search, Server, Sun, Trash2, UserX } from 'lucide-react'
 import SparkMD5 from 'spark-md5'
 import { api, isApp } from './api.js'
-import { Bone, Card, EmptyState, Eyebrow, notify, useLoad } from './ui.jsx'
+import { Bone, Card, EmptyState, Eyebrow, notify, Toggle, useLoad } from './ui.jsx'
 
 // Appearance: follow the system, or force light or dark.
 const THEMES = [
@@ -36,7 +36,7 @@ function Appearance({ theme: [pref, setPref] }) {
 
 // What each service does, as on the web dashboard.
 const HINTS = {
-  hardcover: 'Syncs your reading progress and shelf status to Hardcover.',
+  hardcover: 'Syncs your reading progress and shelf status to Hardcover, and your highlights if you turn them on.',
   microblog: 'Keeps your Currently reading and Finished reading bookshelves in sync.',
   readwise: 'Syncs your highlights to Readwise.',
   'readwise-reader': 'Archives books in Reader when you finish them, and brings your Reader progress back.',
@@ -537,6 +537,9 @@ function Service({ session, conn, onChange }) {
           </button>
         )}
       </div>
+      {conn.linked && !needsRelink && conn.options && (
+        <Options conn={conn} save={(v) => act('options', () => api.setConnectorOptions(session, conn.id, v))} />
+      )}
       {openForm && (!conn.linked || needsRelink) && (
         <LinkForm
           session={session}
@@ -548,6 +551,33 @@ function Service({ session, conn, onChange }) {
           }}
         />
       )}
+    </div>
+  )
+}
+
+// A linked connector's settings (e.g. Hardcover highlights and their privacy).
+function Options({ conn, save }) {
+  const [values, setValues] = useState(conn.option_values ?? {})
+  const set = (key, v) => {
+    setValues({ ...values, [key]: v })
+    save({ [key]: v })
+  }
+  return (
+    <div className="mt-3 space-y-3 pl-12">
+      {conn.options.map((o) => (
+        <label key={o.key} className="flex items-center justify-between gap-3 text-sm text-stone-700">
+          {o.label}
+          {o.choices ? (
+            <select value={values[o.key]} onChange={(e) => set(o.key, e.target.value)} className="h-9 rounded-lg bg-stone-50 px-2 text-sm text-stone-900 ring-1 ring-stone-950/10 outline-none">
+              {o.choices.map((ch) => (
+                <option key={ch.value} value={ch.value}>{ch.label}</option>
+              ))}
+            </select>
+          ) : (
+            <Toggle checked={values[o.key] === true} onChange={(v) => set(o.key, v)} label={o.label} />
+          )}
+        </label>
+      ))}
     </div>
   )
 }

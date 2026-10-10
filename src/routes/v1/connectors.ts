@@ -11,6 +11,7 @@ import { resolveMatch } from '../../connectors/runner.js';
 import { CLIENT_ID_RE, CLIENT_ID_REJECTED, playWhenDeviceAppears, spotifyPlan, spotifyResume, spotifyTracks } from '../../connectors/spotify.js';
 import {
   backfillDocumentMeta,
+  connectorOptions,
   decryptCredential,
   deleteAccount,
   getAccount,
@@ -25,7 +26,9 @@ import {
   setAccountStatus,
   setMatchAnchor,
   setClientId,
+  setConnectorOptions,
   upsertAccount,
+  type OptionValues,
 } from '../../connectors/store.js';
 import { isValidDocument } from '../kosync.js';
 import { ConnectorOperationError, type HttpTransport } from '../../connectors/types.js';
@@ -185,6 +188,7 @@ export function connectorRoutes(
           status: account?.status ?? null,
           account: account?.account_label ?? null,
           queue: account ? queueDepth(db, user.id, conn.id) : undefined,
+          ...(conn.options ? { options: conn.options, option_values: account ? connectorOptions(db, user.id, conn) : null } : {}),
         };
       }),
     });
@@ -423,6 +427,34 @@ export function connectorRoutes(
     } catch (err) {
       return c.json({ code: 2003, message: err instanceof Error ? err.message : 'lookup failed' }, 502);
     }
+  });
+
+  // Change a linked connector's options. Unknown keys and bad values are ignored.
+  app.put('/connectors/:id/options', async (c) => {
+    const conn = getConnector(c.req.param('id'));
+    if (!conn?.options) return c.json({ code: 2003, message: 'Unknown connector' }, 404);
+    const user = c.get('user');
+    if (!getAccount(db, user.id, conn.id)) {
+      return c.json({ code: 2003, message: 'Connector not linked' }, 400);
+    }
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const next: OptionValues = connectorOptions(db, user.id, conn);
+    for (const o of conn.options) {
+      const v = body?.[o.key];
+      if (o.choices ? o.choices.some((ch) => ch.value === v) : typeof v === 'boolean') next[o.key] = v as boolean | string;
+    }
+    withTransaction(db, () => {
+      setConnectorOptions(db, user.id, conn.id, next);
+      // A kind switched off: drop its queued work so nothing more goes out.
+      for (const o of conn.options!) {
+        if (o.gates && next[o.key] === false) {
+          // The kind column holds the coalesce key, e.g. 'highlight:<clipping id>'.
+          db.prepare(`DELETE FROM connector_queue WHERE user_id = ? AND connector_id = ? AND (kind = ? OR kind LIKE ?) AND status = 'pending'`)
+            .run(user.id, conn.id, o.gates, `${o.gates}:%`);
+        }
+      }
+    });
+    return c.json({ id: conn.id, option_values: next });
   });
 
   // "Sync now": backfill this connector with everything already synced.

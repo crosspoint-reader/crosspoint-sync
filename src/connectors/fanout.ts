@@ -2,7 +2,7 @@ import type { DB } from '../db/db.js';
 import { secretsEnabled } from '../crypto/secrets.js';
 import { getConnector } from './registry.js';
 import { enqueue } from './queue.js';
-import { activeConnectorIds, documentMeta, getMatch } from './store.js';
+import { activeConnectorIds, carriesFor, documentMeta, getMatch } from './store.js';
 import { extractTitleAuthor } from './matching.js';
 import { nowSeconds } from '../models/sync.js';
 import type { Connector, OutboundEvent } from './types.js';
@@ -42,7 +42,7 @@ function fanOut(
     for (const connectorId of activeConnectorIds(db, userId)) {
       if (connectorId === exceptConnectorId) continue; // loop suppression: don't echo to the source
       const conn = getConnector(connectorId);
-      if (!conn || !conn.capabilities.write || !conn.carries.includes(ev.kind)) continue;
+      if (!conn || !conn.capabilities.write || !carriesFor(db, userId, conn, ev.kind)) continue;
       if (!isAttemptable(db, userId, conn, ev.document)) continue; // no metadata/match: skip
       enqueue(db, userId, connectorId, ev, coalesceKey);
     }
@@ -142,7 +142,7 @@ export function backfillConnector(db: DB, userId: number, connectorId: string): 
   if (!conn || !conn.capabilities.write) return 0;
   let queued = 0;
 
-  if (conn.carries.includes('progress') || conn.carries.includes('finished')) {
+  if (carriesFor(db, userId, conn, 'progress') || carriesFor(db, userId, conn, 'finished')) {
     const rows = db
       .prepare(
         `SELECT p.document, p.percentage, p.progress, p.position, p.updated_at
@@ -168,7 +168,7 @@ export function backfillConnector(db: DB, userId: number, connectorId: string): 
     for (const r of rows) {
       const finished = r.percentage >= 0.98;
       const kind = finished ? 'finished' : 'progress';
-      if (!conn.carries.includes(kind)) continue;
+      if (!carriesFor(db, userId, conn, kind)) continue;
       if (!isAttemptable(db, userId, conn, r.document)) continue; // no metadata/match: skip
       let position: Record<string, unknown> | null = null;
       if (r.position) {
@@ -190,7 +190,7 @@ export function backfillConnector(db: DB, userId: number, connectorId: string): 
     }
   }
 
-  if (conn.carries.includes('highlight')) {
+  if (carriesFor(db, userId, conn, 'highlight')) {
     const rows = db
       .prepare(
         `SELECT c.id, c.document, c.text, c.note, c.created_at, c.spine_index, c.start_offset, c.end_offset,
