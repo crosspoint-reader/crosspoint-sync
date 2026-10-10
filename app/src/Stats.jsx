@@ -591,44 +591,106 @@ function PagesAndBooks({ activity: all, books, onShare }) {
   )
 }
 
-// The stats share card: this year's headline numbers, recent covers, weekly pages.
+// The stats share card for this week, month or year: headline numbers, covers, pages over time.
+const PERIODS = [
+  ['week', 'Week'],
+  ['month', 'Month'],
+  ['year', 'Year'],
+]
+
+// The period so far, as local days, with chart bars: days for a week or month, months for a year.
+export function sharePeriod(period, now = new Date()) {
+  const today = new Date(now)
+  today.setHours(12, 0, 0, 0)
+  const start = new Date(today)
+  if (period === 'week') start.setDate(start.getDate() - ((start.getDay() + 6) % 7))
+  else if (period === 'month') start.setDate(1)
+  else start.setMonth(0, 1)
+  const year = today.getFullYear()
+  const name = {
+    week: 'This week',
+    month: fmt(today, { month: 'long' }),
+    year: String(year),
+  }[period]
+  const slots =
+    period === 'year'
+      ? Array.from({ length: 12 }, (_, m) => ({ key: `${year}-${String(m + 1).padStart(2, '0')}`, current: m === today.getMonth() }))
+      : Array.from({ length: period === 'week' ? 7 : new Date(year, today.getMonth() + 1, 0).getDate() }, (_, i) => {
+          const key = localDay(new Date(start.getTime() + i * DAY_MS))
+          return { key, current: key === localDay(today) }
+        })
+  return {
+    from: localDay(start),
+    to: localDay(today),
+    name,
+    chartLabel: period === 'year' ? 'PAGES PER MONTH' : 'PAGES PER DAY',
+    // A day key falls in a month slot by its YYYY-MM prefix.
+    slotOf: (day) => (period === 'year' ? day.slice(0, 7) : day),
+    slots,
+  }
+}
+
 function StatsShare({ summary, activity, books, onClose }) {
-  const year = new Date().getFullYear()
+  const [period, setPeriod] = useState('year')
+  const p = sharePeriod(period)
+  const inPeriod = (day) => day >= p.from && day <= p.to
   const shown = new Map(books.map((b) => [b.document, b]))
   const finished = activity.books
-    .filter((b) => b.finished_at && shown.has(b.document))
+    .filter((b) => b.finished_at && shown.has(b.document) && inPeriod(localDay(new Date(b.finished_at * 1000))))
     .sort((a, b) => b.finished_at - a.finished_at)
-  const thisYear = finished.filter((b) => new Date(b.finished_at * 1000).getFullYear() === year)
-  const pages = activity.books.filter((b) => shown.has(b.document)).reduce((n, b) => n + (b.pages_read ?? 0), 0)
-  const hasTime = summary?.devices?.length > 0
+  const days = activity.days.filter((d) => inPeriod(d.day))
+  const pages = Math.round(days.reduce((n, d) => n + d.pages, 0))
+  // Books read in the period, newest first, for covers and moods when nothing was finished.
+  const read = [...new Set(days.slice().reverse().flatMap((d) => (d.books ?? []).map((b) => b.document)))].filter((d) => shown.has(d))
+  const daily = summary?.daily ?? []
+  const seconds = daily.filter((d) => inPeriod(d.date)).reduce((n, d) => n + d.seconds, 0)
   const tiles = [
-    [`finished in ${year}`, thisYear.length],
+    [period === 'week' ? 'finished this week' : `finished in ${p.name}`, finished.length],
     ['pages read', pages.toLocaleString()],
-    ...(hasTime
+    ...(daily.length
       ? [
-          ['hours read', Math.round(summary.seconds / 3600).toLocaleString()],
+          ['hours read', Math.round(seconds / 3600).toLocaleString()],
           ['day streak', summary.current_streak],
         ]
-      : [['reading now', books.filter((b) => b.status === 'reading').length]]),
+      : [['days read', days.filter((d) => d.pages > 0).length]]),
   ]
-  const covers = finished.map((b) => shown.get(b.document).cover_url).filter(Boolean)
-  // This year's moods: books finished this year, else anything read this year.
-  const readThisYear = activity.books.filter((b) => new Date(b.last_at * 1000).getFullYear() === year)
-  const moods = topMoods(books, (thisYear.length ? thisYear : readThisYear).map((b) => b.document))
+  const coverDocs = [...new Set([...finished.map((b) => b.document), ...read])]
+  const covers = coverDocs.map((d) => shown.get(d).cover_url).filter(Boolean)
+  const moods = topMoods(books, finished.length ? finished.map((b) => b.document) : read)
+  const totals = new Map()
+  for (const d of days) totals.set(p.slotOf(d.day), (totals.get(p.slotOf(d.day)) ?? 0) + d.pages)
+  const chart = { label: p.chartLabel, bars: p.slots.map((s) => ({ pages: totals.get(s.key) ?? 0, current: s.current })) }
+  const heading = `${p.name} in books`
+  const mine = period === 'week' ? 'My week in books' : `My ${p.name} in books`
   const meta = {
-    title: `${year} in books`,
-    postTitle: `My ${year} in books`,
-    fileName: `${year} in books.png`,
-    text: `My ${year} in books: ${thisYear.length} finished, ${pages.toLocaleString()} pages read. Tracked with CrossPoint Sync.`,
+    title: heading,
+    postTitle: mine,
+    fileName: `${heading}.png`,
+    text: `${mine}: ${finished.length} finished, ${pages.toLocaleString()} pages read. Tracked with CrossPoint Sync.`,
   }
   return (
     <ShareSheet
       heading="Share your stats"
       meta={meta}
-      renderKey={`${year}-${pages}-${thisYear.length}-${moods.join()}`}
+      renderKey={`${period}-${p.to}-${pages}-${finished.length}-${seconds}-${moods.join()}`}
       onClose={onClose}
-      render={() => renderStatsCard({ heading: `${year} in books`, tiles, covers, weeks: weeklyPages(activity.days), moods })}
-    />
+      render={() => renderStatsCard({ heading, tiles, covers, chart, moods })}
+    >
+      <div className="mt-4 grid grid-cols-3 gap-1 rounded-xl bg-stone-200/60 p-1" role="radiogroup" aria-label="Period">
+        {PERIODS.map(([v, label]) => (
+          <button
+            key={v}
+            type="button"
+            role="radio"
+            aria-checked={period === v}
+            onClick={() => setPeriod(v)}
+            className={`h-9 rounded-lg text-sm font-semibold transition ${period === v ? 'bg-raised text-stone-900 shadow-sm' : 'text-stone-500 active:bg-stone-200'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </ShareSheet>
   )
 }
 

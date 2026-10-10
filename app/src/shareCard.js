@@ -351,7 +351,7 @@ function moodLine(ctx, y, moods) {
   return 90
 }
 
-export async function renderStatsCard({ heading, tiles, covers, weeks, moods = [] }) {
+export async function renderStatsCard({ heading, tiles, covers, chart, moods = [] }) {
   const [logo, ...images] = await Promise.all([loadImage(`${import.meta.env.BASE_URL}logo.png`, false), ...covers.slice(0, 5).map((u) => loadImage(u, isApp))])
   const { canvas, ctx } = await statsBase(heading, tiles)
 
@@ -359,9 +359,10 @@ export async function renderStatsCard({ heading, tiles, covers, weeks, moods = [
   const shown = images.filter(Boolean)
   const tilesEnd = 400 + Math.ceil(Math.min(tiles.length, 4) / 2) * 170 + 10
   const coverTop = tilesEnd + moodLine(ctx, tilesEnd - 10, moods)
+  // Covers kept compact so the pages chart below gets real height.
+  const cw = 130
+  const chh = 195
   if (shown.length) {
-    const cw = 150
-    const chh = 225
     const gap = (W - PAD * 2 - cw * 5) / 4
     shown.forEach((img, i) => {
       const x = PAD + i * (cw + gap)
@@ -384,20 +385,23 @@ export async function renderStatsCard({ heading, tiles, covers, weeks, moods = [
     })
   }
 
-  // Pages per week, oldest to newest.
-  const chartTop = shown.length ? coverTop + 290 : coverTop + 40
-  const chartH = H - 150 - chartTop
-  if (chartH > 60 && weeks.some((w) => w.pages)) {
+  // Pages per day/week/month, oldest to newest; the current one in full green.
+  const { label, bars } = chart
+  const chartTop = shown.length ? coverTop + chh + 70 : coverTop + 40
+  // Down to just above the signature (its logo starts at H - 90).
+  const chartH = H - 125 - chartTop
+  if (chartH > 60 && bars.some((b) => b.pages)) {
     ctx.fillStyle = C.faint
     ctx.font = '400 22px "Geist Mono"'
-    ctx.fillText('PAGES PER WEEK', PAD, chartTop)
-    const max = Math.max(...weeks.map((w) => w.pages), 1)
-    const bw = (W - PAD * 2) / weeks.length
-    weeks.forEach((w, i) => {
-      const h = Math.max(w.pages ? 4 : 0, ((chartH - 40) * w.pages) / max)
-      ctx.fillStyle = i === weeks.length - 1 ? C.brand : C.brandRule
+    ctx.fillText(label, PAD, chartTop)
+    const max = Math.max(...bars.map((b) => b.pages), 1)
+    const bw = (W - PAD * 2) / bars.length
+    const gap = Math.min(12, bw * 0.3)
+    bars.forEach((b, i) => {
+      const h = Math.max(b.pages ? 4 : 0, ((chartH - 40) * b.pages) / max)
+      ctx.fillStyle = b.current ? C.brand : C.brandRule
       ctx.beginPath()
-      ctx.roundRect(PAD + i * bw + 6, chartTop + chartH - h, bw - 12, h, 5)
+      ctx.roundRect(PAD + i * bw + gap / 2, chartTop + chartH - h, bw - gap, h, Math.min(5, (bw - gap) / 2))
       ctx.fill()
     })
     ctx.fillStyle = C.rule

@@ -5,7 +5,7 @@ import { Spinner } from './ui.jsx'
 
 // Preview a generated share card, then share it natively, copy/save it, or post it
 // (desktop). Used for clippings and the stats card.
-export default function ShareSheet({ heading, meta, render, renderKey, onClose }) {
+export default function ShareSheet({ heading, meta, render, renderKey, onClose, children }) {
   const [card, setCard] = useState(null) // { blob, url }
   const [status, setStatus] = useState(null)
 
@@ -46,6 +46,7 @@ export default function ShareSheet({ heading, meta, render, renderKey, onClose }
           <X className="size-5" />
         </button>
         <h2 className="font-display text-xl font-semibold text-stone-900">{heading}</h2>
+        {children}
         <div className="mx-auto mt-4 aspect-[4/5] w-full max-w-72 overflow-hidden rounded-xl shadow-lg ring-1 ring-stone-950/10">
           {card ? <img src={card.url} alt="Share card preview" className="size-full" /> : <div className="grid size-full place-items-center bg-cover"><Spinner /></div>}
         </div>
