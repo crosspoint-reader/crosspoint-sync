@@ -6,6 +6,28 @@
  */
 const GITHUB = 'https://github.com/crosspoint-reader/crosspoint-sync';
 
+export const SITE_DESCRIPTION =
+  "Sync your e-reader's progress, highlights and reading stats to your phone, the web, Hardcover, Readwise and more. Works with CrossPoint, CrossInk and KOReader.";
+// Link previews need an absolute image URL. It's brand art, so self-hosted
+// servers point at the hosted copy too.
+const OG_IMAGE = 'https://sync.crosspointreader.com/og.jpg';
+
+/** Description plus Open Graph / Twitter card tags. Title and description are trusted literals. */
+export const metaTags = (title: string, description = SITE_DESCRIPTION) =>
+  `<meta name="description" content="${description}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CrossPoint Sync">
+<meta property="og:title" content="${title}">
+<meta property="og:description" content="${description}">
+<meta property="og:image" content="${OG_IMAGE}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="CrossPoint Sync: your reading, in sync everywhere. The CrossPoint Sync library on the web.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${title}">
+<meta name="twitter:description" content="${description}">
+<meta name="twitter:image" content="${OG_IMAGE}">`;
+
 // A screenshot with its dark twin, swapped by the visitor's color scheme.
 const shot = (name: string, alt: string, eager = false) =>
   `<picture><source srcset="/landing/${name}-dark.webp" media="(prefers-color-scheme: dark)">` +
@@ -170,8 +192,8 @@ footer a:hover{color:var(--ink)}
 export function landingPage(fontFaces: string): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CrossPoint Sync: your reading, in sync everywhere</title>
-<meta name="description" content="A KOReader-compatible sync server for your e-reader, with an app for your library, clippings and reading stats.">
+<title>CrossPoint Sync: Your reading, in sync everywhere</title>
+${metaTags('CrossPoint Sync: Your reading, in sync everywhere')}
 <meta name="theme-color" content="#fafaf9" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#121110" media="(prefers-color-scheme: dark)">
 <link rel="icon" type="image/png" href="/favicon.png">
