@@ -76,7 +76,7 @@ services.crosspoint-sync = {
 ### Bare Node (≥ 22.13)
 
 ```sh
-npm ci && npm run build
+npm ci && npm run build && npm run build:frontend
 DATABASE_PATH=./data/crosspoint.db PORT=8080 node dist/index.js
 ```
 
