@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DOC, makeTestApp, registerUser } from './helpers.js';
+import { DOC, makeTestApp, md5, registerUser } from './helpers.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
 import type { HttpTransport } from '../src/connectors/types.js';
 import { pollConnector, pollSpotify } from '../src/connectors/fanin.js';
@@ -628,6 +628,44 @@ describe('spotify sign-in (server-run PKCE, one https redirect)', () => {
       method: 'POST', headers: { ...headers, 'x-forwarded-proto': 'https' }, body: '{}',
     });
     expect((await res.json()).redirect_uri).toBe('https://sync.example.com/connectors/spotify/callback');
+  });
+
+  it('preserves a deployment prefix in advertised callbacks, OAuth and return links', async () => {
+    const basePath = '/services/reading';
+    const f = fakeSpotify({
+      'POST /api/token': [200, { access_token: 'at', refresh_token: 'rt', expires_in: 3600 }],
+      'GET /me': [200, { display_name: 'Reader', country: 'US' }],
+    });
+    const { app, db } = makeTestApp({ basePath, trustProxy: true }, { connectorTransport: f.transport });
+    try {
+      const headers = { 'content-type': 'application/json', 'x-auth-user': 'reader', 'x-auth-key': md5('password'), 'x-forwarded-proto': 'https' };
+      const at = (path: string) => `http://books.example.net${basePath}${path}`;
+      expect((await app.request(at('/users/create'), {
+        method: 'POST', headers, body: JSON.stringify({ username: 'reader', password: md5('password') }),
+      })).status).toBe(201);
+      await app.request(at('/api/v1/connectors/spotify/reveal'), { method: 'POST', headers });
+      const redirect = `https://books.example.net${basePath}/connectors/spotify/callback`;
+      const info = await (await app.request(at('/api/v1/connectors'), { headers })).json();
+      expect(info.connectors.find((c: any) => c.id === 'spotify').oauth.redirect_uri).toBe(redirect);
+      expect((await app.request(at('/api/v1/connectors/spotify/client-id'), {
+        method: 'PUT', headers, body: JSON.stringify({ client_id: 'a'.repeat(32) }),
+      })).status).toBe(200);
+      const begun = await (await app.request(at('/api/v1/connectors/spotify/oauth/begin'), {
+        method: 'POST', headers, body: JSON.stringify({ client: 'web' }),
+      })).json();
+      expect(begun.redirect_uri).toBe(redirect);
+      const params = new URL(begun.authorize_url).searchParams;
+      expect(params.get('redirect_uri')).toBe(redirect);
+      const callback = await app.request(at(`/connectors/spotify/callback?state=${params.get('state')}&code=c`));
+      expect(callback.status).toBe(302);
+      expect(callback.headers.get('location')).toBe(`${basePath}/app/#/settings/spotify`);
+      expect(new URLSearchParams(f.calls[0].body).get('redirect_uri')).toBe(redirect);
+      const expired = await app.request(at('/connectors/spotify/callback?state=expired'));
+      expect(expired.status).toBe(400);
+      expect(await expired.text()).toContain(`href="${basePath}/app/#/settings"`);
+    } finally {
+      db.close();
+    }
   });
 
   it('web: the callback page exchanges the code with the stored verifier and returns to Settings', async () => {
