@@ -6,6 +6,7 @@ services:
     volumes:
       - crosspoint-data:/data
     environment:
+      BASE_PATH: "${BASE_PATH:-}"
       # Set to "true" on private instances once your accounts exist.
       REGISTRATION_DISABLED: "false"
       # Set Listen Address so the service is accessible from outside the container
