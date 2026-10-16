@@ -5,7 +5,11 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 // in a plain browser, the webview fetch.
 export const isApp = '__TAURI_INTERNALS__' in window
 // Served by a sync server at /app/: that server is the only one to sign in to.
-export const hostedServer = !isApp && /^https?:$/.test(location.protocol) && location.pathname.startsWith('/app') ? location.origin : null
+export function hostedServerUrl(url) {
+  const match = url.pathname.match(/^(.*)\/app\/(?:index\.html)?$/)
+  return /^https?:$/.test(url.protocol) && match ? url.origin + match[1] : null
+}
+export const hostedServer = !isApp ? hostedServerUrl(location) : null
 
 // File bytes for raw-body commands (send_bytes, save_file). Android's WebView can't
 // pass request bodies to Tauri's IPC protocol, so there the message is JSON-encoded

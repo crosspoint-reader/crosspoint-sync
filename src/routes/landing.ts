@@ -28,16 +28,6 @@ export const metaTags = (title: string, description = SITE_DESCRIPTION) =>
 <meta name="twitter:description" content="${description}">
 <meta name="twitter:image" content="${OG_IMAGE}">`;
 
-// A screenshot with its dark twin, swapped by the visitor's color scheme.
-const shot = (name: string, alt: string, eager = false) =>
-  `<picture><source srcset="/landing/${name}-dark.webp" media="(prefers-color-scheme: dark)">` +
-  `<img src="/landing/${name}-light.webp" alt="${alt}"${eager ? ' fetchpriority="high"' : ' loading="lazy"'} decoding="async"></picture>`;
-
-const phone = (name: string, alt: string, cls = '', eager = false) =>
-  `<div class="phone ${cls}">${shot(name, alt, eager)}</div>`;
-const browser = (name: string, alt: string, cls = '', eager = false) => `<div class="browser ${cls}">${shot(name, alt, eager)}</div>`;
-const tablet = (name: string, alt: string, cls = '') => `<div class="tablet ${cls}">${shot(name, alt)}</div>`;
-
 const SERVICES: [string, string, string, 'ready' | 'beta'][] = [
   ['hardcover', 'Hardcover', 'Your shelf and progress update each time you sync.', 'ready'],
   ['bookfusion', 'BookFusion', 'Reading positions both ways for books from BookFusion.', 'ready'],
@@ -189,21 +179,29 @@ footer a:hover{color:var(--ink)}
 }
 `;
 
-export function landingPage(fontFaces: string): string {
+export function landingPage(fontFaces: string, basePath = ''): string {
+  // A screenshot with its dark twin, swapped by the visitor's color scheme.
+  const shot = (name: string, alt: string, eager = false) =>
+    `<picture><source srcset="${basePath}/landing/${name}-dark.webp" media="(prefers-color-scheme: dark)">` +
+    `<img src="${basePath}/landing/${name}-light.webp" alt="${alt}"${eager ? ' fetchpriority="high"' : ' loading="lazy"'} decoding="async"></picture>`;
+  const phone = (name: string, alt: string, cls = '', eager = false) =>
+    `<div class="phone ${cls}">${shot(name, alt, eager)}</div>`;
+  const browser = (name: string, alt: string, cls = '', eager = false) => `<div class="browser ${cls}">${shot(name, alt, eager)}</div>`;
+  const tablet = (name: string, alt: string, cls = '') => `<div class="tablet ${cls}">${shot(name, alt)}</div>`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CrossPoint Sync: Your reading, in sync everywhere</title>
 ${metaTags('CrossPoint Sync: Your reading, in sync everywhere')}
 <meta name="theme-color" content="#fafaf9" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#121110" media="(prefers-color-scheme: dark)">
-<link rel="icon" type="image/png" href="/favicon.png">
-<link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="/fonts/lora-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="icon" type="image/png" href="${basePath}/favicon.png">
+<link rel="preload" href="${basePath}/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="${basePath}/fonts/lora-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
 <style>${fontFaces}${STYLE}</style></head>
 <body>
 <header><div class="wrap">
-  <a class="mark" href="/"><img src="/logo.png" alt="">CrossPoint Sync</a>
-  <nav><a class="link" href="${GITHUB}">Self-host</a><a class="btn primary" href="/app/">Get started</a></nav>
+  <a class="mark" href="${basePath}/"><img src="${basePath}/logo.png" alt="">CrossPoint Sync</a>
+  <nav><a class="link" href="${GITHUB}">Self-host</a><a class="btn primary" href="${basePath}/app/">Get started</a></nav>
 </div></header>
 
 <main>
@@ -212,7 +210,7 @@ ${metaTags('CrossPoint Sync: Your reading, in sync everywhere')}
     <span class="hand eyebrow">read on every device</span>
     <h1>Your reading, in sync <span class="u">everywhere</span></h1>
     <p class="sub">Your e-reader's progress, clippings and stats on your phone and the web, and in the services you already use.</p>
-    <div class="cta"><a class="btn primary" href="/app/">Get started</a><a class="btn ghost" href="#how">How it works</a></div>
+    <div class="cta"><a class="btn primary" href="${basePath}/app/">Get started</a><a class="btn ghost" href="#how">How it works</a></div>
   </div>
   <div class="stage">
     ${browser('desktop-library', 'The CrossPoint Sync library on the web', '', true)}
@@ -226,7 +224,7 @@ ${metaTags('CrossPoint Sync: Your reading, in sync everywhere')}
   <div class="services">
     ${SERVICES.map(
       ([icon, name, desc, state]) =>
-        `<div class="svc"><img src="/icons/${icon}.png" alt="" width="40" height="40" loading="lazy"><div>` +
+        `<div class="svc"><img src="${basePath}/icons/${icon}.png" alt="" width="40" height="40" loading="lazy"><div>` +
         `<div class="name">${name}${state === 'beta' ? '<span class="pill">beta</span>' : ''}</div><div class="desc">${desc}</div></div></div>`
     ).join('')}
   </div>
@@ -289,7 +287,7 @@ ${metaTags('CrossPoint Sync: Your reading, in sync everywhere')}
 <div class="wrap closing">
   <h2>Start syncing in a minute</h2>
   <p>Free to use and open source. Run it here, or on your own server with one Docker image.</p>
-  <div class="cta"><a class="btn primary" href="/app/">Get started</a><a class="btn ghost" href="${GITHUB}">Self-host</a></div>
+  <div class="cta"><a class="btn primary" href="${basePath}/app/">Get started</a><a class="btn ghost" href="${GITHUB}">Self-host</a></div>
 </div>
 </main>
 

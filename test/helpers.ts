@@ -21,6 +21,7 @@ export function makeTestApp(
   const db = openDatabase(':memory:');
   migrate(db);
   const config: Config = {
+    basePath: '',
     registrationDisabled: false,
     authRateLimitPerMinute: 0, // disabled in tests (limiter state is per-app anyway)
     trustProxy: false,

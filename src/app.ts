@@ -2,13 +2,13 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { DB } from './db/db.js';
-import type { Config } from './config.js';
+import { normalizeBasePath, type Config } from './config.js';
 import { sessionOrKeyAuth, type AppEnv } from './auth/middleware.js';
 import { kosyncRoutes } from './routes/kosync.js';
 import { meRoutes } from './routes/v1/me.js';
 import { authRoutes } from './routes/auth.js';
 import { accountRoutes } from './routes/account.js';
-import { webRoutes } from './routes/web.js';
+import { webRoutes, appLinkRoutes } from './routes/web.js';
 import { progressRoutes } from './routes/v1/progress.js';
 import { bookmarkRoutes } from './routes/v1/bookmarks.js';
 import { clippingRoutes } from './routes/v1/clippings.js';
@@ -28,6 +28,8 @@ export interface AppOptions {
 }
 
 export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<AppEnv> {
+  config = { ...config, basePath: normalizeBasePath(config.basePath) };
+  const { basePath } = config;
   const app = new Hono<AppEnv>();
   const refreshProgress = createProgressRefresh(db, opts.connectorTransport);
 
@@ -51,12 +53,12 @@ export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<A
   // The full CrossPoint Sync app (same build as the phone/desktop app) at /app/.
   // WEB_APP_DIR is set in the Docker image; locally it falls back to app/dist.
   const webApp = process.env.WEB_APP_DIR ?? 'app/dist';
-  app.get('/app', (c) => c.redirect('/app/'));
+  app.get('/app', (c) => c.redirect(`${basePath}/app/`));
   app.use(
     '/app/*',
     serveStatic({
       root: webApp,
-      rewriteRequestPath: (p) => p.replace(/^\/app/, ''),
+      rewriteRequestPath: (p) => p.slice(`${basePath}/app`.length),
       onFound: (path, c) => {
         // Vite fingerprints assets; index.html must always be fresh.
         c.header('Cache-Control', path.endsWith('.html') ? 'no-cache' : 'public, max-age=31536000, immutable');
@@ -65,8 +67,8 @@ export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<A
   );
 
   // Web UI (landing / account pages).
-  app.route('/', webRoutes());
-  app.route('/', oauthCallbackRoutes(db, opts.connectorTransport));
+  app.route('/', webRoutes(undefined, basePath));
+  app.route('/', oauthCallbackRoutes(db, opts.connectorTransport, basePath));
 
   // kosync-compatible API at the root - stock KOReader and current CrossPoint
   // firmware work by changing only the server URL.
@@ -85,7 +87,7 @@ export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<A
   v1.route('/', clippingRoutes(db));
   v1.route('/', statsRoutes(db, opts.connectorTransport));
   v1.route('/', documentRoutes(db, opts.connectorTransport));
-  v1.route('/', connectorRoutes(db, opts.connectorTransport, config.trustProxy));
+  v1.route('/', connectorRoutes(db, opts.connectorTransport, config.trustProxy, basePath));
   v1.route('/', meRoutes(db));
   // Self-host-only Amazon device registration (off unless explicitly enabled).
   if (config.kindleServerRegistration) {
@@ -93,5 +95,10 @@ export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<A
   }
   app.route('/api/v1', v1);
 
-  return app;
+  const root = new Hono<AppEnv>();
+  // OS app-link discovery always happens at the domain root.
+  root.route('/', appLinkRoutes(basePath));
+  if (basePath) root.get(basePath, (c) => c.redirect(`${basePath}/${new URL(c.req.url).search}`, 308));
+  root.route(`${basePath}/`, app);
+  return root;
 }
