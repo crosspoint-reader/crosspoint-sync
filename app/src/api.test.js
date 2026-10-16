@@ -23,6 +23,9 @@ describe('prefixed server URLs', () => {
   it.each(['', '/reading', '/services/reading'])('detects the hosted server at %j', (basePath) => {
     expect(hostedServerUrl(new URL(`https://sync.test${basePath}/app/`))).toBe(`https://sync.test${basePath}`)
   })
+  it.each(['', '/reading', '/services/reading'])('detects the hosted server from the explicit index URL at %j', (basePath) => {
+    expect(hostedServerUrl(new URL(`https://sync.test${basePath}/app/index.html`))).toBe(`https://sync.test${basePath}`)
+  })
   it.each(['https://sync.test/application/', 'https://sync.test/app/assets/', 'tauri://localhost/app/'])('does not mistake %s for a hosted app', (url) => {
     expect(hostedServerUrl(new URL(url))).toBeNull()
   })

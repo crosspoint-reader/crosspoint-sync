@@ -72,6 +72,13 @@ describe.each(['', '/reading', '/services/reading'])('deployment at %j', (basePa
     expect((await app.request(`${basePath}/kindle-link.zip`)).status).toBe(200);
   });
 
+  it('serves the app at the explicit index URL', async () => {
+    const app = setup();
+    const index = await app.request(`${basePath}/app/index.html`);
+    expect(index.status).toBe(200);
+    expect(await index.text()).toContain('./assets/app.js');
+  });
+
   it('supports KOSync, the extended API and API CORS under the prefix', async () => {
     const app = setup();
     const headers = { 'content-type': 'application/json', 'x-auth-user': 'reader', 'x-auth-key': md5('password') };

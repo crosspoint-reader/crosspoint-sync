@@ -6,7 +6,7 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 export const isApp = '__TAURI_INTERNALS__' in window
 // Served by a sync server at /app/: that server is the only one to sign in to.
 export function hostedServerUrl(url) {
-  const match = url.pathname.match(/^(.*)\/app\/$/)
+  const match = url.pathname.match(/^(.*)\/app\/(?:index\.html)?$/)
   return /^https?:$/.test(url.protocol) && match ? url.origin + match[1] : null
 }
 export const hostedServer = !isApp ? hostedServerUrl(location) : null
