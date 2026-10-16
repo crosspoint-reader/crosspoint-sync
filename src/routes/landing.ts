@@ -47,6 +47,7 @@ const SERVICES: [string, string, string, 'ready' | 'beta'][] = [
   ['microblog', 'Micro.blog', 'Keep your Currently reading and Finished shelves current.', 'ready'],
   ['audiobookshelf', 'Audiobookshelf', 'Switch between the ebook and the audiobook without losing your place.', 'ready'],
   ['bookorbit', 'BookOrbit', 'Two-way progress with your own library, clippings as highlights.', 'beta'],
+  ['seekquel', 'Seekquel', 'Log your progress, finished books and highlights in your Seekquel library.', 'beta'],
 ];
 
 const STYLE = `

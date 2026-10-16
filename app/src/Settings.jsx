@@ -44,6 +44,7 @@ const HINTS = {
   bookfusion: 'Syncs reading progress with BookFusion. You approve the request on bookfusion.com.',
   audiobookshelf: 'Keeps your place between the ebook and the audiobook. Create an API key in Audiobookshelf under Settings, Users, API Keys.',
   bookorbit: 'Syncs progress both ways with your BookOrbit server, and adds your clippings as highlights.',
+  seekquel: 'Logs your reading in your Seekquel library: where you are in each book, the books you finish, and your highlights. You approve the request in the Seekquel app.',
   spotify: 'Moves your progress forward when you listen ahead in the Spotify audiobook, and resumes it there. Audiobooks are in the US, UK, Canada, Ireland, Australia and New Zealand.',
   kindle: 'Linking needs the CrossPoint Kindle Link browser extension.',
 }

@@ -283,6 +283,7 @@ export function connectorRoutes(
         const user = c.get('user');
         // Confirm the freshly minted credential works, then store it.
         const v = await conn.validate(result.credential, transport);
+        if (!v.ok) return c.json({ status: 'error', error: v.error ?? 'Credential rejected' }, 400);
         upsertAccount(db, user.id, conn.id, result.credential, v.accountLabel ?? result.accountLabel ?? null);
         return c.json({ status: 'ok', linked: true });
       }
