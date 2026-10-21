@@ -48,6 +48,11 @@ const authKey = (cat) => JSON.stringify(cat.auth ?? null)
 export const feed = (cat, url = cat.url) => memo(`f ${authKey(cat)} ${url}`, () => invoke('opds_feed', { url, auth: cat.auth }))
 export const search = (cat, query) => memo(`s ${authKey(cat)} ${cat.url} ${query}`, () => invoke('opds_search', { url: cat.url, query, auth: cat.auth }))
 
+// An <img> sends no credentials, so covers from a catalog behind a login are fetched
+// by the app (with the catalog's auth) and handed back as data: URLs.
+export const needsAuthedImage = (cat, url) => !!url && (cat.auth?.kind ?? 'none') !== 'none' && /^https?:/i.test(url)
+export const image = (cat, url) => memo(`i ${authKey(cat)} ${url}`, () => invoke('opds_image', { url, auth: cat.auth }))
+
 // Rows worth showing from a feed's navigation: drop page chrome (start, self, html alternates).
 export const navRows = (links) =>
   links.filter((l) => !['start', 'self', 'alternate', 'search', 'up'].includes(l.rel) && !/html/.test(l.mime ?? ''))
@@ -74,12 +79,44 @@ const onProgress = (cb) => {
   return ch
 }
 
-export const download = (cat, entry, acq, progress = () => {}) =>
+// A data: URL of the image scaled down to `width` px, as JPEG.
+function shrink(src, width) {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.min(width, img.naturalWidth)
+      canvas.height = Math.round((img.naturalHeight * canvas.width) / img.naturalWidth)
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+      resolve(canvas.toDataURL('image/jpeg', 0.85))
+    }
+    img.onerror = reject
+    img.src = src
+  })
+}
+
+// The cover kept with a download. The downloads list has no catalog credentials, so a
+// cover behind a login is stored as a small data: URL (the list shows it 40px wide).
+export async function storedCover(cat, url) {
+  if (!needsAuthedImage(cat, url)) return url ?? null
+  try {
+    return await shrink(await image(cat, url), 120)
+  } catch {
+    return null
+  }
+}
+
+export const download = async (cat, entry, acq, progress = () => {}) =>
   invoke('download_book', {
     url: acq.href,
     mime: acq.mime,
     auth: cat.auth,
-    meta: { title: entry.title, author: entry.authors[0]?.replace(/^([^,]+), ([^,]+)$/, '$2 $1') ?? null, cover: entry.cover ?? entry.thumbnail ?? null, source: cat.name },
+    meta: {
+      title: entry.title,
+      author: entry.authors[0]?.replace(/^([^,]+), ([^,]+)$/, '$2 $1') ?? null,
+      cover: await storedCover(cat, entry.cover ?? entry.thumbnail),
+      source: cat.name,
+    },
     onProgress: onProgress(progress),
   })
 

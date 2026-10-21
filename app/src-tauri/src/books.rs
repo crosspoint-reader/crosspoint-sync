@@ -83,6 +83,11 @@ pub async fn opds_search(url: String, query: String, auth: Option<Auth>) -> Res<
 }
 
 #[tauri::command]
+pub async fn opds_image(url: String, auth: Option<Auth>) -> Res<String> {
+  opds::image(&auth.unwrap_or_default(), &url).await.map_err(err)
+}
+
+#[tauri::command]
 pub async fn download_book(
   app: AppHandle,
   url: String,

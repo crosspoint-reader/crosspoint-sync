@@ -125,6 +125,24 @@ pub async fn download(
   Ok((bytes, ct, cd))
 }
 
+/// Fetch a cover or thumbnail with the catalog's credentials, as a data: URL.
+/// The webview can't load these itself: an <img> sends no Authorization header,
+/// so catalogs behind a login (Calibre-Web, COPS...) answer 401.
+pub async fn image(auth: &Auth, url: &str) -> Result<String> {
+  let resp = check(apply(client(30).get(url).header(ACCEPT, "image/*"), auth).send().await?)?;
+  let ct = resp
+    .headers()
+    .get(reqwest::header::CONTENT_TYPE)
+    .and_then(|v| v.to_str().ok())
+    .unwrap_or("")
+    .to_string();
+  if !ct.starts_with("image/") {
+    return Err(anyhow!("Not an image ({})", ct));
+  }
+  let bytes = resp.bytes().await?;
+  Ok(format!("data:{};base64,{}", ct, B64.encode(&bytes)))
+}
+
 /// Parse an OpenSearch Description Document and return the best atom/opds
 /// search URL template. Returns None if no usable template is found.
 /// Expand an OPDS search template. Catalogs advertise either OpenSearch's

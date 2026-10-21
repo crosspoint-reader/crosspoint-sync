@@ -3,7 +3,7 @@ import { impactFeedback, selectionFeedback } from '@tauri-apps/plugin-haptics'
 import { ArrowLeft, BookOpen, ChevronRight, Download, GripVertical, Loader2, Pencil, Plus, Search, Send as SendIcon, Server, Trash2 } from 'lucide-react'
 import { isApp } from './api.js'
 import { loadDevicePrefs } from './device.js'
-import { download, feed as fetchFeed, loadCatalogs, moveCatalog, navRows, readable, saveCatalogs, search, sendDownload } from './catalogs.js'
+import { download, feed as fetchFeed, image, loadCatalogs, moveCatalog, navRows, needsAuthedImage, readable, saveCatalogs, search, sendDownload } from './catalogs.js'
 import { progressLabel } from './Send.jsx'
 import { Card, EmptyAction, EmptyState, Eyebrow, Spinner, folderLabel, notify } from './ui.jsx'
 import { useNativeBack } from './tabbar.js'
@@ -78,13 +78,48 @@ function BackBar({ back, label }) {
   )
 }
 
-function Cover({ entry, large = false, className = '' }) {
+// The image to put in an <img>: the URL itself, or, behind a login, the data: URL the
+// app fetched with the catalog's credentials (undefined while loading, null if it failed).
+// Only fetched once the cover nears the screen, like <img loading="lazy">.
+function useCoverSrc(cat, url, seen) {
+  const authed = needsAuthedImage(cat, url)
+  const [loaded, setLoaded] = useState(null) // { url, src }
+  useEffect(() => {
+    if (!authed || !seen) return
+    let live = true
+    image(cat, url).then(
+      (src) => live && setLoaded({ url, src }),
+      () => live && setLoaded({ url, src: null }),
+    )
+    return () => {
+      live = false
+    }
+  }, [cat, url, authed, seen])
+  if (!authed) return url
+  return loaded?.url === url ? loaded.src : undefined
+}
+
+// Whether the element has come near the screen (stays true once it has).
+function useSeen() {
+  const ref = useRef(null)
+  const [seen, setSeen] = useState(typeof IntersectionObserver === 'undefined')
+  useEffect(() => {
+    if (seen || !ref.current) return
+    const io = new IntersectionObserver(([e]) => e.isIntersecting && setSeen(true), { rootMargin: '300px' })
+    io.observe(ref.current)
+    return () => io.disconnect()
+  }, [seen])
+  return [ref, seen]
+}
+
+function Cover({ cat, entry, large = false, className = '' }) {
   const [broken, setBroken] = useState(false)
-  const src = large ? (entry.cover ?? entry.thumbnail) : (entry.thumbnail ?? entry.cover)
+  const [ref, seen] = useSeen()
+  const src = useCoverSrc(cat, large ? (entry.cover ?? entry.thumbnail) : (entry.thumbnail ?? entry.cover), seen)
   const frame = `aspect-[2/3] overflow-hidden rounded-md shadow-sm ring-1 ring-stone-950/10 ${className}`
-  if (src && !broken) return <img src={src} alt="" loading="lazy" onError={() => setBroken(true)} className={`${frame} block h-auto max-w-full object-cover`} />
+  if (src && !broken) return <img ref={ref} src={src} alt="" loading="lazy" onError={() => setBroken(true)} className={`${frame} block h-auto max-w-full object-cover`} />
   return (
-    <div className={`${frame} flex flex-col justify-between bg-cover p-2`}>
+    <div ref={ref} className={`${frame} flex flex-col justify-between bg-cover p-2`}>
       <p className="line-clamp-4 font-display text-xs/tight font-semibold text-stone-800">{entry.title}</p>
       <p className="line-clamp-2 text-[0.6rem]/tight text-stone-500">{entry.authors.map(person)[0]}</p>
     </div>
@@ -92,21 +127,21 @@ function Cover({ entry, large = false, className = '' }) {
 }
 
 // block + w-full: a button otherwise sizes to its content, and a wide cover image blows out its slot.
-function Tile({ entry, onOpen }) {
+function Tile({ cat, entry, onOpen }) {
   return (
     <button onClick={() => onOpen(entry)} className="group block w-full min-w-0 text-left">
-      <Cover entry={entry} className="w-full transition group-active:scale-[0.98] md:group-hover:-translate-y-0.5 md:group-hover:shadow-md" />
+      <Cover cat={cat} entry={entry} className="w-full transition group-active:scale-[0.98] md:group-hover:-translate-y-0.5 md:group-hover:shadow-md" />
       <p className="mt-2 line-clamp-2 text-sm/5 font-semibold text-stone-900">{entry.title}</p>
       <p className="truncate text-xs text-stone-500">{entry.authors.map(person).join(', ')}</p>
     </button>
   )
 }
 
-function Grid({ entries, onOpen }) {
+function Grid({ cat, entries, onOpen }) {
   return (
     <div className="grid grid-cols-3 gap-x-3 gap-y-5 sm:grid-cols-4 md:gap-x-5 lg:grid-cols-5 xl:grid-cols-6">
       {entries.map((e, i) => (
-        <Tile key={`${e.id}-${i}`} entry={e} onOpen={onOpen} />
+        <Tile key={`${e.id}-${i}`} cat={cat} entry={e} onOpen={onOpen} />
       ))}
     </div>
   )
@@ -133,12 +168,12 @@ function Rail({ title, more, children }) {
 
 const railItem = 'w-28 shrink-0 snap-start sm:w-32 md:w-36'
 
-function CoverRail({ title, more, entries, onOpen }) {
+function CoverRail({ cat, title, more, entries, onOpen }) {
   return (
     <Rail title={title} more={more}>
       {entries.map((e, i) => (
         <div key={`${e.id}-${i}`} className={railItem}>
-          <Tile entry={e} onOpen={onOpen} />
+          <Tile cat={cat} entry={e} onOpen={onOpen} />
         </div>
       ))}
     </Rail>
@@ -249,7 +284,7 @@ function BookPage({ cat, entryKey }) {
       <BackBar back="history" label="Back" />
       <div className="mt-3 md:grid md:grid-cols-[15rem_1fr] md:items-start md:gap-10 lg:grid-cols-[18rem_1fr] lg:gap-14">
         <aside className="md:sticky md:top-8">
-          <Cover entry={entry} large className="mx-auto w-44 shadow-lg md:w-full" />
+          <Cover cat={cat} entry={entry} large className="mx-auto w-44 shadow-lg md:w-full" />
         </aside>
 
         <div className="@container mt-6 md:mt-0 md:max-w-2xl">
@@ -384,7 +419,7 @@ function SectionRail({ cat, link }) {
   if (failed) return null
   if (!feed) return <SkeletonRail title={title} />
   const books = feed.groups.length ? feed.groups.flatMap((g) => g.entries) : feed.entries
-  if (books.length) return <CoverRail title={title} more={more} entries={books.slice(0, 24)} onOpen={openBook(cat)} />
+  if (books.length) return <CoverRail cat={cat} title={title} more={more} entries={books.slice(0, 24)} onOpen={openBook(cat)} />
   // A section of sub-sections (genres, authors...): swipeable category tiles.
   const subs = navRows(feed.navigation).slice(0, 24)
   if (!subs.length) return null
@@ -422,7 +457,7 @@ function CatalogBlock({ cat }) {
   if (error) body = <p className="mt-3 text-sm text-red-600">{error}</p>
   else if (!root) body = <SkeletonRail title="Loading…" />
   else if (root.entries.length && !root.groups.length) {
-    body = <CoverRail title={root.title} more={href(cat)} entries={root.entries.slice(0, 24)} onOpen={openBook(cat)} />
+    body = <CoverRail cat={cat} title={root.title} more={href(cat)} entries={root.entries.slice(0, 24)} onOpen={openBook(cat)} />
   } else {
     // OPDS 2 groups arrive with their books; nav sections load their own rails.
     const lanes = root.groups.filter((g) => g.entries.length)
@@ -430,7 +465,7 @@ function CatalogBlock({ cat }) {
     body = (
       <>
         {lanes.slice(0, MAX_RAILS).map((g, i) => (
-          <CoverRail key={`g${i}`} title={g.title} more={g.href && href(cat, 'f', g.href)} entries={g.entries} onOpen={openBook(cat)} />
+          <CoverRail key={`g${i}`} cat={cat} title={g.title} more={g.href && href(cat, 'f', g.href)} entries={g.entries} onOpen={openBook(cat)} />
         ))}
         {sections.slice(0, Math.max(0, MAX_RAILS - lanes.length)).map((l) => (
           <SectionRail key={l.href} cat={cat} link={l} />
@@ -518,7 +553,7 @@ function SearchAll({ catalogs, query }) {
               <p className="mt-1 text-sm text-stone-500">{r.error ?? 'No matches.'}</p>
             </section>
           )
-        return <CoverRail key={c.id} title={c.name} more={href(c, 's', query)} entries={r.entries} onOpen={openBook(c)} />
+        return <CoverRail key={c.id} cat={c} title={c.name} more={href(c, 's', query)} entries={r.entries} onOpen={openBook(c)} />
       })}
     </div>
   )
@@ -601,12 +636,12 @@ function FeedView({ cat, url, query }) {
           )}
 
           {feed.groups.map((g, gi) => (
-            <CoverRail key={`${g.title}-${gi}`} title={g.title} more={g.href && href(cat, 'f', g.href)} entries={g.entries} onOpen={open} />
+            <CoverRail key={`${g.title}-${gi}`} cat={cat} title={g.title} more={g.href && href(cat, 'f', g.href)} entries={g.entries} onOpen={open} />
           ))}
 
           {loose.length > 0 && (
             <div className="mt-6">
-              <Grid entries={loose} onOpen={open} />
+              <Grid cat={cat} entries={loose} onOpen={open} />
             </div>
           )}
 

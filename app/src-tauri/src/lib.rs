@@ -31,6 +31,7 @@ pub fn run() {
       mdns::resolve_local,
       books::opds_feed,
       books::opds_search,
+      books::opds_image,
       books::download_book,
       books::list_downloads,
       books::delete_download,
