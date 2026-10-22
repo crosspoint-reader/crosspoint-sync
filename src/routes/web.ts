@@ -25,7 +25,7 @@ const OG_IMAGE = fs.readFileSync(path.join(ASSETS_DIR, 'og.jpg'));
 // Service app icons, served at /icons/:id.png. Loaded once at boot; a missing
 // file just means no icon for that service (the UI falls back gracefully).
 const SERVICE_ICONS = new Map<string, Buffer>();
-for (const id of ['kosync', 'hardcover', 'audiobookshelf', 'bookfusion', 'readwise', 'microblog', 'bookorbit', 'spotify', 'kindle']) {
+for (const id of ['kosync', 'hardcover', 'audiobookshelf', 'bookfusion', 'readwise', 'microblog', 'bookorbit', 'seekquel', 'spotify', 'kindle']) {
   try {
     SERVICE_ICONS.set(id, fs.readFileSync(path.join(ASSETS_DIR, 'icons', `${id}.png`)));
   } catch {
@@ -285,6 +285,9 @@ const LANDING = shell(
        <span class="pill">ready</span></div>
      <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/bookorbit.png" alt="" width="34" height="34"><div><div class="name">BookOrbit</div>
        <div class="desc">Keep your place in sync, both ways, with your own BookOrbit library. Clippings show up as highlights, and finished books are marked Read.</div></div></div>
+       <span class="pill warn">beta</span></div>
+     <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/seekquel.png" alt="" width="34" height="34"><div><div class="name">Seekquel</div>
+       <div class="desc">Log your reading in Seekquel, a book tracker: where you are in each book, the books you finish, and your highlights.</div></div></div>
        <span class="pill warn">beta</span></div>
      <p style="font-family:'Caveat',cursive;font-weight:600;font-size:19px;color:var(--brand-600);margin:16px 0 0;transform:rotate(-1deg)">more on the way, and it's all open source</p>
    </div>
@@ -606,7 +609,8 @@ const HINTS = {
   kosync: 'Mirror your reading progress to another KOReader-compatible (KOSync) server, so your other devices see it too.',
   bookfusion: 'Connect your BookFusion account to sync reading progress. You will approve the request on bookfusion.com.',
   audiobookshelf: 'Sync your reading position to the matching audiobook on your Audiobookshelf server. Create an API key in Audiobookshelf under Settings, Users, API Keys.',
-  bookorbit: 'Sync reading progress both ways with your BookOrbit server. Books are matched by title and author, finishing a book marks it Read, and your clippings appear as highlights in the right spot. Sign in with your BookOrbit account.'
+  bookorbit: 'Sync reading progress both ways with your BookOrbit server. Books are matched by title and author, finishing a book marks it Read, and your clippings appear as highlights in the right spot. Sign in with your BookOrbit account.',
+  seekquel: 'Log your reading in your Seekquel library: where you are in each book, the books you finish, and your highlights. You will approve the request in the Seekquel app.'
 };
 
 const TOKEN_HELP = {

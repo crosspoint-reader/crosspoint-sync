@@ -9,6 +9,7 @@ import { microblogConnector } from './microblog.js';
 import { kindleConnector } from './kindle.js';
 import { bookorbitConnector } from './bookorbit.js';
 import { spotifyConnector } from './spotify.js';
+import { seekquelConnector } from './seekquel.js';
 
 /** All connectors known to this build. */
 const CONNECTORS: Connector[] = [
@@ -20,6 +21,7 @@ const CONNECTORS: Connector[] = [
   audiobookshelfConnector,
   bookorbitConnector,
   spotifyConnector,
+  seekquelConnector,
   microblogConnector,
   kindleConnector,
 ];

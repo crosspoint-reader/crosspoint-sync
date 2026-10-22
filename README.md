@@ -7,7 +7,7 @@ and any KOReader device.
   only the sync-server URL. Same accounts, same auth, same endpoints as `sync.koreader.rocks`.
 - **Better multi-device sync.** Progress is stored per device and the newest position wins, fixing
   the ping-pong you get with stock kosync servers.
-- **Server-side service connectors.** Link services such as Hardcover, Micro.blog, Audiobookshelf, BookOrbit, and Readwise Reader once; readers continue speaking standard KOSync while the server updates external reading state.
+- **Server-side service connectors.** Link services such as Hardcover, Micro.blog, Audiobookshelf, BookOrbit, Readwise Reader, and Seekquel once; readers continue speaking standard KOSync while the server updates external reading state.
 - **Lossless CrossPoint sync.** An extended API carries the full CrossPoint position (spine,
   paragraph, anchor, page hints), not just a lossy xpath + percentage.
 - **Bookmarks, clippings, and reading stats.** Delta sync with tombstones for bookmarks and
@@ -96,6 +96,7 @@ DATABASE_PATH=./data/crosspoint.db PORT=8080 node dist/index.js
 | `LEGACY_WEB` | _(unset)_ | The website is the CrossPoint Sync app at `/app/` (the old account pages redirect there; Kindle setup keeps its pages). Set `1` to keep the old server-rendered website instead. |
 | `HARDCOVER_CLIENT_ID` | CrossPoint Sync's app | Optional. Hardcover OAuth client id for "Connect Hardcover" sign-in. The built-in id is CrossPoint Sync's public Hardcover app and works for self-hosted servers too; set this only to use your own Hardcover developer app. |
 | `SEARCHAPI_KEY` | _(unset)_ | Optional, paid ([searchapi.io](https://www.searchapi.io)). Last fallback for print page counts: Amazon search + product "Print length", 2 requests per book, only for books the free sources miss. Cached forever. |
+| `SEEKQUEL_URL` | `https://api.seekquel.app` | Optional. The Seekquel API the Seekquel connector links to and sends to. Only for testing against a local Seekquel. |
 | `CORS_ORIGINS` | `*` | Origins allowed to call the sync API from browsers (comma-separated). The default wildcard is safe: the API authenticates with headers, not cookies, and the web UI's cookie routes never get CORS headers. |
 
 ### Link Micro.blog
