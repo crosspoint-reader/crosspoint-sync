@@ -1,4 +1,6 @@
 export interface Config {
+  /** URL prefix, empty for a domain-root deployment. */
+  basePath: string;
   registrationDisabled: boolean;
   /** Max requests per IP per minute on sensitive endpoints (0 = disabled). */
   authRateLimitPerMinute: number;
@@ -20,6 +22,7 @@ export interface Config {
 
 export function fromEnv(env: NodeJS.ProcessEnv = process.env): Config {
   return {
+    basePath: normalizeBasePath(env.BASE_PATH ?? ''),
     registrationDisabled: env.REGISTRATION_DISABLED === 'true' || env.REGISTRATION_DISABLED === '1',
     authRateLimitPerMinute: env.AUTH_RATE_LIMIT_PER_MINUTE
       ? Number(env.AUTH_RATE_LIMIT_PER_MINUTE)
@@ -35,4 +38,14 @@ export function fromEnv(env: NodeJS.ProcessEnv = process.env): Config {
     kindleServerRegistration:
       env.KINDLE_SERVER_REGISTRATION === 'true' || env.KINDLE_SERVER_REGISTRATION === '1',
   };
+}
+
+export function normalizeBasePath(value: string): string {
+  if (value === '' || value === '/') return '';
+  const path = value.replace(/\/+$/, '');
+  if (!/^\/(?:[A-Za-z0-9._~-]+\/)*[A-Za-z0-9._~-]+$/.test(path)
+    || path.split('/').some((part) => part === '.' || part === '..')) {
+    throw new Error('BASE_PATH must be an absolute path of URL-safe segments (for example /reading)');
+  }
+  return path;
 }

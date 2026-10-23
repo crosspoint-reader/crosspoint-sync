@@ -36,14 +36,14 @@ function masterToken(accountId: number): string {
   return `xp1_${accountId}_${crypto.randomBytes(16).toString('hex')}`;
 }
 
-function setSessionCookie(c: Context<AppEnv>, accountId: number) {
+function setSessionCookie(c: Context<AppEnv>, accountId: number, basePath: string) {
   const proto = c.req.header('x-forwarded-proto');
   const secure = proto ? proto.split(',')[0].trim() === 'https' : false;
   setCookie(c, SESSION_COOKIE, signSession(accountId), {
     httpOnly: true,
     sameSite: 'Lax',
     secure,
-    path: '/',
+    path: basePath || '/',
     maxAge: SESSION_TTL_SECONDS,
   });
 }
@@ -76,7 +76,7 @@ export function authRoutes(db: DB, config: Config): Hono<AppEnv> {
     const accountId = Number(info.lastInsertRowid);
     const token = `xp1_${accountId}_${secret}`;
     db.prepare('UPDATE accounts SET token_hash = ? WHERE id = ?').run(hashKey(md5(token)), accountId);
-    setSessionCookie(c, accountId);
+    setSessionCookie(c, accountId, config.basePath);
     return c.json({ handle, token });
   });
 
@@ -98,7 +98,7 @@ export function authRoutes(db: DB, config: Config): Hono<AppEnv> {
     if (!row || !verifyKey(md5(token), row.token_hash)) {
       return c.json({ error: 'Invalid token' }, 401);
     }
-    setSessionCookie(c, accountId);
+    setSessionCookie(c, accountId, config.basePath);
     return c.json({ ok: true });
   });
 
@@ -141,12 +141,12 @@ export function authRoutes(db: DB, config: Config): Hono<AppEnv> {
       db.prepare('UPDATE accounts SET token_hash = ? WHERE id = ?').run(hashKey(md5(token)), accountId);
       db.prepare('UPDATE users SET account_id = ? WHERE id = ?').run(accountId, row.id);
     }
-    setSessionCookie(c, accountId);
+    setSessionCookie(c, accountId, config.basePath);
     return c.json({ ok: true });
   });
 
   app.post('/logout', (c) => {
-    deleteCookie(c, SESSION_COOKIE, { path: '/' });
+    deleteCookie(c, SESSION_COOKIE, { path: config.basePath || '/' });
     return c.json({ ok: true });
   });
 

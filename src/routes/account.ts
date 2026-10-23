@@ -158,7 +158,7 @@ export function accountRoutes(db: DB, config: Config): Hono<AppEnv> {
       .get(account.id) as { id: number; username: string } | undefined;
     if (kosync) deleteKosyncUserData(db, kosync.id, kosync.username);
     db.prepare('DELETE FROM accounts WHERE id = ?').run(account.id);
-    deleteCookie(c, SESSION_COOKIE, { path: '/' });
+    deleteCookie(c, SESSION_COOKIE, { path: config.basePath || '/' });
     return c.json({ deleted: true });
   });
 

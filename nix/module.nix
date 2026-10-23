@@ -33,6 +33,12 @@ in
       default = 8080;
     };
 
+    basePath = mkOption {
+      type = types.str;
+      description = "URL prefix, for example /crosspoint-sync; empty serves at the domain root. The reverse proxy must preserve this prefix.";
+      default = "";
+    };
+
     databaseFile = mkOption {
       type = filename;
       description = "Filename of the SQLite database in the state directory; ";
@@ -125,6 +131,7 @@ in
       };
 
       environment = {
+        BASE_PATH = cfg.basePath;
         PORT = builtins.toString cfg.port;
         DATABASE_PATH = "/var/lib/crosspoint-sync/${cfg.databaseFile}";
         REGISTRATION_DISABLED = if !cfg.registration then "true" else "false";

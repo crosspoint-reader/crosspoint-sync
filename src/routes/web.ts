@@ -38,19 +38,20 @@ const FONTS = new Map<string, Buffer>();
 for (const f of fs.readdirSync(path.join(ASSETS_DIR, 'fonts'))) {
   if (f.endsWith('.woff2')) FONTS.set(f, fs.readFileSync(path.join(ASSETS_DIR, 'fonts', f)));
 }
-const face = (family: string, file: string, weight: string) =>
-  `@font-face{font-family:"${family}";src:url(/fonts/${file}) format("woff2");font-weight:${weight};font-style:normal;font-display:swap}`;
-const FONT_FACES = [
-  face('InterVariable', 'inter-latin-wght-normal.woff2', '100 900'),
-  face('Lora', 'lora-latin-500-normal.woff2', '500'),
-  face('Lora', 'lora-latin-600-normal.woff2', '600'),
-  face('Lora', 'lora-latin-700-normal.woff2', '700'),
-  face('Geist Mono', 'geist-mono-latin-400-normal.woff2', '400'),
-  face('Geist Mono', 'geist-mono-latin-500-normal.woff2', '500'),
-  face('Caveat', 'caveat-latin-500-normal.woff2', '500'),
-  face('Caveat', 'caveat-latin-600-normal.woff2', '600'),
-].join('');
-const LANDING_PAGE = landingPage(FONT_FACES);
+function fontFaces(basePath: string): string {
+  const face = (family: string, file: string, weight: string) =>
+    `@font-face{font-family:"${family}";src:url(${basePath}/fonts/${file}) format("woff2");font-weight:${weight};font-style:normal;font-display:swap}`;
+  return [
+    face('InterVariable', 'inter-latin-wght-normal.woff2', '100 900'),
+    face('Lora', 'lora-latin-500-normal.woff2', '500'),
+    face('Lora', 'lora-latin-600-normal.woff2', '600'),
+    face('Lora', 'lora-latin-700-normal.woff2', '700'),
+    face('Geist Mono', 'geist-mono-latin-400-normal.woff2', '400'),
+    face('Geist Mono', 'geist-mono-latin-500-normal.woff2', '500'),
+    face('Caveat', 'caveat-latin-500-normal.woff2', '500'),
+    face('Caveat', 'caveat-latin-600-normal.woff2', '600'),
+  ].join('');
+}
 
 // Landing page screenshots (the real app with a demo account), served at /landing/:file.
 const LANDING_IMAGES = new Map<string, Buffer>();
@@ -213,17 +214,17 @@ const STYLE = `
   .progress-fill { height:100%; border-radius:inherit; background:var(--brand-500); }
 `;
 
-function shell(title: string, body: string, wide = false): string {
+function shell(basePath: string, title: string, body: string, wide = false): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title} · CrossPoint Sync</title>
 ${metaTags(`${title} · CrossPoint Sync`)}
-<link rel="icon" type="image/png" href="/favicon.png">
-<link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
-<style>${FONT_FACES}${STYLE}</style></head>
+<link rel="icon" type="image/png" href="${basePath}/favicon.png">
+<link rel="preload" href="${basePath}/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<style>${fontFaces(basePath)}${STYLE}</style></head>
 <body>
 <header class="site"><div class="bar">
-  <a class="wordmark" href="https://crosspointreader.com"><img src="/logo.png" alt=""><span>CrossPoint <span class="accent">Sync</span></span></a>
+  <a class="wordmark" href="https://crosspointreader.com"><img src="${basePath}/logo.png" alt=""><span>CrossPoint <span class="accent">Sync</span></span></a>
   ${title === 'Account' ? '<button class="ghost" id="logout">Sign out</button>' : ''}
 </div></header>
 <div class="wrap${wide ? ' wide' : ''}">${body}</div>
@@ -232,7 +233,7 @@ ${metaTags(`${title} · CrossPoint Sync`)}
 
 const SECTION = 'font-size:13px;text-transform:uppercase;letter-spacing:0.05em;color:var(--stone-500);margin:32px 0 12px;';
 
-const LANDING = shell(
+const LANDING = (basePath: string) => shell(basePath,
   'Sync your reading',
   `<div class="hero">
      <p class="eyebrow-hand">read on every device</p>
@@ -262,28 +263,28 @@ const LANDING = shell(
 
    <h2 style="${SECTION}">Services you can link</h2>
    <div class="card">
-     <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/bookfusion.png" alt="" width="34" height="34"><div><div class="name">BookFusion</div>
+     <div class="svc"><div class="lead"><img class="svc-icon" src="${basePath}/icons/bookfusion.png" alt="" width="34" height="34"><div><div class="name">BookFusion</div>
        <div class="desc">Sync reading positions both ways for books downloaded from BookFusion.</div></div></div>
        <span class="pill">ready</span></div>
-     <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/kosync.png" alt="" width="34" height="34"><div><div class="name">Another KOSync server</div>
+     <div class="svc"><div class="lead"><img class="svc-icon" src="${basePath}/icons/kosync.png" alt="" width="34" height="34"><div><div class="name">Another KOSync server</div>
        <div class="desc">Mirror your progress to sync.koreader.rocks or your own server, so your other KOReader devices stay in sync too.</div></div></div>
        <span class="pill">ready</span></div>
-     <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/hardcover.png" alt="" width="34" height="34"><div><div class="name">Hardcover</div>
+     <div class="svc"><div class="lead"><img class="svc-icon" src="${basePath}/icons/hardcover.png" alt="" width="34" height="34"><div><div class="name">Hardcover</div>
        <div class="desc">Keep your Hardcover shelf and reading progress up to date automatically.</div></div></div>
        <span class="pill">ready</span></div>
-     <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/microblog.png" alt="" width="34" height="34"><div><div class="name">Micro.blog</div>
+     <div class="svc"><div class="lead"><img class="svc-icon" src="${basePath}/icons/microblog.png" alt="" width="34" height="34"><div><div class="name">Micro.blog</div>
        <div class="desc">Keep your Currently reading and Finished reading bookshelves up to date automatically.</div></div></div>
        <span class="pill">ready</span></div>
-     <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/readwise.png" alt="" width="34" height="34"><div><div class="name">Readwise</div>
+     <div class="svc"><div class="lead"><img class="svc-icon" src="${basePath}/icons/readwise.png" alt="" width="34" height="34"><div><div class="name">Readwise</div>
        <div class="desc">Send the passages you highlight on your reader to Readwise.</div></div></div>
        <span class="pill">ready</span></div>
-     <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/readwise.png" alt="" width="34" height="34"><div><div class="name">Readwise Reader</div>
+     <div class="svc"><div class="lead"><img class="svc-icon" src="${basePath}/icons/readwise.png" alt="" width="34" height="34"><div><div class="name">Readwise Reader</div>
        <div class="desc">Archive books in Reader when you finish them, and bring your Reader progress back.</div></div></div>
        <span class="pill">ready</span></div>
-     <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/audiobookshelf.png" alt="" width="34" height="34"><div><div class="name">Audiobookshelf</div>
+     <div class="svc"><div class="lead"><img class="svc-icon" src="${basePath}/icons/audiobookshelf.png" alt="" width="34" height="34"><div><div class="name">Audiobookshelf</div>
        <div class="desc">Keep your place between the ebook and the audiobook, both ways. Read some, then pick up listening right where you left off.</div></div></div>
        <span class="pill">ready</span></div>
-     <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/bookorbit.png" alt="" width="34" height="34"><div><div class="name">BookOrbit</div>
+     <div class="svc"><div class="lead"><img class="svc-icon" src="${basePath}/icons/bookorbit.png" alt="" width="34" height="34"><div><div class="name">BookOrbit</div>
        <div class="desc">Keep your place in sync, both ways, with your own BookOrbit library. Import reading time and session history for matched books. Clippings show up as highlights, and finished books are marked Read.</div></div></div>
        <span class="pill warn">beta</span></div>
      <p style="font-family:'Caveat',cursive;font-weight:600;font-size:19px;color:var(--brand-600);margin:16px 0 0;transform:rotate(-1deg)">more on the way, and it's all open source</p>
@@ -305,7 +306,7 @@ const LANDING = shell(
          <code class="token" id="tokenVal"></code>
          <div class="row">
            <button class="ghost" id="copyTok">Copy token</button>
-           <a href="/account">Continue &rarr;</a>
+           <a href="${basePath}/account">Continue &rarr;</a>
          </div>
        </div>
      </div>
@@ -340,7 +341,7 @@ async function post(url, body) {
 }
 $('signup').onclick = async () => {
   $('suErr').textContent = '';
-  const { ok, data } = await post('/auth/signup', { handle: $('su').value.trim() });
+  const { ok, data } = await post('${basePath}/auth/signup', { handle: $('su').value.trim() });
   if (!ok) { $('suErr').textContent = data.error || 'Something went wrong'; return; }
   $('tokenVal').textContent = data.token;
   $('tokenBox').hidden = false;
@@ -362,18 +363,24 @@ async function copyWithFeedback(btn, text) {
   setTimeout(() => { btn.textContent = original; btn.classList.remove('copied'); btn.disabled = false; }, 1600);
 }
 // Where to go after signing in: ?next=/kindle (same-site paths only), else the account page.
-const NEXT = (() => { const n = new URLSearchParams(location.search).get('next') || ''; return /^\/[a-z]/i.test(n) ? n : '/account'; })();
+const NEXT = (() => {
+  const n = new URLSearchParams(location.search).get('next') || '';
+  if (!n.startsWith('${basePath}/') || n.startsWith('//') || n.includes('\\\\')) return '${basePath}/account';
+  const target = new URL(n, location.origin);
+  return target.origin === location.origin && target.pathname.startsWith('${basePath}/')
+    ? target.pathname + target.search + target.hash : '${basePath}/account';
+})();
 $('copyTok').onclick = () => copyWithFeedback($('copyTok'), $('tokenVal').textContent);
 $('ksLogin').onclick = async () => {
   $('ksLoginErr').textContent = '';
-  const { ok, data } = await post('/auth/login-kosync', { username: $('ksu').value.trim(), password: $('ksp').value });
+  const { ok, data } = await post('${basePath}/auth/login-kosync', { username: $('ksu').value.trim(), password: $('ksp').value });
   if (!ok) { $('ksLoginErr').textContent = data.error || 'Invalid credentials'; return; }
   location.href = NEXT;
 };
 $('tokToggle').onclick = (e) => { e.preventDefault(); $('tokBox').hidden = !$('tokBox').hidden; };
 $('login').onclick = async () => {
   $('liErr').textContent = '';
-  const { ok, data } = await post('/auth/login', { token: $('li').value.trim() });
+  const { ok, data } = await post('${basePath}/auth/login', { token: $('li').value.trim() });
   if (!ok) { $('liErr').textContent = data.error || 'Invalid token'; return; }
   location.href = NEXT;
 };
@@ -381,7 +388,7 @@ $('login').onclick = async () => {
   true
 );
 
-const ACCOUNT = shell(
+const ACCOUNT = (basePath: string) => shell(basePath,
   'Account',
   `<div>
      <span class="eyebrow">Account</span>
@@ -393,7 +400,7 @@ const ACCOUNT = shell(
 
 
    <h2 style="${SECTION}">Reading progress</h2>
-   <div class="card"><div class="row"><div><div style="font-weight:600">Synced books</div><div class="muted" style="margin-top:3px">View titles, percentages, devices and sync times, or remove a book.</div></div><a href="/progress"><button class="ghost">View</button></a></div></div>
+   <div class="card"><div class="row"><div><div style="font-weight:600">Synced books</div><div class="muted" style="margin-top:3px">View titles, percentages, devices and sync times, or remove a book.</div></div><a href="${basePath}/progress"><button class="ghost">View</button></a></div></div>
 
    <h2 style="${SECTION}">Linked services</h2>
    <div class="notice" style="margin-bottom:12px">
@@ -418,7 +425,7 @@ const ACCOUNT = shell(
    <p class="foot"><a href="https://github.com/crosspoint-reader/crosspoint-sync">Want to self host this?</a></p>
 
 <script>
-const ORIGIN = window.location.origin;
+const ORIGIN = window.location.origin + '${basePath}';
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
 async function jget(u){ const r = await fetch(u); return { ok:r.ok, data: await r.json().catch(()=>({})) }; }
@@ -431,8 +438,8 @@ async function copyWithFeedback(btn, text) {
 }
 
 (async () => {
-  const me = await jget('/auth/me');
-  if (!me.ok) { location.href='/'; return; }
+  const me = await jget('${basePath}/auth/me');
+  if (!me.ok) { location.href='${basePath}/'; return; }
   $('who').textContent = me.data.handle;
   renderKosync();
 })();
@@ -453,7 +460,7 @@ function readerSetup(username) {
 }
 
 async function renderKosync() {
-  const { ok, data } = await jget('/account/kosync');
+  const { ok, data } = await jget('${basePath}/account/kosync');
   const el = $('kosync');
   if (!ok) { el.innerHTML = '<p class="muted">Could not load.</p>'; return; }
   if (data.linked) {
@@ -469,18 +476,18 @@ async function renderKosync() {
         + '<button class="primary mt" id="ksPwSave">Save password</button><div class="err" id="ksPwErr"></div>';
       $('ksPwSave').onclick = async () => {
         $('ksPwErr').textContent = '';
-        const r = await jsend('/account/kosync/password', 'POST', { password: $('ksNewPw').value });
+        const r = await jsend('${basePath}/account/kosync/password', 'POST', { password: $('ksNewPw').value });
         if (r.ok) { $('ksPwBox').innerHTML = readerSetup(data.username); }
         else { $('ksPwErr').textContent = r.data.error || 'Could not update'; }
       };
     };
     $('ksUnlink').onclick = async () => {
       if (!confirm('Disconnect this sync account from your login? Your reading data is kept.')) return;
-      await jsend('/account/kosync', 'DELETE'); renderKosync();
+      await jsend('${basePath}/account/kosync', 'DELETE'); renderKosync();
     };
     $('ksDelete').onclick = async () => {
       if (!confirm('Permanently delete this sync account and ALL its reading data (progress, bookmarks, clippings, stats, linked services)? This cannot be undone.')) return;
-      await jsend('/account/kosync/data', 'DELETE'); renderKosync();
+      await jsend('${basePath}/account/kosync/data', 'DELETE'); renderKosync();
     };
     renderConnectors();
     return;
@@ -505,7 +512,7 @@ async function renderKosync() {
     $('ksErr').textContent = '';
     const u = $('ksUser').value.trim(), p = $('ksPass').value, p2 = $('ksPass2').value;
     if (p !== p2) { $('ksErr').textContent = 'Passwords do not match.'; return; }
-    const r = await jsend('/account/kosync', 'POST', { username: u, password: p });
+    const r = await jsend('${basePath}/account/kosync', 'POST', { username: u, password: p });
     if (r.ok) {
       el.querySelector('.card').innerHTML = '<div style="font-weight:600">'+esc(r.data.username)+' <span class="pill ok">connected</span></div>'
         + '<div style="margin-top:12px">'+readerSetup(r.data.username)+'</div>'
@@ -517,14 +524,14 @@ async function renderKosync() {
   };
   $('ksLink').onclick = async () => {
     $('ksLerr').textContent = '';
-    const r = await jsend('/account/kosync', 'PUT', { username: $('ksLuser').value.trim(), password: $('ksLpass').value });
+    const r = await jsend('${basePath}/account/kosync', 'PUT', { username: $('ksLuser').value.trim(), password: $('ksLpass').value });
     if (r.ok) { renderKosync(); } else { $('ksLerr').textContent = r.data.error || 'Could not connect'; }
   };
   $('connectors').innerHTML = '<p class="muted">Set up reading sync above to link services.</p>';
 }
 
 async function renderConnectors() {
-  const { ok, data } = await jget('/api/v1/connectors');
+  const { ok, data } = await jget('${basePath}/api/v1/connectors');
   const el = $('connectors');
   if (!ok) { el.innerHTML = '<p class="muted">Set up reading sync above to link services.</p>'; return; }
   if (data.encryption !== 'enabled') {
@@ -538,44 +545,44 @@ async function renderConnectors() {
     const action = c.linked
       ? '<div class="row" style="justify-content:flex-end;gap:8px"><button class="ghost" data-review="'+c.id+'">Matches</button><button class="ghost" data-sync="'+c.id+'">Sync now</button></div>'
       : '<button class="primary" data-link="'+c.id+'">Link</button>';
-    return '<div class="card"><div class="row"><div class="lead"><img class="svc-icon" src="/icons/'+esc(c.id)+'.png" alt="" width="34" height="34" onerror="this.style.display=\\'none\\'"><div><div style="font-weight:600">'+esc(c.name)+' '+badge+
+    return '<div class="card"><div class="row"><div class="lead"><img class="svc-icon" src="${basePath}/icons/'+esc(c.id)+'.png" alt="" width="34" height="34" onerror="this.style.display=\\'none\\'"><div><div style="font-weight:600">'+esc(c.name)+' '+badge+
       '</div><div class="muted" style="margin-top:3px">syncs '+esc(c.carries.join(', '))+(c.account?' · '+esc(c.account):'')+'</div></div></div>'+action+'</div></div>';
   }).join('');
   el.querySelectorAll('[data-unlink]').forEach(b => b.onclick = async (e) => {
     e.preventDefault();
     if (!confirm('Unlink this service? Its saved matches are removed too.')) return;
-    await jsend('/api/v1/connectors/'+b.dataset.unlink, 'DELETE'); renderConnectors();
+    await jsend('${basePath}/api/v1/connectors/'+b.dataset.unlink, 'DELETE'); renderConnectors();
   });
   el.querySelectorAll('[data-sync]').forEach(b => b.onclick = async () => {
     const orig = b.textContent; b.disabled = true; b.textContent = 'Syncing…';
-    const r = await jsend('/api/v1/connectors/'+b.dataset.sync+'/sync');
+    const r = await jsend('${basePath}/api/v1/connectors/'+b.dataset.sync+'/sync');
     b.textContent = r.ok ? ('Queued ' + r.data.queued + ' ✓') : 'Failed';
     b.classList.toggle('copied', r.ok);
     setTimeout(() => { b.textContent = orig; b.disabled = false; b.classList.remove('copied'); }, 2000);
   });
-  el.querySelectorAll('[data-review]').forEach(b => b.onclick = () => { location.href = '/review/' + b.dataset.review; });
-  el.querySelectorAll('[data-link]').forEach(b => b.onclick = () => { location.href = '/link/' + b.dataset.link; });
+  el.querySelectorAll('[data-review]').forEach(b => b.onclick = () => { location.href = '${basePath}/review/' + b.dataset.review; });
+  el.querySelectorAll('[data-link]').forEach(b => b.onclick = () => { location.href = '${basePath}/link/' + b.dataset.link; });
 }
 
-$('logout').onclick = async () => { await jsend('/auth/logout'); location.href='/'; };
+$('logout').onclick = async () => { await jsend('${basePath}/auth/logout'); location.href='${basePath}/'; };
 $('rotate').onclick = async () => {
   if (!confirm('Rotate your website login token? You will be signed out on the web and must sign in with the new token.')) return;
-  const { ok, data } = await jsend('/auth/token/rotate');
+  const { ok, data } = await jsend('${basePath}/auth/token/rotate');
   if (ok) { $('rotVal').textContent = data.token; $('rotBox').hidden = false; }
 };
 $('copyRot').onclick = () => copyWithFeedback($('copyRot'), $('rotVal').textContent);
 $('delAccount').onclick = async () => {
   if (!confirm('Permanently delete your account, your sync account, and ALL reading data? This cannot be undone.')) return;
   if (!confirm('Are you absolutely sure? Everything will be erased.')) return;
-  await jsend('/account', 'DELETE'); location.href = '/';
+  await jsend('${basePath}/account', 'DELETE'); location.href = '${basePath}/';
 };
 </script>`,
   true
 );
 
-const LINK = shell(
+const LINK = (basePath: string) => shell(basePath,
   'Link service',
-  `<div><a class="muted" href="/account">&larr; Account</a></div>
+  `<div><a class="muted" href="${basePath}/account">&larr; Account</a></div>
    <div style="margin-top:16px"><span class="eyebrow" id="eyebrow">Link service</span>
      <h1 id="title">Link</h1>
      <p class="sub" id="desc"></p></div>
@@ -595,7 +602,7 @@ async function linkCredential(body) {
   if (!secureCredentialConnection()) {
     return { ok:false, data:{ message:'Use HTTPS to link a service.' } };
   }
-  return jsend('/api/v1/connectors/' + ID, 'PUT', { credential: body });
+  return jsend('${basePath}/api/v1/connectors/' + ID, 'PUT', { credential: body });
 }
 
 const HINTS = {
@@ -626,7 +633,7 @@ const TOKEN_HELP = {
   kindle: '<div class="muted" style="margin-bottom:18px">'
     + '<p style="margin-top:0"><b>Set up with the CrossPoint Kindle Link extension (recommended):</b></p>'
     + '<ol style="padding-left:20px;margin-bottom:10px">'
-    + '<li><a href="/kindle-link.zip"><b>Download crosspoint-kindle-link.zip</b></a> and unzip it.</li>'
+    + '<li><a href="${basePath}/kindle-link.zip"><b>Download crosspoint-kindle-link.zip</b></a> and unzip it.</li>'
     + '<li>Open <code>chrome://extensions</code> and turn on <b>Developer mode</b>.</li>'
     + '<li>Choose <b>Load unpacked</b> and select the unzipped folder.</li>'
     + '<li>Click the extension icon: connect it to this server (the same username and password as this dashboard), then register with Amazon — Amazon emails a one-time code.</li>'
@@ -637,11 +644,11 @@ const TOKEN_HELP = {
 };
 
 (async () => {
-  const { ok, status, data } = await jget('/api/v1/connectors');
-  if (status === 409) { location.href = '/account'; return; }   // no sync account yet
+  const { ok, status, data } = await jget('${basePath}/api/v1/connectors');
+  if (status === 409) { location.href = '${basePath}/account'; return; }   // no sync account yet
   if (!ok) { $('form').innerHTML = '<p class="muted">Could not load.</p>'; return; }
   const conn = (data.connectors || []).find(c => c.id === ID);
-  if (!conn) { location.href = '/account'; return; }
+  if (!conn) { location.href = '${basePath}/account'; return; }
   $('title').textContent = 'Link ' + conn.name;
   CONN_NAME = conn.name;
   $('desc').textContent = HINTS[ID] || '';
@@ -650,7 +657,7 @@ const TOKEN_HELP = {
 })();
 
 let CONN_NAME = 'the service';
-function done() { location.href = '/account'; }
+function done() { location.href = '${basePath}/account'; }
 
 function render(conn) {
   const f = $('form');
@@ -704,7 +711,7 @@ function render(conn) {
 async function startDeviceFlow() {
   $('e').textContent = '';
   $('start').disabled = true;
-  const r = await jsend('/api/v1/connectors/' + ID + '/link/begin');
+  const r = await jsend('${basePath}/api/v1/connectors/' + ID + '/link/begin');
   if (!r.ok) { $('e').textContent = r.data.message || 'Could not start'; $('start').disabled = false; return; }
   const { device_code, user_code, verification_uri, verification_uri_complete, interval } = r.data;
   // With a pre-filled link, one tap opens the approval page with the code already entered.
@@ -718,7 +725,7 @@ async function startDeviceFlow() {
   const deadline = Date.now() + 15 * 60 * 1000;
   const tick = async () => {
     if (Date.now() > deadline) { $('poll').textContent = 'Timed out. Start again.'; return; }
-    const p = await jsend('/api/v1/connectors/' + ID + '/link/poll', 'POST', { device_code });
+    const p = await jsend('${basePath}/api/v1/connectors/' + ID + '/link/poll', 'POST', { device_code });
     if (p.data.status === 'ok') { done(); return; }
     if (p.data.status === 'pending') { setTimeout(tick, Math.max(2, interval || 5) * 1000); return; }
     $('poll').textContent = p.data.error || 'Linking failed. Start again.';
@@ -729,9 +736,9 @@ async function startDeviceFlow() {
 </script>`
 );
 
-const PROGRESS = shell(
+const PROGRESS = (basePath: string) => shell(basePath,
   'Reading progress',
-  `<div><a class="muted" href="/account">&larr; Account</a></div>
+  `<div><a class="muted" href="${basePath}/account">&larr; Account</a></div>
    <div style="margin-top:16px"><span class="eyebrow">Reading progress</span>
      <h1>Synced books</h1>
      <p class="sub">All synced books with their latest progress. Removing a book deletes its synced progress and everything else stored here for it. If the same book shows up twice (two devices can identify one book differently), merge the listings and they will sync as one.</p></div>
@@ -796,7 +803,7 @@ function openMerge(doc) {
     $('err').textContent = '';
     btn.disabled = true; btn.textContent = 'Merging…';
     let r;
-    try { r = await jsend('/api/v1/documents/merge', 'POST', { document: doc, into: btn.dataset.into, stats: box.querySelector('[data-stats]').checked }); }
+    try { r = await jsend('${basePath}/api/v1/documents/merge', 'POST', { document: doc, into: btn.dataset.into, stats: box.querySelector('[data-stats]').checked }); }
     catch { r = { ok:false, data:{} }; }
     if (!r.ok) {
       $('err').textContent = r.data.message || 'Could not merge.';
@@ -811,7 +818,7 @@ async function unmerge(alias) {
   if (!confirm('Unmerge this listing? The old copy starts syncing separately again and takes its reading stats back; progress already merged stays here.')) return;
   $('err').textContent = '';
   let r;
-  try { r = await jsend('/api/v1/documents/merge/' + encodeURIComponent(alias), 'DELETE'); }
+  try { r = await jsend('${basePath}/api/v1/documents/merge/' + encodeURIComponent(alias), 'DELETE'); }
   catch { r = { ok:false, data:{} }; }
   if (!r.ok) { $('err').textContent = r.data.message || 'Could not unmerge.'; return; }
   load();
@@ -829,7 +836,7 @@ async function removeBook(btn) {
   // fetch rejects outright when the network is down; treat that as an ordinary
   // failed response so the one error path below re-enables the button.
   let r;
-  try { r = await jsend('/api/v1/progress/' + encodeURIComponent(doc), 'DELETE'); }
+  try { r = await jsend('${basePath}/api/v1/progress/' + encodeURIComponent(doc), 'DELETE'); }
   catch { r = { ok:false, status:0, data:{} }; }
   if (!r.ok && r.status !== 404) {
     $('err').textContent = r.data.message || 'Could not remove this book.';
@@ -841,8 +848,8 @@ async function removeBook(btn) {
 }
 
 async function load() {
-  const r = await jget('/api/v1/progress?limit=500');
-  if (r.status === 409) { location.href = '/account'; return; }
+  const r = await jget('${basePath}/api/v1/progress?limit=500');
+  if (r.status === 409) { location.href = '${basePath}/account'; return; }
   if (!r.ok) { $('list').innerHTML = '<p class="muted">Could not load synced books.</p>'; return; }
   BOOKS = r.data.items || [];
   render();
@@ -852,9 +859,9 @@ load();
 );
 
 
-const REVIEW = shell(
+const REVIEW = (basePath: string) => shell(basePath,
   'Matches',
-  `<div><a class="muted" href="/account">&larr; Account</a></div>
+  `<div><a class="muted" href="${basePath}/account">&larr; Account</a></div>
     <div style="margin-top:16px"><span class="eyebrow">Matches</span>
       <h1 id="title">Matches</h1>
       <p class="sub">Which book each of your synced titles maps to. Fix anything that matched wrong, or pick a match for the ones that didn't.</p></div>
@@ -871,33 +878,33 @@ async function jsend(u, m='PUT', body){ const r = await fetch(u,{method:m,header
 let CONN = null, CANDIDATES = [], BOOKS = [];
 
 (async () => {
-  const list = await jget('/api/v1/connectors');
-  if (list.status === 409) { location.href = '/account'; return; }
+  const list = await jget('${basePath}/api/v1/connectors');
+  if (list.status === 409) { location.href = '${basePath}/account'; return; }
   CONN = (list.data.connectors || []).find(c => c.id === ID);
-  if (!CONN) { location.href = '/account'; return; }
+  if (!CONN) { location.href = '${basePath}/account'; return; }
   $('title').textContent = CONN.name + ' matches';
   if (CONN.library_refresh) {
     $('libtools').innerHTML = '<button class="ghost" id="refr">Refresh library</button> <span class="muted" id="refrNote"></span>';
     $('refr').onclick = async () => {
       $('refr').disabled = true;
       $('refrNote').textContent = 'refreshing…';
-      const r = await jsend('/api/v1/connectors/' + ID + '/library/refresh', 'POST');
+      const r = await jsend('${basePath}/api/v1/connectors/' + ID + '/library/refresh', 'POST');
       $('refrNote').textContent = r.ok && r.data.count != null
         ? r.data.count + ' book(s). Send-to-Kindle docs refresh from the extension.'
         : 'failed: ' + (r.data.message || r.status);
-      const cand = await jget('/api/v1/connectors/' + ID + '/candidates');
+      const cand = await jget('${basePath}/api/v1/connectors/' + ID + '/candidates');
       CANDIDATES = cand.data.books || [];
       $('refr').disabled = false;
     };
   }
   // Preload the "currently reading" candidates for quick picking.
-  const cand = await jget('/api/v1/connectors/' + ID + '/candidates');
+  const cand = await jget('${basePath}/api/v1/connectors/' + ID + '/candidates');
   CANDIDATES = cand.data.books || [];
   renderList();
 })();
 
 async function renderList() {
-  const { ok, data } = await jget('/api/v1/connectors/' + ID + '/review');
+  const { ok, data } = await jget('${basePath}/api/v1/connectors/' + ID + '/review');
   const el = $('list');
   if (!ok) { el.innerHTML = '<p class="muted">Could not load.</p>'; return; }
   BOOKS = data.books || [];
@@ -943,7 +950,7 @@ function openPicker(doc) {
     const asin = $('asin-' + doc).value.trim();
     if (!asin) return;
     res.innerHTML = '<p class="muted" style="margin:6px 0 0">Looking up ' + esc(asin) + '…</p>';
-    const r = await jsend('/api/v1/connectors/' + ID + '/lookup', 'POST', { external_id: asin });
+    const r = await jsend('${basePath}/api/v1/connectors/' + ID + '/lookup', 'POST', { external_id: asin });
     const b = r.data && r.data.book;
     res.innerHTML = r.ok && r.data.found && b
       ? '<div class="grp">Found in your Kindle account</div>' + optionRow(doc, b)
@@ -951,7 +958,7 @@ function openPicker(doc) {
     res.querySelectorAll('[data-choose]').forEach(bindChoose);
   });
   box.querySelector('[data-nomatch]').onclick = async () => {
-    await jsend('/api/v1/connectors/' + ID + '/matches/' + doc, 'PUT', { external_id: null });
+    await jsend('${basePath}/api/v1/connectors/' + ID + '/matches/' + doc, 'PUT', { external_id: null });
     renderList();
   };
   // Auto-suggest from the whole library using the book's own title.
@@ -963,7 +970,7 @@ async function runSearch(doc, q, isAuto) {
   if (!q) return;
   const res = $('results-' + doc);
   res.innerHTML = '<div class="grp">' + (isAuto ? 'Suggestions' : 'Results') + '</div><p class="muted" style="margin:2px 0 0">Searching…</p>';
-  const r = await jget('/api/v1/connectors/' + ID + '/search?q=' + encodeURIComponent(q));
+  const r = await jget('${basePath}/api/v1/connectors/' + ID + '/search?q=' + encodeURIComponent(q));
   const rows = (r.data.books || []).map(c => optionRow(doc, c)).join('');
   res.innerHTML = '<div class="grp">' + (isAuto ? 'Suggestions' : 'Results') + '</div>' + (rows || '<p class="muted" style="margin:2px 0 0">No matches found.</p>');
   res.querySelectorAll('[data-choose]').forEach(bindChoose);
@@ -976,14 +983,14 @@ function optionRow(doc, c) {
 function bindChoose(btn) {
   btn.onclick = async () => {
     const p = JSON.parse(btn.dataset.choose);
-    await jsend('/api/v1/connectors/' + ID + '/matches/' + p.doc, 'PUT', { external_id: p.id, external_edition: p.edition || null, title: p.title, author: p.author });
+    await jsend('${basePath}/api/v1/connectors/' + ID + '/matches/' + p.doc, 'PUT', { external_id: p.id, external_edition: p.edition || null, title: p.title, author: p.author });
     renderList();
   };
 }
 </script>`
 );
 
-const KINDLE = shell(
+const KINDLE = (basePath: string) => shell(basePath,
   'Connect your Kindle',
   `<div style="margin-top:16px"><span class="eyebrow">Beta</span>
      <h1>Connect your Kindle</h1>
@@ -996,7 +1003,7 @@ const KINDLE = shell(
    <div class="card">
      <div class="step"><div class="n">1</div><div>
        <h3>Download the Kindle Link extension</h3>
-       <p><a href="/kindle-link.zip"><b>Download crosspoint-kindle-link.zip</b></a> and unzip it.</p></div></div>
+       <p><a href="${basePath}/kindle-link.zip"><b>Download crosspoint-kindle-link.zip</b></a> and unzip it.</p></div></div>
      <div class="step"><div class="n">2</div><div>
        <h3>Load it in Chrome</h3>
        <p>Open <code>chrome://extensions</code>, turn on <b>Developer mode</b>, choose <b>Load unpacked</b> and select the unzipped folder.</p></div></div>
@@ -1009,10 +1016,10 @@ const KINDLE = shell(
    </div>
    <p class="muted" id="reveal" style="margin-top:14px">Enabling the Kindle connector on your account…</p>
    <script>
-     fetch('/api/v1/connectors/kindle/reveal', { method: 'POST' })
+     fetch('${basePath}/api/v1/connectors/kindle/reveal', { method: 'POST' })
        .then(function (r) {
          document.getElementById('reveal').innerHTML = r.ok
-           ? 'The Kindle connector is now visible <a href="/account">on your account page</a>.'
+           ? 'The Kindle connector is now visible <a href="${basePath}/account">on your account page</a>.'
            : 'Could not enable it automatically — it will also appear once linked from the extension.';
        })
        .catch(function () {
@@ -1021,14 +1028,14 @@ const KINDLE = shell(
    </script>`
 );
 
-const SPOTIFY = shell(
+const SPOTIFY = (basePath: string) => shell(basePath,
   'Audio progress',
   `<p class="muted" id="reveal" style="margin-top:24px">Enabling…</p>
    <script>
-     fetch('/api/v1/connectors/spotify/reveal', { method: 'POST' })
+     fetch('${basePath}/api/v1/connectors/spotify/reveal', { method: 'POST' })
        .then(function (r) {
          document.getElementById('reveal').innerHTML = r.ok
-           ? 'Enabled. Link it in <a href="/app/#/settings">Settings</a>.'
+           ? 'Enabled. Link it in <a href="${basePath}/app/#/settings">Settings</a>.'
            : 'Could not enable it. Try again.';
        })
        .catch(function () { document.getElementById('reveal').textContent = 'Could not enable it. Try again.'; });
@@ -1037,7 +1044,7 @@ const SPOTIFY = shell(
 
 const APP_ID = 'com.crosspointreader.sync';
 
-export function webRoutes(legacy = process.env.LEGACY_WEB === '1'): Hono<AppEnv> {
+export function appLinkRoutes(basePath = ''): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   // App links, so the native app can catch /connectors/:id/callback sign-in
@@ -1045,7 +1052,7 @@ export function webRoutes(legacy = process.env.LEGACY_WEB === '1'): Hono<AppEnv>
   app.get('/.well-known/apple-app-site-association', (c) => {
     const team = process.env.APPLE_TEAM_ID?.trim();
     if (!team) return c.notFound();
-    return c.json({ applinks: { details: [{ appIDs: [`${team}.${APP_ID}`], components: [{ '/': '/connectors/*/callback' }] }] } });
+    return c.json({ applinks: { details: [{ appIDs: [`${team}.${APP_ID}`], components: [{ '/': `${basePath}/connectors/*/callback` }] }] } });
   });
   app.get('/.well-known/assetlinks.json', (c) => {
     const prints = (process.env.ANDROID_CERT_SHA256 ?? '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -1055,6 +1062,17 @@ export function webRoutes(legacy = process.env.LEGACY_WEB === '1'): Hono<AppEnv>
       target: { namespace: 'android_app', package_name: APP_ID, sha256_cert_fingerprints: prints },
     }]);
   });
+
+  return app;
+}
+
+export function webRoutes(legacy = process.env.LEGACY_WEB === '1', basePath = ''): Hono<AppEnv> {
+  const app = new Hono<AppEnv>();
+  const pages = {
+    LANDING_PAGE: landingPage(fontFaces(basePath), basePath),
+    LANDING: LANDING(basePath), ACCOUNT: ACCOUNT(basePath), LINK: LINK(basePath),
+    PROGRESS: PROGRESS(basePath), REVIEW: REVIEW(basePath), KINDLE: KINDLE(basePath), SPOTIFY: SPOTIFY(basePath),
+  };
 
   app.get('/logo.png', (c) => {
     c.header('content-type', 'image/png');
@@ -1110,58 +1128,58 @@ export function webRoutes(legacy = process.env.LEGACY_WEB === '1'): Hono<AppEnv>
   // Kindle connector (its browser-extension link flow). LEGACY_WEB=1 keeps the
   // whole old site for self-hosters who prefer it.
   if (!legacy) {
-    app.get('/', (c) => c.html(LANDING_PAGE));
-    app.get('/signin', (c) => c.html(LANDING));
-    app.get('/account', (c) => c.redirect('/app/#/settings'));
-    app.get('/progress', (c) => c.redirect('/app/'));
-    app.get('/link/:id', (c) => (c.req.param('id') === 'kindle' ? c.html(LINK) : c.redirect('/app/#/settings')));
-    app.get('/review/:id', (c) => (c.req.param('id') === 'kindle' ? c.html(REVIEW) : c.redirect(`/app/#/settings/${encodeURIComponent(c.req.param('id'))}`)));
+    app.get('/', (c) => c.html(pages.LANDING_PAGE));
+    app.get('/signin', (c) => c.html(pages.LANDING));
+    app.get('/account', (c) => c.redirect(`${basePath}/app/#/settings`));
+    app.get('/progress', (c) => c.redirect(`${basePath}/app/`));
+    app.get('/link/:id', (c) => (c.req.param('id') === 'kindle' ? c.html(pages.LINK) : c.redirect(`${basePath}/app/#/settings`)));
+    app.get('/review/:id', (c) => (c.req.param('id') === 'kindle' ? c.html(pages.REVIEW) : c.redirect(`${basePath}/app/#/settings/${encodeURIComponent(c.req.param('id'))}`)));
     app.get('/kindle', (c) => {
-      if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect('/signin?next=/kindle#get-started');
-      return c.html(KINDLE);
+      if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect(`${basePath}/signin?next=${basePath}/kindle#get-started`);
+      return c.html(pages.KINDLE);
     });
     app.get('/spotify', (c) => {
-      if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect('/signin?next=/spotify');
-      return c.html(SPOTIFY);
+      if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect(`${basePath}/signin?next=${basePath}/spotify`);
+      return c.html(pages.SPOTIFY);
     });
     return app;
   }
 
   app.get('/', (c) => {
-    if (verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect('/account');
-    return c.html(LANDING);
+    if (verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect(`${basePath}/account`);
+    return c.html(pages.LANDING);
   });
 
   app.get('/account', (c) => {
-    if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect('/');
-    return c.html(ACCOUNT);
+    if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect(`${basePath}/`);
+    return c.html(pages.ACCOUNT);
   });
 
   app.get('/progress', (c) => {
-    if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect('/');
-    return c.html(PROGRESS);
+    if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect(`${basePath}/`);
+    return c.html(pages.PROGRESS);
   });
 
   // Stealth landing page for the Kindle connector: visiting it reveals the
   // connector on the user's account page (the page JS POSTs the reveal).
   app.get('/kindle', (c) => {
-    if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect('/');
-    return c.html(KINDLE);
+    if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect(`${basePath}/`);
+    return c.html(pages.KINDLE);
   });
 
   app.get('/spotify', (c) => {
-    if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect('/');
-    return c.html(SPOTIFY);
+    if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect(`${basePath}/`);
+    return c.html(pages.SPOTIFY);
   });
 
   app.get('/link/:id', (c) => {
-    if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect('/');
-    return c.html(LINK);
+    if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect(`${basePath}/`);
+    return c.html(pages.LINK);
   });
 
   app.get('/review/:id', (c) => {
-    if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect('/');
-    return c.html(REVIEW);
+    if (!verifySession(getCookie(c, SESSION_COOKIE))) return c.redirect(`${basePath}/`);
+    return c.html(pages.REVIEW);
   });
 
   return app;

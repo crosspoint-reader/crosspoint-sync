@@ -232,7 +232,8 @@ export function LinkForm({ session, conn, onLinked }) {
       if (!isApp) return window.location.assign(authorize_url)
       unlisten.current?.()
       unlisten.current = await onOpenUrl((urls) => {
-        const u = urls.map((x) => new URL(x)).find((x) => x.pathname === `/connectors/${conn.id}/callback`)
+        const callback = new URL(`${session.server}/connectors/${conn.id}/callback`)
+        const u = urls.map((x) => new URL(x)).find((x) => x.origin === callback.origin && x.pathname === callback.pathname)
         if (!u || !live.current) return
         stop()
         const q = Object.fromEntries(u.searchParams)

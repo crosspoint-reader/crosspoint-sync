@@ -105,15 +105,15 @@ const page = (title: string, body: string) =>
  * here, then returns a web sign-in to the app's Settings. Unauthenticated; the
  * single-use state is what ties it to the user who began.
  */
-export function oauthCallbackRoutes(db: DB, transport: HttpTransport = fetchTransport): Hono<AppEnv> {
+export function oauthCallbackRoutes(db: DB, transport: HttpTransport = fetchTransport, basePath = ''): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   app.get('/connectors/:id/callback', async (c) => {
     const { entry, error } = await completeOAuth(db, transport, c.req.query('state') ?? '', c.req.query('code'), c.req.query('error'));
     const name = escapeHtml(getConnector(c.req.param('id'))?.displayName ?? 'Service');
     if (error) {
-      return c.html(page(`${name} not linked`, `${escapeHtml(error)} <a href="/app/#/settings">Back to Settings</a>`), 400);
+      return c.html(page(`${name} not linked`, `${escapeHtml(error)} <a href="${basePath}/app/#/settings">Back to Settings</a>`), 400);
     }
-    if (entry!.client === 'web') return c.redirect(`/app/#/settings/${encodeURIComponent(entry!.connectorId)}`);
+    if (entry!.client === 'web') return c.redirect(`${basePath}/app/#/settings/${encodeURIComponent(entry!.connectorId)}`);
     return c.html(page(`${name} linked`, 'You can go back to the CrossPoint Sync app.'));
   });
   return app;
@@ -150,7 +150,8 @@ export function credentialRequestIsSecure(c: Context<AppEnv>, trustProxy: boolea
 export function connectorRoutes(
   db: DB,
   transport: HttpTransport = fetchTransport,
-  trustProxy = false
+  trustProxy = false,
+  basePath = ''
 ): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
@@ -180,7 +181,7 @@ export function connectorRoutes(
           // Sign-in setup: the redirect to register (this server's own public URL), the
           // user's own client id, and whether the server has a shared one.
           ...(conn.oauth ? { oauth: {
-            redirect_uri: publicOrigin(c, trustProxy) + oauthCallbackPath(conn.id),
+            redirect_uri: publicOrigin(c, trustProxy) + basePath + oauthCallbackPath(conn.id),
             client_id: getClientId(db, user.id, conn.id),
             shared: !!conn.oauth().clientId,
           } } : {}),
@@ -322,7 +323,7 @@ export function connectorRoutes(
     if (!CLIENT_ID_RE.test(id)) {
       return c.json({ code: 2003, message: 'A Client ID is 32 letters and numbers. Copy it from your app\'s Settings (step 3).' }, 400);
     }
-    const redirectUri = publicOrigin(c, trustProxy) + oauthCallbackPath(conn.id);
+    const redirectUri = publicOrigin(c, trustProxy) + basePath + oauthCallbackPath(conn.id);
     if ((await conn.checkClientId?.(id, redirectUri, transport)) === 'rejected') {
       return c.json({ code: 2003, message: CLIENT_ID_REJECTED }, 400);
     }
@@ -355,7 +356,7 @@ export function connectorRoutes(
     for (const [k, v] of pendingOAuth) if (v.expires < now) pendingOAuth.delete(k);
     const verifier = b64url(randomBytes(48));
     const state = b64url(randomBytes(16));
-    const redirectUri = publicOrigin(c, trustProxy) + oauthCallbackPath(conn.id);
+    const redirectUri = publicOrigin(c, trustProxy) + basePath + oauthCallbackPath(conn.id);
     pendingOAuth.set(state, {
       userId: user.id, connectorId: conn.id, verifier, redirectUri, clientId,
       client: body?.client === 'app' ? 'app' : 'web', expires: now + OAUTH_TTL_MS,

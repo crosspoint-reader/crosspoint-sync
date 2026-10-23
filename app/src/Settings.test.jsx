@@ -92,6 +92,20 @@ describe('LinkForm', () => {
     expect(onLinked).toHaveBeenCalled()
     expect(api.oauthComplete).not.toHaveBeenCalled()
   })
+
+  it('app: accepts callbacks under the server prefix, only from that server', async () => {
+    env.isApp = true
+    api.oauthBegin.mockResolvedValue({ authorize_url: AUTH })
+    api.oauthComplete.mockResolvedValue({ linked: true })
+    const prefixed = { server: 'https://sync.test/reading' }
+    render(<LinkForm session={prefixed} conn={spotify} onLinked={vi.fn()} />)
+    fireEvent.click(signIn())
+    await waitFor(() => expect(openUrl).toHaveBeenCalledWith(AUTH))
+    await act(async () => deliver(['https://other.test/reading/connectors/spotify/callback?state=s1&code=c1']))
+    expect(api.oauthComplete).not.toHaveBeenCalled()
+    await act(async () => deliver(['https://sync.test/reading/connectors/spotify/callback?state=s1&code=c1']))
+    expect(api.oauthComplete).toHaveBeenCalledWith(prefixed, 'spotify', { state: 's1', code: 'c1', error: undefined })
+  })
 })
 
 describe('Spotify Client ID setup', () => {

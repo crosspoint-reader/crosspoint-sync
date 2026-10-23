@@ -7,7 +7,7 @@ const fetchMock = vi.fn()
 vi.stubGlobal('fetch', fetchMock)
 // Node's experimental localStorage can shadow jsdom's storage in Vitest.
 vi.stubGlobal('localStorage', new JSDOM('', { url: 'https://app.test' }).window.localStorage)
-const { api, cached, loadSession, login, logout, saveSession } = await import('./api.js')
+const { api, cached, loadSession, login, logout, saveSession, hostedServerUrl } = await import('./api.js')
 const session = (username, server = 'https://sync.test') => ({ server, username, key: 'key' })
 const prefix = (s) => `crosspoint-offline:v2:${s.username}@${s.server}`
 const progress = '/api/v1/progress?limit=500'
@@ -18,6 +18,29 @@ beforeEach(() => {
   localStorage.clear()
   fetchMock.mockReset()
 })
+
+describe('prefixed server URLs', () => {
+  it.each(['', '/reading', '/services/reading'])('detects the hosted server at %j', (basePath) => {
+    expect(hostedServerUrl(new URL(`https://sync.test${basePath}/app/`))).toBe(`https://sync.test${basePath}`)
+  })
+  it.each(['', '/reading', '/services/reading'])('detects the hosted server from the explicit index URL at %j', (basePath) => {
+    expect(hostedServerUrl(new URL(`https://sync.test${basePath}/app/index.html`))).toBe(`https://sync.test${basePath}`)
+  })
+  it.each(['https://sync.test/application/', 'https://sync.test/app/assets/', 'tauri://localhost/app/'])('does not mistake %s for a hosted app', (url) => {
+    expect(hostedServerUrl(new URL(url))).toBeNull()
+  })
+  it('preserves the prefix during server discovery, authentication and API calls', async () => {
+    fetchMock.mockResolvedValueOnce(response({ status: 'ok' }))
+      .mockResolvedValueOnce(response({ authorized: true }))
+      .mockResolvedValueOnce(response({ items: [] }))
+    const s = await login('https://sync.test/reading/', 'reader', 'password')
+    await api.books(s)
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      'https://sync.test/reading/healthz', 'https://sync.test/reading/users/auth',
+      `https://sync.test/reading${progress}`,
+    ])
+  })
+});
 
 it('rejects a failed activity refresh while retaining its saved copy for display', async () => {
   const s = session('reader')
