@@ -1,14 +1,47 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { BookOpen, CircleAlert, CircleCheck, CircleX, Pause, Share, Share2, X } from 'lucide-react'
 import { api, isApp } from './api.js'
 import { useSheet } from './tabbar.js'
 
 export function Sheet({ title, onClose, children }) {
   useSheet()
+  const dialogRef = useRef(null)
+  const previousFocus = useRef(document.activeElement)
+  useEffect(() => {
+    const dialog = dialogRef.current
+    const isTopmost = () => [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].at(-1) === dialog
+    const focusable = () => [...dialog.querySelectorAll('button, [href], input, select, textarea, [tabindex]')].filter((el) =>
+      el.tabIndex >= 0 && !el.matches(':disabled') && !el.closest('[hidden], [inert]') &&
+      getComputedStyle(el).display !== 'none' && getComputedStyle(el).visibility !== 'hidden'
+    )
+    const keepFocus = () => {
+      if (isTopmost() && !dialog.contains(document.activeElement)) (focusable()[0] ?? dialog).focus()
+    }
+    const trapTab = (e) => {
+      if (e.key !== 'Tab' || !isTopmost()) return
+      const controls = focusable()
+      const first = controls[0] ?? dialog
+      const last = controls.at(-1) ?? dialog
+      if (!controls.includes(document.activeElement) || document.activeElement === (e.shiftKey ? first : last)) {
+        e.preventDefault()
+        const target = e.shiftKey ? last : first
+        target.focus()
+      }
+    }
+    // Keep an input's autoFocus; otherwise start on the non-destructive Close button.
+    keepFocus()
+    document.addEventListener('focusin', keepFocus)
+    document.addEventListener('keydown', trapTab)
+    return () => {
+      document.removeEventListener('focusin', keepFocus)
+      document.removeEventListener('keydown', trapTab)
+      if (previousFocus.current?.isConnected) previousFocus.current.focus()
+    }
+  }, [])
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center md:items-center">
       <div className="absolute inset-0 bg-stone-950/40" onClick={onClose} />
-      <div role="dialog" aria-modal="true" aria-label={title} className="relative max-h-[88dvh] w-full overflow-y-auto overscroll-contain rounded-t-[28px] bg-stone-50 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:max-w-lg md:rounded-[28px] md:p-6">
+      <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} className="relative max-h-[88dvh] w-full overflow-y-auto overscroll-contain rounded-t-[28px] bg-stone-50 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:max-w-lg md:rounded-[28px] md:p-6">
         <div className="mx-auto mb-4 h-1.5 w-10 rounded-full bg-stone-300 md:hidden" />
         <button onClick={onClose} className="absolute top-3 right-3 grid size-10 place-items-center rounded-full text-stone-500 active:bg-stone-200" aria-label="Close">
           <X className="size-5" />
@@ -17,6 +50,56 @@ export function Sheet({ title, onClose, children }) {
         {children}
       </div>
     </div>
+  )
+}
+
+// Async confirmations and text entry must work in native WebViews too.
+export function ActionSheet({ title, children, actionLabel, pendingLabel, onConfirm, onClose, inputLabel, initialValue = '', isValid = () => true, danger = false }) {
+  const [value, setValue] = useState(initialValue)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const pending = useRef(false)
+  const valid = (!inputLabel || !!value.trim()) && isValid(value.trim())
+  const close = () => { if (!pending.current) onClose() }
+
+  async function submit(e) {
+    e.preventDefault()
+    if (pending.current || !valid) return
+    pending.current = true
+    setBusy(true)
+    setError(null)
+    try {
+      await onConfirm(value.trim())
+      onClose()
+    } catch (e) {
+      setError(e?.message || String(e))
+    } finally {
+      pending.current = false
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Sheet title={title} onClose={close}>
+      <form onSubmit={submit}>
+        {children && <p className="mt-3 text-sm/6 text-stone-600">{children}</p>}
+        {inputLabel && (
+          <label className="mt-3 block text-sm font-medium text-stone-600">
+            {inputLabel}
+            <input autoFocus value={value} onChange={(e) => setValue(e.target.value)} disabled={busy} autoCapitalize="none" autoCorrect="off" spellCheck={false} className="mt-2 h-12 w-full rounded-xl bg-surface px-3 text-base text-stone-900 ring-1 ring-stone-950/10 outline-none focus:ring-2 focus:ring-brand-500/60 disabled:opacity-60" />
+          </label>
+        )}
+        {error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}
+        <div className="mt-5 grid gap-2">
+          <button type="submit" disabled={busy || !valid} className={`h-12 rounded-xl text-base font-semibold text-white disabled:opacity-60 ${danger ? 'bg-red-600 active:bg-red-700' : 'bg-brand-500 active:bg-brand-600'}`}>
+            {busy ? pendingLabel : actionLabel}
+          </button>
+          <button type="button" disabled={busy} onClick={close} className="h-12 rounded-xl bg-surface text-base font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100 disabled:opacity-60">
+            Cancel
+          </button>
+        </div>
+      </form>
+    </Sheet>
   )
 }
 

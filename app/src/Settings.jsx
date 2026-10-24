@@ -4,7 +4,7 @@ import { onOpenUrl } from '@tauri-apps/plugin-deep-link'
 import { ArrowLeft, ChevronRight, Copy, KeyRound, ListChecks, Loader2, LogOut, Monitor, Moon, RefreshCw, Search, Server, Sun, Trash2, UserX } from 'lucide-react'
 import SparkMD5 from 'spark-md5'
 import { api, isApp } from './api.js'
-import { Bone, Card, EmptyState, notify, Toggle, useLoad } from './ui.jsx'
+import { ActionSheet, Bone, Card, EmptyState, notify, Toggle, useLoad } from './ui.jsx'
 import { useNativeBack } from './tabbar.js'
 
 // Appearance: follow the system, or force light or dark.
@@ -448,6 +448,7 @@ export function LinkForm({ session, conn, onLinked }) {
 }
 
 function Service({ session, conn, onChange }) {
+  const [unlinking, setUnlinking] = useState(false)
   const [openForm, setOpenForm] = useState(false)
   const [busy, setBusy] = useState(null)
   const needsRelink = conn.linked && conn.status === 'needs_reauth'
@@ -468,14 +469,6 @@ function Service({ session, conn, onChange }) {
     } finally {
       setBusy(null)
     }
-  }
-  const unlink = () => {
-    if (!confirm(`Unlink ${conn.name}? Its book matches and any queued syncs are removed.`)) return
-    act(
-      'unlink',
-      () => api.unlinkConnector(session, conn.id),
-      () => notify({ title: `${conn.name} unlinked` }),
-    )
   }
 
   return (
@@ -522,7 +515,7 @@ function Service({ session, conn, onChange }) {
             <button
               type="button"
               disabled={!!busy}
-              onClick={unlink}
+              onClick={() => setUnlinking(true)}
               className="h-9 rounded-full px-3 text-sm font-medium text-red-600 active:bg-stone-100 md:hover:bg-stone-100"
             >
               {busy === 'unlink' ? <Loader2 className="size-4 animate-spin" /> : 'Unlink'}
@@ -538,6 +531,20 @@ function Service({ session, conn, onChange }) {
           </button>
         )}
       </div>
+      {unlinking && (
+        <ActionSheet title={`Unlink ${conn.name}?`} actionLabel="Unlink" pendingLabel="Unlinking…" danger onClose={() => setUnlinking(false)} onConfirm={async () => {
+          setBusy('unlink')
+          try {
+            await api.unlinkConnector(session, conn.id)
+            notify({ title: `${conn.name} unlinked` })
+            onChange()
+          } finally {
+            setBusy(null)
+          }
+        }}>
+          Its book matches and any queued syncs are removed.
+        </ActionSheet>
+      )}
       {conn.linked && (conn.queue?.pending > 0 || conn.queue?.dead > 0) && (
         <p role="status" className="mt-2 text-xs text-stone-500">
           {[conn.queue.pending > 0 && `${conn.queue.pending} item${conn.queue.pending === 1 ? '' : 's'} waiting to sync`,
@@ -625,6 +632,7 @@ function Services({ session }) {
 
 // Password, clear data, delete: what the website's account page did.
 function Account({ session, onSession, onLogout }) {
+  const [action, setAction] = useState(null)
   const [editing, setEditing] = useState(false)
   const [pw, setPw] = useState({ next: '', again: '' })
   const [busy, setBusy] = useState(null)
@@ -655,32 +663,10 @@ function Account({ session, onSession, onLogout }) {
       })
     })
   }
-  const clearData = () => {
-    if (
-      !confirm(
-        'Clear all your reading data? Progress, clippings, stats and linked services are deleted. Your account stays, and readers sync again from scratch.',
-      )
-    )
-      return
-    run('clear', async () => {
-      await api.clearData(session)
-      notify({ title: 'Reading data cleared' })
-      location.hash = '#/'
-      location.reload()
-    })
-  }
-  const deleteAccount = () => {
-    const typed = prompt(`This deletes the account and everything in it, for good. Type ${session.username} to confirm.`)
-    if (typed?.trim() !== session.username) return
-    run('delete', async () => {
-      await api.deleteAccount(session)
-      onLogout()
-    })
-  }
 
   return (
     <Card className="mt-3 divide-y divide-stone-100">
-      <button type="button" onClick={() => setEditing(!editing)} className={`${row} text-stone-800`}>
+      <button type="button" disabled={!!busy || !!action} onClick={() => setEditing(!editing)} className={`${row} text-stone-800`}>
         <KeyRound className="size-4 text-stone-400" />
         <span className="flex-1">Change sync password</span>
         <ChevronRight className={`size-4 text-stone-400 transition ${editing ? 'rotate-90' : ''}`} />
@@ -704,21 +690,53 @@ function Account({ session, onSession, onLogout }) {
             autoComplete="new-password"
           />
           <button
-            disabled={busy === 'password'}
+            disabled={!!busy || !!action}
             className="flex h-11 w-full items-center justify-center rounded-xl bg-brand-500 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-50"
           >
             {busy === 'password' ? <Loader2 className="size-4 animate-spin" /> : 'Save password'}
           </button>
         </form>
       )}
-      <button type="button" disabled={!!busy} onClick={clearData} className={`${row} text-red-600`}>
+      <button type="button" disabled={!!busy || !!action} onClick={() => setAction('clear')} className={`${row} text-red-600`}>
         {busy === 'clear' ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
         Clear reading data
       </button>
-      <button type="button" disabled={!!busy} onClick={deleteAccount} className={`${row} text-red-600`}>
+      <button type="button" disabled={!!busy || !!action} onClick={() => setAction('delete')} className={`${row} text-red-600`}>
         {busy === 'delete' ? <Loader2 className="size-4 animate-spin" /> : <UserX className="size-4" />}
         Delete account
       </button>
+      {action && (
+        <ActionSheet
+          key={action}
+          title={action === 'clear' ? 'Clear reading data?' : 'Delete account?'}
+          actionLabel={action === 'clear' ? 'Clear reading data' : 'Delete account'}
+          pendingLabel={action === 'clear' ? 'Clearing…' : 'Deleting…'}
+          danger
+          inputLabel={action === 'delete' ? 'Username' : undefined}
+          isValid={(value) => action !== 'delete' || value === session.username}
+          onClose={() => setAction(null)}
+          onConfirm={async () => {
+            setBusy(action)
+            try {
+              if (action === 'clear') {
+                await api.clearData(session)
+                notify({ title: 'Reading data cleared' })
+                location.hash = '#/'
+                location.reload()
+              } else {
+                await api.deleteAccount(session)
+                onLogout()
+              }
+            } finally {
+              setBusy(null)
+            }
+          }}
+        >
+          {action === 'clear'
+            ? 'Progress, clippings, stats and linked services are deleted. Your account stays, and readers sync again from scratch.'
+            : `This deletes the account and everything in it, for good. Type ${session.username} to confirm.`}
+        </ActionSheet>
+      )}
     </Card>
   )
 }

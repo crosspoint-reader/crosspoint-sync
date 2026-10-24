@@ -7,7 +7,7 @@ import ShareSheet from './ShareSheet.jsx'
 import { useNativeBack, useNativeButton } from './tabbar.js'
 import SpotifyCard from './SpotifyCard.jsx'
 import { Picker } from './Settings.jsx'
-import { STATUS, Card, Cover, EmptyState, ErrorNote, ProgressBar, ShareIcon, Sheet, Spinner, ViaHardcover, ago, duration, notify, pct, useLoad } from './ui.jsx'
+import { STATUS, ActionSheet, Card, Cover, EmptyState, ErrorNote, ProgressBar, ShareIcon, Sheet, Spinner, ViaHardcover, ago, duration, notify, pct, useLoad } from './ui.jsx'
 
 const date = (unix, opts) =>
   unix ? new Date(unix * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', ...opts }) : null
@@ -323,8 +323,7 @@ function CoverPicker({ session, book, onDone, onClose }) {
 }
 
 function MergePicker({ session, book, books, onDone, onClose }) {
-  const [busy, setBusy] = useState(null)
-  const [err, setErr] = useState(null)
+  const [selected, setSelected] = useState(null)
   const [stats, setStats] = useState(true)
   // Syncs with no title or filename (e.g. KOReader on a binary hash) are hidden from
   // the library; list them here, newest first, so they can be folded into the real book.
@@ -333,18 +332,16 @@ function MergePicker({ session, book, books, onDone, onClose }) {
     .filter((b) => b.document !== book.document)
     .sort((a, b) => Number(looksLikeSame(book, b)) - Number(looksLikeSame(book, a)) || (a.title ?? '').localeCompare(b.title ?? ''))
     .concat([...(untitled ?? [])].sort((a, b) => b.timestamp - a.timestamp))
-  async function merge(other) {
-    const what = stats ? 'progress, clippings and reading stats' : 'progress and clippings'
-    if (!confirm(`Merge "${other.title || other.filename || 'Untitled book'}" into this book? Its ${what} move here, and future syncs of it land here too.`)) return
-    setBusy(other.document)
-    setErr(null)
-    try {
-      await api.merge(session, other.document, book.document, stats)
-      onDone()
-    } catch (e) {
-      setErr(e.message)
-      setBusy(null)
-    }
+  if (selected) {
+    const what = selected.stats ? 'progress, clippings and reading stats' : 'progress and clippings'
+    return (
+      <ActionSheet title={`Merge "${selected.book.title || selected.book.filename || 'Untitled book'}" into this book?`} actionLabel="Merge" pendingLabel="Merging…" onClose={() => setSelected(null)} onConfirm={async () => {
+        await api.merge(session, selected.book.document, book.document, selected.stats)
+        onDone()
+      }}>
+        Its {what} move here, and future syncs of it land here too.
+      </ActionSheet>
+    )
   }
   return (
     <Sheet title="Merge a duplicate into this book" onClose={onClose}>
@@ -355,10 +352,9 @@ function MergePicker({ session, book, books, onDone, onClose }) {
         <input type="checkbox" checked={stats} onChange={(e) => setStats(e.target.checked)} className="size-4 accent-brand-500" />
         Combine reading stats (time, pages, sessions)
       </label>
-      {err && <p className="mt-3 text-sm text-red-600">{err}</p>}
       <Card className="mt-4 divide-y divide-stone-100">
         {others.map((b) => (
-          <button key={b.document} disabled={busy !== null} onClick={() => merge(b)} className="flex w-full items-center gap-3 px-4 py-3 text-left active:bg-stone-50">
+          <button key={b.document} onClick={() => setSelected({ book: b, stats })} className="flex w-full items-center gap-3 px-4 py-3 text-left active:bg-stone-50">
             <Cover session={session} book={b} small className="w-9" />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold text-stone-900">{b.title || b.filename || 'Untitled book'}</p>
@@ -366,11 +362,7 @@ function MergePicker({ session, book, books, onDone, onClose }) {
                 {[b.author, pct(b.percentage), b.device, !b.title && !b.filename && b.timestamp && `synced ${ago(b.timestamp)}`].filter(Boolean).join(' · ')}
               </p>
             </div>
-            {busy === b.document ? (
-              <Loader2 className="size-4 animate-spin text-brand-500" />
-            ) : (
-              looksLikeSame(book, b) && <span className="shrink-0 rounded-full bg-brand-50 px-2 py-0.5 text-[0.65rem] font-semibold text-brand-700">Likely duplicate</span>
-            )}
+            {looksLikeSame(book, b) && <span className="shrink-0 rounded-full bg-brand-50 px-2 py-0.5 text-[0.65rem] font-semibold text-brand-700">Likely duplicate</span>}
           </button>
         ))}
       </Card>
@@ -504,6 +496,7 @@ function DetailsSheet({ session, book, onDone, onClose }) {
 }
 
 function BookMenu({ session, book, books, activity, onChange }) {
+  const [action, setAction] = useState(null)
   const [menu, setMenu] = useState(false)
   useNativeButton('more', { sfSymbol: 'ellipsis', anchor: 'topTrailing' }, () => setMenu((m) => !m))
   const [open, setOpen] = useState(null) // 'cover' | 'details' | 'pages' | 'dates' | 'merge'
@@ -524,21 +517,6 @@ function BookMenu({ session, book, books, activity, onChange }) {
       done()
     } finally {
       setSaving(false)
-    }
-  }
-  async function separate() {
-    if (!confirm('Separate the merged copies again? Future syncs from them will show as their own books.')) return
-    for (const alias of book.aliases) await api.unmerge(session, alias)
-    onChange()
-  }
-  async function remove() {
-    if (!confirm(`Remove "${book.title || 'this book'}" from your library? Its progress, clippings and stats are deleted. A reader that still has it will sync it again.`)) return
-    try {
-      await api.removeBook(session, book.document)
-      location.hash = '#/'
-      onChange()
-    } catch (e) {
-      notify({ error: true, title: "Couldn't remove the book", detail: e.message })
     }
   }
   const item = (Icon, label, run, extra = null, danger = false) => (
@@ -583,10 +561,36 @@ function BookMenu({ session, book, books, activity, onChange }) {
               dupes > 0 && <span className="ml-auto rounded-full bg-brand-50 px-2 py-0.5 text-[0.65rem] font-semibold text-brand-700">{dupes} likely</span>
             )}
             {book.aliases?.length > 0 &&
-              item(Split, book.aliases.length === 1 ? 'Separate merged copy' : `Separate ${book.aliases.length} merged copies`, separate)}
-            {item(Trash2, 'Remove from library', remove, null, true)}
+              item(Split, book.aliases.length === 1 ? 'Separate merged copy' : `Separate ${book.aliases.length} merged copies`, () => setAction({ kind: 'separate', aliases: [...book.aliases] }))}
+            {item(Trash2, 'Remove from library', () => setAction({ kind: 'remove', document: book.document, title: book.title }), null, true)}
           </div>
         </>
+      )}
+      {action && (
+        <ActionSheet
+          title={action.kind === 'separate' ? 'Separate merged copies?' : `Remove "${action.title || 'this book'}" from your library?`}
+          actionLabel={action.kind === 'separate' ? 'Separate' : 'Remove'}
+          pendingLabel={action.kind === 'separate' ? 'Separating…' : 'Removing…'}
+          danger={action.kind === 'remove'}
+          onClose={() => setAction(null)}
+          onConfirm={async () => {
+            if (action.kind === 'separate') {
+              for (const alias of action.aliases) {
+                await api.unmerge(session, alias)
+                // Retry only the remaining copies if a later request fails.
+                setAction((current) => ({ ...current, aliases: current.aliases.filter((id) => id !== alias) }))
+              }
+            } else {
+              await api.removeBook(session, action.document)
+              location.hash = '#/'
+            }
+            onChange()
+          }}
+        >
+          {action.kind === 'separate'
+            ? 'Future syncs from the separated copies will show as their own books.'
+            : 'Its progress, clippings and stats are deleted. A reader that still has it will sync it again.'}
+        </ActionSheet>
       )}
       {open === 'cover' && <CoverPicker session={session} book={book} onDone={done} onClose={() => setOpen(null)} />}
       {open === 'dates' && <DatesSheet session={session} book={book} activity={activity} onDone={done} onClose={() => setOpen(null)} />}

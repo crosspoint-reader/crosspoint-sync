@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 const env = vi.hoisted(() => ({ isApp: false }))
 vi.mock('./api.js', () => ({
   get isApp() { return env.isApp },
-  api: { oauthBegin: vi.fn(), oauthComplete: vi.fn(), connectors: vi.fn(), linkConnector: vi.fn(), setClientId: vi.fn(), removeClientId: vi.fn(), syncConnector: vi.fn() },
+  api: { oauthBegin: vi.fn(), oauthComplete: vi.fn(), connectors: vi.fn(), linkConnector: vi.fn(), setClientId: vi.fn(), removeClientId: vi.fn(), syncConnector: vi.fn(), unlinkConnector: vi.fn(), clearData: vi.fn(), deleteAccount: vi.fn() },
 }))
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }))
 let deliver = null
@@ -29,6 +29,8 @@ const AUTH = 'https://accounts.spotify.com/authorize?state=s1'
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   vi.useRealTimers()
   env.isApp = false
   deliver = null
@@ -209,5 +211,101 @@ describe('service delivery status', () => {
     expect(screen.getByRole('alert').textContent).toContain('clipping text not found')
     await act(async () => vi.advanceTimersByTimeAsync(15000))
     expect(api.connectors).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('in-app destructive confirmations', () => {
+  const reader = { ...session, username: 'reader' }
+  const connector = { id: 'bookorbit', name: 'BookOrbit', linked: true, status: 'ok' }
+  const renderSettings = (onLogout = vi.fn()) => render(<Settings session={reader} theme={['system', vi.fn()]} onSession={vi.fn()} onLogout={onLogout} />)
+
+  beforeEach(() => {
+    env.isApp = true
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    vi.spyOn(window, 'prompt').mockReturnValue(null)
+    api.connectors.mockResolvedValue({ connectors: [connector] })
+    api.unlinkConnector.mockReset().mockResolvedValue({})
+    api.clearData.mockReset().mockResolvedValue({})
+    api.deleteAccount.mockReset().mockResolvedValue({})
+  })
+
+  it.each(['Cancel', 'Close'])('dismisses every confirmation with %s without requests', async (dismiss) => {
+    renderSettings()
+    for (const name of ['Unlink', 'Clear reading data', 'Delete account']) {
+      fireEvent.click(await screen.findByRole('button', { name, exact: true }))
+      const dialog = screen.getByRole('dialog')
+      if (name === 'Delete account') fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'reader' } })
+      fireEvent.click(within(dialog).getByRole('button', { name: dismiss }))
+      expect(screen.queryByRole('dialog')).toBeNull()
+    }
+    expect(api.unlinkConnector).not.toHaveBeenCalled()
+    expect(api.clearData).not.toHaveBeenCalled()
+    expect(api.deleteAccount).not.toHaveBeenCalled()
+    expect(window.confirm).not.toHaveBeenCalled()
+    expect(window.prompt).not.toHaveBeenCalled()
+  })
+
+  it('retries a failed unlink and refreshes the service list after success', async () => {
+    api.unlinkConnector.mockRejectedValueOnce(new Error('Unlink failed'))
+    renderSettings()
+    fireEvent.click(await screen.findByRole('button', { name: 'Unlink', exact: true }))
+    const dialog = screen.getByRole('dialog', { name: 'Unlink BookOrbit?' })
+    expect(api.unlinkConnector).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Unlink', exact: true }))
+    expect((await within(dialog).findByRole('alert')).textContent).toBe('Unlink failed')
+    expect(api.connectors).toHaveBeenCalledTimes(1)
+    api.connectors.mockResolvedValue({ connectors: [{ ...connector, linked: false }] })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Unlink', exact: true }))
+    await screen.findByRole('button', { name: 'Link', exact: true })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(api.unlinkConnector).toHaveBeenNthCalledWith(2, reader, 'bookorbit')
+    expect(api.connectors).toHaveBeenCalledTimes(2)
+    expect(window.confirm).not.toHaveBeenCalled()
+  })
+
+  it('clears data only after confirmation and reloads only after a successful retry', async () => {
+    const reload = vi.fn()
+    vi.stubGlobal('location', { hash: '#/settings', reload })
+    api.clearData.mockRejectedValueOnce(new Error('Clear failed'))
+    renderSettings()
+    fireEvent.click(screen.getByRole('button', { name: 'Clear reading data', exact: true }))
+    const dialog = screen.getByRole('dialog')
+    expect(api.clearData).not.toHaveBeenCalled()
+    expect(dialog.textContent).toContain('Your account stays')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Clear reading data' }))
+    expect((await within(dialog).findByRole('alert')).textContent).toBe('Clear failed')
+    expect(reload).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Clear reading data' }))
+    await waitFor(() => expect(reload).toHaveBeenCalledOnce())
+    expect(api.clearData).toHaveBeenNthCalledWith(2, reader)
+    expect(location.hash).toBe('#/')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(window.confirm).not.toHaveBeenCalled()
+  })
+
+  it('requires the matching username and retains it when account deletion fails', async () => {
+    api.deleteAccount.mockRejectedValueOnce(new Error('Delete failed'))
+    const onLogout = vi.fn()
+    renderSettings(onLogout)
+    fireEvent.click(screen.getByRole('button', { name: 'Delete account', exact: true }))
+    const dialog = screen.getByRole('dialog')
+    const input = within(dialog).getByRole('textbox', { name: 'Username' })
+    const submit = within(dialog).getByRole('button', { name: 'Delete account' })
+    for (const value of ['', '   ', 'Reader', 'someone else']) {
+      fireEvent.change(input, { target: { value } })
+      expect(submit.disabled).toBe(true)
+      fireEvent.submit(input.closest('form'))
+    }
+    expect(api.deleteAccount).not.toHaveBeenCalled()
+    fireEvent.change(input, { target: { value: ' reader ' } })
+    fireEvent.click(submit)
+    expect((await within(dialog).findByRole('alert')).textContent).toBe('Delete failed')
+    expect(input.value).toBe(' reader ')
+    expect(onLogout).not.toHaveBeenCalled()
+    fireEvent.click(submit)
+    await waitFor(() => expect(onLogout).toHaveBeenCalledOnce())
+    expect(api.deleteAccount).toHaveBeenNthCalledWith(2, reader)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(window.prompt).not.toHaveBeenCalled()
   })
 })
