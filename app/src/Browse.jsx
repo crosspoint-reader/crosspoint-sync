@@ -5,6 +5,8 @@ import { isApp } from './api.js'
 import { loadDevicePrefs } from './device.js'
 import { download, feed as fetchFeed, loadCatalogs, moveCatalog, navRows, readable, saveCatalogs, search, sendDownload } from './catalogs.js'
 import { progressLabel } from './Send.jsx'
+import ConversionLog from './ConversionLog.jsx'
+import { transferProgress } from './epub/log.js'
 import { Card, EmptyAction, EmptyState, Eyebrow, Sheet, Spinner, folderLabel, notify } from './ui.jsx'
 import { useNativeBack } from './tabbar.js'
 
@@ -224,19 +226,19 @@ function BookPage({ cat, entryKey }) {
   const formats = readable(entry)
   const chosen = formats.find((f) => f.href === format?.href) ?? formats[0]
   async function run(alsoSend) {
-    setJob({ state: 'working', progress: null })
+    setJob({ state: 'working', progress: null, logs: [] })
     try {
       const book = await download(cat, entry, chosen, (progress) => setJob((j) => ({ ...j, progress })))
       const prefs = loadDevicePrefs()
-      const used = alsoSend ? await sendDownload(book.name, prefs, (progress) => setJob((j) => ({ ...j, progress }))) : null
-      setJob({ state: 'done', sent: alsoSend })
+      const used = alsoSend ? await sendDownload(book.name, prefs, (event) => setJob((j) => transferProgress(j, event))) : null
+      setJob((j) => ({ ...j, state: 'done', sent: alsoSend }))
       notify(
         alsoSend
           ? { title: 'Sent to your reader', detail: `${used} in ${folderLabel(prefs.folder)}` }
           : { title: 'Downloaded', detail: `${entry.title} is on your shelf in Send` }
       )
     } catch (e) {
-      setJob({ state: 'error', error: String(e) })
+      setJob((j) => ({ ...j, state: 'error', error: String(e) }))
       notify({ error: true, title: alsoSend ? "Couldn't send that book" : "Couldn't download that book", detail: String(e) })
     }
   }
@@ -298,17 +300,22 @@ function BookPage({ cat, entryKey }) {
                   <Download className="size-5" /> Download
                 </button>
               </div>
-              {job && (
-                <p className={`mt-3 text-center text-sm ${job.state === 'error' ? 'text-red-600' : 'text-stone-600'}`}>
-                  {job.state === 'working'
-                    ? progressLabel(job.progress)
-                    : job.state === 'done'
-                      ? job.sent
-                        ? 'On your reader.'
-                        : 'Downloaded. Send it any time from the Send tab.'
-                      : job.error}
-                </p>
-              )}
+              <ConversionLog entries={job?.logs}>
+                {(details) => job && (
+                  <p className={`mt-3 flex items-center justify-center text-sm ${job.state === 'error' ? 'text-red-600' : 'text-stone-600'}`}>
+                    <span>
+                      {job.state === 'working'
+                        ? progressLabel(job.progress)
+                        : job.state === 'done'
+                          ? job.sent
+                            ? 'On your reader.'
+                            : 'Downloaded. Send it any time from the Send tab.'
+                          : job.error}
+                    </span>
+                    {details}
+                  </p>
+                )}
+              </ConversionLog>
             </div>
           )}
 

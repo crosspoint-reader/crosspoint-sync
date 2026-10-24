@@ -8,6 +8,7 @@
     "build": "vite build",
     "tauri": "tauri",
     "test": "vitest run",
+    "test:optimizer": "playwright test",
     "ios:phone": "sh scripts/ios-phone.sh"
   },
   "dependencies": {
@@ -21,12 +22,14 @@
     "@tauri-apps/plugin-haptics": "^2.4.2",
     "@tauri-apps/plugin-http": "^2.8.0",
     "@tauri-apps/plugin-opener": "^2.7.0",
+    "jszip": "3.10.1",
     "lucide-react": "^1.48.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "spark-md5": "^3.0.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/vite": "^4.1.0",
     "@tauri-apps/cli": "^2.12.3",
     "@testing-library/react": "^16.3.3",

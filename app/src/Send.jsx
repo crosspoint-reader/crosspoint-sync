@@ -23,16 +23,18 @@ import { isApp } from './api.js'
 import { DEFAULT_HOST, EXTENSIONS, connect, deleteFiles, folders, isBook, joinPath, listFiles, loadDevicePrefs, makeFolder, renameFile, saveDevicePrefs } from './device.js'
 import { downloads as listDownloads, removeDownload, sendDownload, sendFile } from './catalogs.js'
 import { Card, EmptyState, folderLabel, notify, Toggle } from './ui.jsx'
+import ConversionLog from './ConversionLog.jsx'
+import { transferProgress } from './epub/log.js'
 
 const size = (n) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`)
 // Android's picker filters by MIME type and has none for .md, so let it show everything there.
 const ACCEPT = /android/i.test(navigator.userAgent) ? undefined : EXTENSIONS.map((e) => `.${e}`).join(',')
 
-// Shared "what's happening" line for a send, from Rust progress events.
+// Shared progress from the WebView optimizer and native transfers.
 export function progressLabel(p) {
   if (!p) return 'Sending…'
   if (p.stage === 'downloading') return p.total ? `Downloading ${Math.round((p.done / p.total) * 100)}%` : `Downloading ${size(p.done)}`
-  if (p.stage === 'optimizing') return p.total ? `Shrinking images ${p.done}/${p.total}` : 'Shrinking images…'
+  if (p.stage === 'optimizing') return p.total ? `Optimizing EPUB ${Math.round(p.done / p.total * 100)}%` : 'Optimizing EPUB…'
   return 'Sending to reader…'
 }
 
@@ -124,10 +126,10 @@ function Device({ prefs, setPrefs, device, onRetry }) {
           <div className="flex items-center gap-3">
             <ImageDown className="size-5 shrink-0 text-stone-400" strokeWidth={1.75} />
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-stone-900">Shrink EPUB images</p>
-              <p className="text-xs/5 text-stone-500">Re-encodes pictures as JPEG so books take less space and open faster.</p>
+              <p className="text-sm font-medium text-stone-900">Optimize EPUB</p>
+              <p className="text-xs/5 text-stone-500">Fits images to your reader in grayscale, fixes SVG covers, and removes embedded fonts.</p>
             </div>
-            <Toggle label="Shrink EPUB images" checked={prefs.optimize} onChange={(optimize) => setPrefs({ ...prefs, optimize })} />
+            <Toggle label="Optimize EPUB" checked={prefs.optimize} onChange={(optimize) => setPrefs({ ...prefs, optimize })} />
           </div>
           {prefs.optimize && (
             <label className="mt-3 flex items-center gap-3 pl-8 text-xs text-stone-500">
@@ -188,9 +190,9 @@ function Shelf({ prefs, ready }) {
 
   async function send(name) {
     const set = (patch) => setJobs((j) => ({ ...j, [name]: { ...j[name], ...patch } }))
-    set({ state: 'sending', error: null, progress: null })
+    set({ state: 'sending', error: null, progress: null, logs: [] })
     try {
-      const used = await sendDownload(name, prefs, (progress) => set({ progress }))
+      const used = await sendDownload(name, prefs, (event) => setJobs((jobs) => ({ ...jobs, [name]: transferProgress(jobs[name], event) })))
       set({ state: 'done', sentAs: used !== name ? used : null })
       notify({ title: 'Sent to your reader', detail: `${used} in ${folderLabel(prefs.folder)}` })
     } catch (e) {
@@ -206,38 +208,47 @@ function Shelf({ prefs, ready }) {
         {books.map((b) => {
           const job = jobs[b.name] ?? {}
           return (
-            <div key={b.name} className="flex items-center gap-3 px-4 py-3">
-              {b.meta?.cover ? (
-                <img src={b.meta.cover} alt="" className="aspect-[2/3] w-10 shrink-0 rounded object-cover ring-1 ring-stone-950/10" />
-              ) : (
-                <FileText className="size-5 shrink-0 text-stone-400" strokeWidth={1.75} />
-              )}
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-stone-900">{b.meta?.title ?? b.name}</p>
-                <p className="truncate text-xs text-stone-500">
-                  {job.state ? <Status {...job} /> : [b.meta?.author, size(b.size)].filter(Boolean).join(' · ')}
-                </p>
-              </div>
-              {job.state && job.state !== 'error' ? (
-                <StatusIcon state={job.state} />
-              ) : (
-                <>
-                  <button
-                    disabled={!ready}
-                    onClick={() => send(b.name)}
-                    className="flex h-9 items-center gap-1.5 rounded-full bg-brand-50 px-3 text-sm font-semibold text-brand-700 active:bg-brand-100 disabled:opacity-40"
-                  >
-                    <SendIcon className="size-4" /> Send
-                  </button>
-                  <button
-                    onClick={() => removeDownload(b.name).then(reload)}
-                    className="-mr-2 grid size-9 place-items-center rounded-full text-stone-400 active:bg-stone-100"
-                    aria-label={`Delete ${b.name}`}
-                  >
-                    <Trash2 className="size-4" />
-                  </button>
-                </>
-              )}
+            <div key={b.name} className="px-4 py-3">
+              <ConversionLog entries={job.logs}>
+                {(details) => (
+                  <div className="flex items-center gap-3">
+                    {b.meta?.cover ? (
+                      <img src={b.meta.cover} alt="" className="aspect-[2/3] w-10 shrink-0 rounded object-cover ring-1 ring-stone-950/10" />
+                    ) : (
+                      <FileText className="size-5 shrink-0 text-stone-400" strokeWidth={1.75} />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-stone-900">{b.meta?.title ?? b.name}</p>
+                      <p className="flex min-w-0 items-center text-xs text-stone-500">
+                        <span className="truncate">
+                          {job.state ? <Status {...job} /> : [b.meta?.author, size(b.size)].filter(Boolean).join(' · ')}
+                        </span>
+                        {details}
+                      </p>
+                    </div>
+                    {job.state && job.state !== 'error' ? (
+                      <StatusIcon state={job.state} />
+                    ) : (
+                      <>
+                        <button
+                          disabled={!ready}
+                          onClick={() => send(b.name)}
+                          className="flex h-9 items-center gap-1.5 rounded-full bg-brand-50 px-3 text-sm font-semibold text-brand-700 active:bg-brand-100 disabled:opacity-40"
+                        >
+                          <SendIcon className="size-4" /> Send
+                        </button>
+                        <button
+                          onClick={() => removeDownload(b.name).then(reload)}
+                          className="-mr-2 grid size-9 place-items-center rounded-full text-stone-400 active:bg-stone-100"
+                          aria-label={`Delete ${b.name}`}
+                        >
+                          <Trash2 className="size-4" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </ConversionLog>
             </div>
           )
         })}
@@ -410,9 +421,9 @@ export default function Send() {
     for (const item of files) {
       if (item.state === 'done') continue
       const update = (patch) => setFiles((cur) => cur.map((f) => (f.file === item.file ? { ...f, ...patch } : f)))
-      update({ state: 'sending', error: null })
+      update({ state: 'sending', error: null, progress: null, logs: [] })
       try {
-        const used = await sendFile(item.file, prefs)
+        const used = await sendFile(item.file, prefs, (event) => setFiles((cur) => cur.map((f) => f.file === item.file ? transferProgress(f, event) : f)))
         update({ state: 'done', sentAs: used !== item.file.name ? used : null })
         sent.push(used)
       } catch (e) {
@@ -492,28 +503,37 @@ export default function Send() {
 
             {files.length > 0 && (
               <Card className="mt-4 divide-y divide-stone-100">
-                {files.map(({ file, state, error, sentAs }) => (
-                  <div key={file.name} className="flex items-center gap-3 px-4 py-3">
-                    <FileText className="size-5 shrink-0 text-stone-400" strokeWidth={1.75} />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-stone-900">{file.name}</p>
-                      <p className="truncate text-xs text-stone-500">
-                        {state === 'queued' ? size(file.size) : <Status state={state} error={error} sentAs={sentAs} />}
-                      </p>
-                    </div>
-                    {state === 'queued' ? (
-                      !sending && (
-                        <button
-                          onClick={() => setFiles((cur) => cur.filter((f) => f.file !== file))}
-                          className="-mr-2 grid size-9 place-items-center rounded-full text-stone-400 active:bg-stone-100"
-                          aria-label={`Remove ${file.name}`}
-                        >
-                          <X className="size-4" />
-                        </button>
-                      )
-                    ) : (
-                      <StatusIcon state={state} />
-                    )}
+                {files.map(({ file, state, error, sentAs, progress, logs }) => (
+                  <div key={file.name} className="px-4 py-3">
+                    <ConversionLog entries={logs}>
+                      {(details) => (
+                        <div className="flex items-center gap-3">
+                          <FileText className="size-5 shrink-0 text-stone-400" strokeWidth={1.75} />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium text-stone-900">{file.name}</p>
+                            <p className="flex min-w-0 items-center text-xs text-stone-500">
+                              <span className="truncate">
+                                {state === 'queued' ? size(file.size) : <Status state={state} error={error} sentAs={sentAs} progress={progress} />}
+                              </span>
+                              {details}
+                            </p>
+                          </div>
+                          {state === 'queued' ? (
+                            !sending && (
+                              <button
+                                onClick={() => setFiles((cur) => cur.filter((f) => f.file !== file))}
+                                className="-mr-2 grid size-9 place-items-center rounded-full text-stone-400 active:bg-stone-100"
+                                aria-label={`Remove ${file.name}`}
+                              >
+                                <X className="size-4" />
+                              </button>
+                            )
+                          ) : (
+                            <StatusIcon state={state} />
+                          )}
+                        </div>
+                      )}
+                    </ConversionLog>
                   </div>
                 ))}
               </Card>

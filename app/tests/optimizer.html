@@ -1,0 +1,9 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>EPUB optimizer tests</title></head>
+<body><script type="module">
+import JSZip from 'jszip'
+import { optimizeEpub } from '../src/epub/optimize.js'
+import { convertEpub } from '../src/epub/vendor/optimizer.js'
+import { fixture, inspect } from './optimizer-fixture.js'
+window.optimizerTest = { JSZip, optimizeEpub, convertEpub, fixture, inspect }
+</script></body></html>

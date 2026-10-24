@@ -2,7 +2,6 @@ mod books;
 mod epub_name;
 mod mdns;
 mod opds;
-mod optimizer;
 mod refresh;
 mod widget;
 
@@ -34,6 +33,7 @@ pub fn run() {
       books::download_book,
       books::list_downloads,
       books::delete_download,
+      books::read_download,
       books::send_download,
       books::send_bytes,
       books::save_file,

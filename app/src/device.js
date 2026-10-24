@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { http, isApp } from './api.js'
+import { DEFAULT_QUALITY } from './epub/optimize.js'
 
 // CrossPoint's on-device file server (File Transfer screen). Same protocol
 // common-stacks uses: GET /api/status, GET /api/files?path=, POST /upload?path=.
@@ -32,9 +33,9 @@ export async function folders(base, path = '/') {
   return (await res.json()).filter((f) => f.isDirectory).map((f) => f.name).sort()
 }
 
-// Reader settings shared by Send and Browse. optimize/quality drive the EPUB image optimizer.
+// Reader settings shared by Send and Browse.
 const PREFS = 'crosspoint-device'
-const DEFAULTS = { host: DEFAULT_HOST, folder: '/', optimize: false, quality: 70, renameFromMetadata: false }
+const DEFAULTS = { host: DEFAULT_HOST, folder: '/', optimize: false, quality: DEFAULT_QUALITY, renameFromMetadata: false }
 export function loadDevicePrefs() {
   try {
     return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(PREFS)) }

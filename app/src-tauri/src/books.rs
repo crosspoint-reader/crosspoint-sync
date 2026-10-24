@@ -2,7 +2,6 @@
 //! Download naming and extension resolution follow common-stacks.
 
 use crate::opds::{self, feed::Feed, Auth};
-use crate::optimizer;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -37,7 +36,6 @@ pub struct Download {
 #[serde(tag = "stage", rename_all = "snake_case")]
 pub enum Progress {
   Downloading { done: u64, total: Option<u64> },
-  Optimizing { done: u64, total: u64 },
   Uploading,
 }
 
@@ -156,20 +154,27 @@ pub fn delete_download(app: AppHandle, name: String) -> Res<()> {
   Ok(())
 }
 
-/// Send a downloaded book to the reader. `quality` set = optimize EPUB images first.
+/// Read a downloaded book for optimization in the WebView. Leave the saved original intact.
+#[tauri::command]
+pub async fn read_download(app: AppHandle, name: String) -> Res<tauri::ipc::Response> {
+  let name = safe_name(&name)?;
+  let bytes = fs::read(books_dir(&app)?.join(name)).map_err(err)?;
+  Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Send a downloaded book without optimization.
 #[tauri::command]
 pub async fn send_download(
   app: AppHandle,
   name: String,
   base: String,
   folder: String,
-  quality: Option<u8>,
   rename: Option<bool>,
   on_progress: Channel<Progress>,
 ) -> Res<String> {
   let name = safe_name(&name)?;
   let bytes = fs::read(books_dir(&app)?.join(&name)).map_err(err)?;
-  send(&base, &folder, &name, bytes, quality, rename.unwrap_or(false), Some(on_progress)).await
+  send(&base, &folder, &name, bytes, rename.unwrap_or(false), Some(on_progress)).await
 }
 
 /// Raw IPC body bytes. Android's WebView can't expose request bodies to the IPC
@@ -190,7 +195,7 @@ fn body_bytes(request: &Request<'_>) -> Res<Vec<u8>> {
 }
 
 /// Send a file picked in the webview. Body = raw bytes; x-name / x-base /
-/// x-folder / x-quality / x-rename headers carry the rest (raw IPC avoids JSON-encoding MBs).
+/// x-folder / x-rename headers carry the rest (raw IPC avoids JSON-encoding MBs).
 #[tauri::command]
 pub async fn send_bytes(request: Request<'_>) -> Res<String> {
   let header = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok()).map(String::from);
@@ -198,10 +203,9 @@ pub async fn send_bytes(request: Request<'_>) -> Res<String> {
   let name = decode(header("x-name"))?;
   let base = decode(header("x-base"))?;
   let folder = decode(header("x-folder"))?;
-  let quality = header("x-quality").and_then(|q| q.parse().ok());
   let bytes = body_bytes(&request)?;
   let rename = header("x-rename").is_some_and(|v| v == "1");
-  send(&base, &folder, &name, bytes, quality, rename, None).await
+  send(&base, &folder, &name, bytes, rename, None).await
 }
 
 /// Save a generated file (share card PNG, clippings Markdown) to Downloads.
@@ -252,7 +256,6 @@ async fn send(
   folder: &str,
   name: &str,
   bytes: Vec<u8>,
-  quality: Option<u8>,
   rename: bool,
   progress: Option<Channel<Progress>>,
 ) -> Res<String> {
@@ -262,31 +265,12 @@ async fn send(
     }
   };
   let is_epub = name.to_ascii_lowercase().ends_with(".epub");
-  // "Rename from Book Metadata", like the reader's own upload page. Read from the
-  // original bytes, before the optimizer rewrites the archive.
+  // "Rename from Book Metadata", like the reader's own upload page.
   let name = match rename && is_epub {
     true => crate::epub_name::metadata_filename(&bytes).unwrap_or_else(|| name.to_string()),
     false => name.to_string(),
   };
   let name = name.as_str();
-  let bytes = match quality {
-    Some(q) if is_epub => {
-      let ch = progress.clone();
-      tauri::async_runtime::spawn_blocking(move || {
-        optimizer::optimize(&bytes, q.clamp(1, 100), &|done, total| {
-          if let Some(ch) = &ch {
-            let _ = ch.send(Progress::Optimizing { done, total });
-          }
-        })
-        // A book the optimizer can't parse still goes over as-is.
-        .unwrap_or(bytes)
-      })
-      .await
-      .map_err(err)?
-    }
-    _ => bytes,
-  };
-
   emit(Progress::Uploading);
   let part = reqwest::multipart::Part::bytes(bytes).file_name(name.to_string()).mime_str(mime_for(name)).map_err(err)?;
   let url = format!("{}/upload?path={}", base.trim_end_matches('/'), urlencoding_encode(folder));

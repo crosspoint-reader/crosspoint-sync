@@ -1,6 +1,7 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
 import { connect } from './device.js'
 import { ipcBytes } from './api.js'
+import { optimizeEpub } from './epub/optimize.js'
 
 // OPDS catalogs the user added. Stored per device.
 // ponytail: credentials sit in localStorage like the sync login; move both to the OS keychain together.
@@ -88,26 +89,40 @@ export const removeDownload = (name) => invoke('delete_download', { name })
 
 // Reader connection, cached briefly so a burst of sends doesn't re-resolve crosspoint.local each time.
 let cached = null
-export async function reader(prefs) {
-  if (cached && cached.host === prefs.host && Date.now() - cached.at < 60_000) return cached.base
-  const { base } = await connect(prefs.host)
-  cached = { host: prefs.host, base, at: Date.now() }
-  return base
+async function readerConnection(prefs) {
+  if (cached && cached.host === prefs.host && Date.now() - cached.at < 60_000) return cached
+  const { base, status } = await connect(prefs.host)
+  cached = { host: prefs.host, base, status, at: Date.now() }
+  return cached
 }
 
-const quality = (prefs) => (prefs.optimize ? prefs.quality : null)
+export async function reader(prefs) {
+  return (await readerConnection(prefs)).base
+}
+
+const shouldOptimize = (name, prefs) => prefs.optimize && /\.epub$/i.test(name)
 
 export async function sendDownload(name, prefs, progress = () => {}) {
-  const base = await reader(prefs)
-  return invoke('send_download', { name, base, folder: prefs.folder, quality: quality(prefs), rename: prefs.renameFromMetadata, onProgress: onProgress(progress) })
+  const connection = await readerConnection(prefs)
+  if (shouldOptimize(name, prefs)) {
+    const bytes = await invoke('read_download', { name })
+    const file = new File([new Uint8Array(bytes)], name, { type: 'application/epub+zip' })
+    return sendConnectedFile(file, prefs, connection, progress)
+  }
+  return invoke('send_download', { name, base: connection.base, folder: prefs.folder, rename: prefs.renameFromMetadata, onProgress: onProgress(progress) })
 }
 
-// Files picked in the webview go to Rust as raw bytes (optimizer, metadata rename and upload live there).
-// Both sends resolve to the file name used on the reader.
-export async function sendFile(file, prefs) {
-  const base = await reader(prefs)
+// Both send paths optimize in the WebView, then pass bytes to Rust for renaming/upload.
+async function sendConnectedFile(file, prefs, { base, status }, progress) {
+  if (shouldOptimize(file.name, prefs)) {
+    file = await optimizeEpub(file, { device: status.device, quality: prefs.quality, onProgress: progress })
+  }
   const headers = { 'x-name': encodeURIComponent(file.name), 'x-base': encodeURIComponent(base), 'x-folder': encodeURIComponent(prefs.folder) }
-  if (prefs.optimize) headers['x-quality'] = String(prefs.quality)
   if (prefs.renameFromMetadata) headers['x-rename'] = '1'
+  progress({ stage: 'uploading' })
   return invoke('send_bytes', await ipcBytes(file), { headers })
+}
+
+export async function sendFile(file, prefs, progress = () => {}) {
+  return sendConnectedFile(file, prefs, await readerConnection(prefs), progress)
 }
