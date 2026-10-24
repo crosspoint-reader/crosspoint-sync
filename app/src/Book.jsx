@@ -254,9 +254,16 @@ function Clippings({ session, book, revision = 0 }) {
 // Letters, marks and digits of every script: an ASCII-only pattern reduces Japanese titles to their
 // digits, and dropping marks merges Thai or Hindi words that differ only in a tone or vowel sign.
 const norm = (s) => (s ?? '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, ' ').trim()
-// Same normalized title (and author when both have one): probably the same book synced twice.
+// Language only by its main subtag ("en" and "en-GB" match). Unknown on either side counts as a match.
+const sameLanguage = (a, b) => !a || !b || a.split('-')[0].toLowerCase() === b.split('-')[0].toLowerCase()
+// Same normalized title (and author and language when both have one): probably the same book synced
+// twice. Editions in two languages can share a title, e.g. "1984" in English and in German.
 export const looksLikeSame = (a, b) =>
-  a.document !== b.document && norm(a.title) && norm(a.title) === norm(b.title) && (!a.author || !b.author || norm(a.author) === norm(b.author))
+  a.document !== b.document &&
+  norm(a.title) &&
+  norm(a.title) === norm(b.title) &&
+  (!a.author || !b.author || norm(a.author) === norm(b.author)) &&
+  sameLanguage(a.language, b.language)
 
 const field =
   'h-11 w-full rounded-xl bg-surface px-3 text-base text-stone-900 ring-1 ring-stone-950/10 outline-none placeholder:text-stone-400 focus:ring-2 focus:ring-brand-500/60'

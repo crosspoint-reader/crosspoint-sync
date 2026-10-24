@@ -65,6 +65,18 @@ describe('duplicate notice', () => {
     expect(container.textContent).not.toContain('appears more than once')
   })
 
+  it('tells the same title apart when the languages differ', () => {
+    const books = [{ ...book('en', '1984'), language: 'en' }, { ...book('de', '1984'), language: 'de' }]
+    const { container } = render(<Library session={session} books={books} />)
+    expect(container.textContent).not.toContain('appears more than once')
+  })
+
+  it('treats a regional variant as the same language', () => {
+    const books = [{ ...book('a', '1984'), language: 'en' }, { ...book('b', '1984'), language: 'en-GB' }]
+    const { container } = render(<Library session={session} books={books} />)
+    expect(container.textContent).toContain('appears more than once')
+  })
+
   it('still finds a Japanese title synced twice, full-width forms included', () => {
     const books = [book('a', '変な家２　～11の間取り図～'), book('b', '変な家2 ~11の間取り図~')]
     const { container } = render(<Library session={session} books={books} />)
