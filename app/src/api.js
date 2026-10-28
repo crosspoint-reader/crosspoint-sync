@@ -204,6 +204,20 @@ function cacheClippingsHub(s, data) {
   keep(key, { ...data, savedAt })
 }
 
+function invalidateClippingCaches(s, documents) {
+  const hubKey = `${OFFLINE}${s.username}@${s.server}/api/v1/clippings`
+  // The hub's document identities and both complete book copies are no longer
+  // authoritative after a merge. A subsequent fetch resolves server conflicts.
+  localStorage.removeItem(hubKey)
+  localStorage.removeItem(`${hubKey}:saved-at`)
+  for (const key of Object.keys(localStorage)) {
+    if (documents.some((doc) => {
+      const bookKey = `${hubKey}/${doc}`
+      return key === bookKey || key === `${bookKey}:saved-at` || key.startsWith(`${bookKey}?`)
+    })) localStorage.removeItem(key)
+  }
+}
+
 const PROGRESS = '/api/v1/progress?limit=500'
 
 function removeCachedBook(session, document) {
@@ -475,7 +489,16 @@ export const api = {
   setInfo: (s, doc, patch) => call(s, `/api/v1/documents/${doc}/info`, { method: 'PUT', body: JSON.stringify(patch) }),
   coverCandidates: (s, doc, q) => call(s, `/api/v1/documents/${doc}/cover/candidates${q ? `?q=${encodeURIComponent(q)}` : ''}`).then((r) => r.items),
   // `document` becomes an alias of `into`: its progress, clippings and stats move there.
-  merge: (s, document, into, stats = true) => call(s, '/api/v1/documents/merge', { method: 'POST', body: JSON.stringify({ document, into, stats }) }),
+  async merge(s, document, into, stats = true) {
+    const version = sessionVersion
+    const result = await call(s, '/api/v1/documents/merge', { method: 'POST', body: JSON.stringify({ document, into, stats }) })
+    if (version === sessionVersion) {
+      readingVersion++
+      invalidateClippingCaches(s, [document, into])
+      await syncShortcutsCache(s)?.catch(() => {})
+    }
+    return result
+  },
   unmerge: (s, alias) => call(s, `/api/v1/documents/merge/${alias}`, { method: 'DELETE' }),
   // Every clipping across books; older servers without /clippings get fetched book by book.
   async allClippings(s, books) {

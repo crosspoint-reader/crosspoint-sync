@@ -677,3 +677,64 @@ it('retains both old book data and freshness when a replacement exceeds quota', 
     storage.mockRestore()
   }
 })
+
+it('invalidates merged clipping caches before reloads and preserves unrelated per-book copies', async () => {
+  const prefix = 'crosspoint-offline:v2:reader@https://sync.test'
+  http.mockResolvedValueOnce(response({ items: [book, { ...book, document: 'two' }] }))
+  await api.books(session)
+  http.mockResolvedValueOnce(response({ items: [{ document: 'one', id: 'source' }, { document: 'two', id: 'target' }] }))
+  await api.allClippings(session, [])
+  for (const doc of ['one', 'two', 'other']) {
+    http.mockResolvedValueOnce(response({ items: [{ id: doc }], more: false }))
+    await api.clippings(session, doc)
+  }
+  localStorage.setItem(`${prefix}/api/v1/clippings/one?cursor=0&limit=100`, JSON.stringify({ items: [{ id: 'legacy' }] }))
+  http.mockResolvedValueOnce(response({ ok: true }))
+  await api.merge(session, 'one', 'two')
+  expect(localStorage.getItem(`${prefix}/api/v1/clippings`)).toBeNull()
+  expect(Object.keys(localStorage).some((key) => /^.*\/clippings\/(one|two)([?:]|$)/.test(key))).toBe(false)
+  expect(localStorage.getItem(`${prefix}/api/v1/clippings/other`)).not.toBeNull()
+  expect(snapshot().clippings.items.map((c) => c.document)).toEqual(['other'])
+  // Successful library reload cannot expose passages under an obsolete identity.
+  http.mockResolvedValueOnce(response({ items: [{ ...book, document: 'two' }] }))
+  await api.books(session)
+  http.mockRejectedValueOnce(new Error('offline'))
+  await expect(api.clippings(session, 'two')).rejects.toThrow('offline')
+  await flush()
+  expect(snapshot().clippings.items.map((c) => c.document)).toEqual(['other'])
+})
+
+it('rejects clipping reads started before a merge', async () => {
+  let resolve
+  http.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+  const pending = api.allClippings(session, [])
+  const rejected = expect(pending).rejects.toThrow('Reading data changed')
+  http.mockResolvedValueOnce(response({ ok: true }))
+  await api.merge(session, 'one', 'two')
+  resolve(response({ items: [{ document: 'one', id: 'old' }] }))
+  await rejected
+  expect(snapshot().clippings).toBeNull()
+})
+
+it('keeps clipping caches when a merge fails', async () => {
+  http.mockResolvedValueOnce(response({ items: [{ document: 'one', id: 'keep' }] }))
+  await api.allClippings(session, [])
+  await flush()
+  const previous = snapshot()
+  http.mockRejectedValueOnce(new Error('offline'))
+  await expect(api.merge(session, 'one', 'two')).rejects.toThrow('offline')
+  expect(snapshot()).toEqual(previous)
+})
+
+it('ignores an old session merge completion', async () => {
+  let resolve
+  http.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+  const pending = api.merge(session, 'one', 'two')
+  logout()
+  http.mockResolvedValueOnce(response({ items: [{ document: 'one', id: 'new-session' }] }))
+  await api.allClippings(session, [])
+  resolve(response({ ok: true }))
+  await pending
+  await flush()
+  expect(snapshot().clippings.items.map((c) => c.id)).toEqual(['new-session'])
+})
