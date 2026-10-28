@@ -738,3 +738,93 @@ it('ignores an old session merge completion', async () => {
   await flush()
   expect(snapshot().clippings.items.map((c) => c.id)).toEqual(['new-session'])
 })
+
+it('retains complete hub deletion evidence when a later hub reaches its cap', async () => {
+  const key = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/clippings'
+  const old = [{ id: 'deleted', text: 'Gone' }, { id: 'kept', text: 'Old text' }]
+  localStorage.setItem(`${key}/one`, JSON.stringify({ items: old, savedAt: 100 }))
+  localStorage.setItem(`${key}/one?cursor=0&limit=100`, JSON.stringify({ items: old, more: false }))
+  localStorage.setItem(`${key}/empty?cursor=0&limit=100`, JSON.stringify({ items: [{ id: 'also-deleted' }], more: false }))
+  const now = vi.spyOn(Date, 'now').mockReturnValue(200)
+  try {
+    http.mockResolvedValueOnce(response({ items: [{ document: 'one', id: 'kept', text: 'Edited text' }] }))
+    await api.allClippings(session, [])
+    now.mockReturnValue(300)
+    http.mockResolvedValueOnce(response({ items: Array.from({ length: 5000 }, (_, i) => ({ document: 'other', id: `c${i}` })) }))
+    await api.allClippings(session, [])
+    await flush()
+    expect(snapshot().clippings.items.filter((c) => c.document === 'one')).toMatchObject([{ id: 'kept', text: 'Edited text', cachedAt: 200 }])
+    expect(snapshot().clippings.items.some((c) => c.id === 'deleted' || c.id === 'also-deleted')).toBe(false)
+    http.mockRejectedValue(new Error('offline'))
+    expect(await api.clippings(session, 'one')).toEqual([{ id: 'kept', text: 'Edited text' }])
+    expect(await api.clippings(session, 'empty')).toEqual([])
+  } finally {
+    now.mockRestore()
+  }
+})
+
+it('preserves per-book data newer than a complete cached hub', async () => {
+  const key = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/clippings'
+  localStorage.setItem(key, JSON.stringify({ items: [], savedAt: 100 }))
+  const recent = { items: [{ id: 'newer' }], savedAt: 200 }
+  localStorage.setItem(`${key}/one`, JSON.stringify(recent))
+  http.mockRejectedValueOnce(new Error('offline'))
+  await api.allClippings(session, [])
+  await flush()
+  expect(JSON.parse(localStorage.getItem(`${key}/one`))).toEqual(recent)
+  expect(snapshot().clippings.items).toMatchObject([{ id: 'newer', cachedAt: 200 }])
+})
+
+it('preserves hub freshness when reconciling older book copies offline', async () => {
+  const key = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/clippings'
+  localStorage.setItem(key, JSON.stringify({ items: [], savedAt: 200 }))
+  localStorage.setItem(`${key}/one`, JSON.stringify({ items: [{ id: 'deleted' }], savedAt: 100 }))
+  http.mockRejectedValueOnce(new Error('offline'))
+  await api.allClippings(session, [])
+  expect(JSON.parse(localStorage.getItem(`${key}/one`))).toEqual({ items: [], savedAt: 200 })
+})
+
+it('keeps book clipping order and extra location fields when reconciling a hub', async () => {
+  const key = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/clippings'
+  localStorage.setItem(`${key}/one`, JSON.stringify({ items: [{ id: 'first', spine: 1, start_page: 12, color: 'yellow' }], savedAt: 100 }))
+  http.mockResolvedValueOnce(response({ items: [
+    { document: 'one', id: 'last', spine: 2, text: 'Later passage' },
+    { document: 'one', id: 'first', spine: 1, text: 'Edited passage' },
+  ] }))
+  await api.allClippings(session, [])
+  http.mockRejectedValueOnce(new Error('offline'))
+  expect(await api.clippings(session, 'one')).toEqual([
+    { id: 'first', spine: 1, start_page: 12, color: 'yellow', text: 'Edited passage' },
+    { id: 'last', spine: 2, text: 'Later passage' },
+  ])
+})
+
+it('discards disproven copies if replacing them from the hub fails', async () => {
+  const key = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/clippings'
+  localStorage.setItem(`${key}/one`, JSON.stringify({ items: [{ id: 'deleted' }], savedAt: 100 }))
+  const proto = Object.getPrototypeOf(localStorage)
+  const setItem = proto.setItem
+  const storage = vi.spyOn(proto, 'setItem').mockImplementation(function (k, value) {
+    if (k === `${key}/one`) throw new DOMException('Quota exceeded', 'QuotaExceededError')
+    return setItem.call(this, k, value)
+  })
+  try {
+    http.mockResolvedValueOnce(response({ items: [] }))
+    await api.allClippings(session, [])
+    await flush()
+    expect(localStorage.getItem(`${key}/one`)).toBeNull()
+    expect(snapshot().clippings.items).toEqual([])
+  } finally {
+    storage.mockRestore()
+  }
+})
+
+it('preserves a book copy with an equal timestamp when replaying an offline hub', async () => {
+  const key = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/clippings'
+  localStorage.setItem(key, JSON.stringify({ items: [], savedAt: 200 }))
+  const per = { items: [{ id: 'possibly-newer' }], savedAt: 200 }
+  localStorage.setItem(`${key}/one`, JSON.stringify(per))
+  http.mockRejectedValueOnce(new Error('offline'))
+  await api.allClippings(session, [])
+  expect(JSON.parse(localStorage.getItem(`${key}/one`))).toEqual(per)
+})

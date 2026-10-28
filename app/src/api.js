@@ -127,8 +127,10 @@ function keep(key, data, timestampSaved = false) {
   try {
     localStorage.setItem(key, JSON.stringify(data))
     if (timestampSaved) localStorage.setItem(`${key}:saved-at`, JSON.stringify(Date.now()))
+    return true
   } catch {
     // storage full: offline copy just stays older
+    return false
   }
 }
 
@@ -150,6 +152,8 @@ function removeCachedClipping(session, document, id) {
   }
 }
 
+const clippingOrder = (a, b) => a.spine - b.spine || (a.start_offset ?? a.para ?? a.start_page) - (b.start_offset ?? b.para ?? b.start_page)
+
 // Stage complete clipping reads so a failed legacy batch cannot alter later snapshots.
 async function readClippings(s, doc) {
   const complete = saved(s, `/api/v1/clippings/${doc}`)
@@ -169,17 +173,16 @@ async function readClippings(s, doc) {
     offline.dispatchEvent(new Event('offline'))
     return { items: complete.items, fromCache: true }
   }
-  const live = items.filter((c) => !c.deleted)
-    .sort((a, b) => a.spine - b.spine || (a.start_offset ?? a.para ?? a.start_page) - (b.start_offset ?? b.para ?? b.start_page))
+  const live = items.filter((c) => !c.deleted).sort(clippingOrder)
   return { items: live, fromCache }
 }
 
-function cacheClippings(s, doc, result) {
+function cacheClippings(s, doc, result, savedAt = Date.now()) {
   const key = `${OFFLINE}${s.username}@${s.server}/api/v1/clippings/${doc}`
   const previous = result.fromCache && read(key)
   const record = previous
     ? { items: previous.items, savedAt: Object.hasOwn(previous, 'savedAt') ? previous.savedAt : read(`${key}:saved-at`) }
-    : { items: result.items, savedAt: result.fromCache ? null : Date.now() }
+    : { items: result.items, savedAt: result.fromCache ? null : savedAt }
   // Store one complete representation, including freshness. Free legacy page
   // copies first so migration doesn't require twice the payload's storage quota.
   const legacy = Object.keys(localStorage).filter((k) => k.startsWith(`${key}?`) || k === `${key}:saved-at`)
@@ -187,11 +190,13 @@ function cacheClippings(s, doc, result) {
   for (const [k] of legacy) localStorage.removeItem(k)
   try {
     localStorage.setItem(key, JSON.stringify(record))
+    return true
   } catch {
     // setItem is atomic; the prior aggregate remains. Restore legacy fallbacks.
     for (const [k, value] of legacy) {
       try { localStorage.setItem(k, value) } catch { /* storage unavailable */ }
     }
+    return false
   }
 }
 
@@ -201,7 +206,30 @@ function cacheClippingsHub(s, data) {
     ? Object.hasOwn(data, 'savedAt') ? data.savedAt : read(`${key}:saved-at`)
     : Date.now()
   // One atomic write keeps payload and freshness consistent even at quota.
-  keep(key, { ...data, savedAt })
+  if (!keep(key, { ...data, savedAt }) || !Number.isFinite(savedAt) || data.truncated || data.items.length >= 5000) return
+  // A complete hub proves both presence and absence for every older book copy.
+  // Persist that knowledge before a later capped response can use those copies.
+  const documents = new Set(Object.keys(localStorage).filter((k) => k.startsWith(`${key}/`))
+    .map((k) => k.slice(key.length + 1).split('?')[0].replace(/:saved-at$/, '')))
+  const byDocument = new Map()
+  for (const c of data.items) {
+    if (!byDocument.has(c.document)) byDocument.set(c.document, [])
+    byDocument.get(c.document).push(c)
+  }
+  for (const doc of documents) {
+    const bookKey = `${key}/${doc}`
+    const per = read(bookKey)
+    const at = per && Object.hasOwn(per, 'savedAt') ? per.savedAt : read(`${bookKey}:saved-at`)
+    if ((at ?? 0) > savedAt || (offlineCopies.has(data) && at === savedAt)) continue
+    const previous = new Map(per?.items.map((c) => [c.id, c]) ?? [])
+    const items = (byDocument.get(doc) ?? []).map(({ document, ...c }) => ({ ...previous.get(c.id), ...c })).sort(clippingOrder)
+    if (!cacheClippings(s, doc, { items, fromCache: false }, savedAt)) {
+      // Failed replacement must not leave a disproven copy available to revive.
+      for (const k of Object.keys(localStorage)) {
+        if (k === bookKey || k === `${bookKey}:saved-at` || k.startsWith(`${bookKey}?`)) localStorage.removeItem(k)
+      }
+    }
+  }
 }
 
 function invalidateClippingCaches(s, documents) {
