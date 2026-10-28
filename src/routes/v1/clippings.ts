@@ -6,6 +6,7 @@ import { isItemId, nowSeconds, parseListParams } from '../../models/sync.js';
 import { fanOutHighlight, highlightFromRow, type ClippingHighlightRow } from '../../connectors/fanout.js';
 import { documentMeta } from '../../connectors/store.js';
 import { clippingDocuments, mergedClippingsCte, resolveDocument } from '../../models/merge.js';
+import { scheduleMicroblogClippings } from '../../connectors/microblog-clippings.js';
 
 const MAX_BATCH = 50;
 const MAX_TEXT = 4096; // full firmware clipping, not the text-export cap
@@ -81,6 +82,7 @@ export function clippingRoutes(db: DB): Hono<AppEnv> {
     if (!Number.isSafeInteger(cursor) || cursor < 0) return kosyncError(c, 403, 2003, 'Invalid cursor');
     const revisionMode = cursorRaw !== undefined;
     const canonical = resolveDocument(db, user.id, document);
+    scheduleMicroblogClippings(db, user.id, canonical);
     const documents = clippingDocuments(db, user.id, canonical);
     const rows = db
       .prepare(
@@ -278,6 +280,7 @@ export function clippingRoutes(db: DB): Hono<AppEnv> {
         );
       }
     }
+    scheduleMicroblogClippings(db, user.id, canonical);
     return c.json({ until: now, accepted: ops.length });
   });
 

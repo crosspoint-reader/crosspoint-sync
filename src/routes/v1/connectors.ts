@@ -35,6 +35,8 @@ import { ConnectorOperationError, type HttpTransport } from '../../connectors/ty
 import { importBookorbitStats } from '../../connectors/bookorbit-stats.js';
 import { resolveDocument } from '../../models/merge.js';
 import { hasDocumentData } from '../../models/document.js';
+import { selectMicroblogClipping, scheduleMicroblogClippings } from '../../connectors/microblog-clippings.js';
+import { isItemId } from '../../models/sync.js';
 
 /** Where a provider sends the browser back: one https URL for web and native (an app link there). */
 export const oauthCallbackPath = (id: string) => `/connectors/${id}/callback`;
@@ -458,6 +460,22 @@ export function connectorRoutes(
     }
   });
 
+  app.post('/connectors/microblog/clippings/:document/:clippingId', (c) => {
+    const user = c.get('user');
+    const account = getAccount(db, user.id, 'microblog');
+    if (!account?.enabled) return c.json({ message: 'Micro.blog is not linked or enabled' }, 400);
+    const document = c.req.param('document');
+    const clippingId = c.req.param('clippingId');
+    if (!isValidDocument(document) || !isItemId(clippingId)) return c.json({ message: 'Invalid clipping' }, 400);
+    const canonical = resolveDocument(db, user.id, document);
+    try { selectMicroblogClipping(db, user.id, canonical, clippingId); }
+    catch { return c.json({ message: 'Clipping not found' }, 404); }
+    const state = db.prepare('SELECT error FROM microblog_clipping_posts WHERE user_id=? AND document=?').get(user.id, canonical) as { error: string | null } | undefined;
+    if (state?.error) return c.json({ message: state.error }, 409);
+    const queued = scheduleMicroblogClippings(db, user.id, canonical) > 0;
+    return c.json({ queued, waiting_for_match: !getMatch(db, user.id, 'microblog', canonical)?.external_id });
+  });
+
   // Change a linked connector's options. Unknown keys and bad values are ignored.
   app.put('/connectors/:id/options', async (c) => {
     const conn = getConnector(c.req.param('id'));
@@ -483,6 +501,7 @@ export function connectorRoutes(
         }
       }
     });
+    if (conn.id === 'microblog') scheduleMicroblogClippings(db, user.id);
     return c.json({ id: conn.id, option_values: next });
   });
 

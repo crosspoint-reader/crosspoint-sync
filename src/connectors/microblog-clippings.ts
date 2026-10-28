@@ -185,7 +185,7 @@ export async function publishMicroblogClippings(
     if (!token) throw new ConnectorOperationError('Missing Micro.blog token', false, true);
     // Caller resolves a verified ISBN; internal bookshelf IDs are never used as ISBNs.
     const isbn = match.externalEdition;
-    if (!isbn || !/^(?:\d{13}|\d{9}[\dXx])$/.test(isbn)) return permanent('Micro.blog book ISBN is unavailable; choose a book match with an ISBN.');
+    if (!isbn || !/^(?:\d{13}|\d{9}[\dXx])$/.test(isbn)) return { ok: false, retryable: false, error: 'Micro.blog book ISBN is unavailable; choose a book match with an ISBN.' };
     const selected = passages(db, userId, document);
     const rendered = microblogClippingsContent(db, userId, document, `https://micro.blog/books/${encodeURIComponent(isbn)}`);
     if (!rendered) return { ok: true };

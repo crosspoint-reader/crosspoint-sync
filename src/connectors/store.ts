@@ -25,7 +25,12 @@ export function upsertAccount(
   now = nowSeconds()
 ): void {
   const enc = encryptSecret(JSON.stringify(cred));
-  const previous = connectorId === 'bookorbit' ? getAccount(db, userId, connectorId) : null;
+  const previous = connectorId === 'bookorbit' || connectorId === 'microblog' ? getAccount(db, userId, connectorId) : null;
+  let changedMicroblogAccount = false;
+  if (connectorId === 'microblog' && previous) {
+    try { changedMicroblogAccount = decryptCredential(previous).token !== cred.token; }
+    catch { changedMicroblogAccount = true; }
+  }
   let sameOrbitAccount = false;
   if (previous) {
     try {
@@ -34,6 +39,11 @@ export function upsertAccount(
     } catch { /* Reconnecting also recovers an unreadable old credential. */ }
   }
   withTransaction(db, () => {
+    if (changedMicroblogAccount) {
+      for (const table of ['microblog_clipping_selections', 'microblog_clipping_posts']) db.prepare(`DELETE FROM ${table} WHERE user_id=?`).run(userId);
+      for (const table of ['connector_matches', 'connector_queue']) db.prepare(`DELETE FROM ${table} WHERE user_id=? AND connector_id='microblog'`).run(userId);
+      db.prepare("UPDATE connector_accounts SET options='{}' WHERE user_id=? AND connector_id='microblog'").run(userId);
+    }
     db.prepare(
       `INSERT INTO connector_accounts
          (user_id, connector_id, cred_enc, account_label, status, enabled, created_at, updated_at)
@@ -90,6 +100,9 @@ export function decryptCredential(row: AccountRow, db?: DB): Credential {
 }
 
 export function deleteAccount(db: DB, userId: number, connectorId: string): void {
+  if (connectorId === 'microblog') {
+    for (const table of ['microblog_clipping_selections', 'microblog_clipping_posts']) db.prepare(`DELETE FROM ${table} WHERE user_id=?`).run(userId);
+  }
   db.prepare('DELETE FROM connector_accounts WHERE user_id = ? AND connector_id = ?').run(
     userId,
     connectorId
