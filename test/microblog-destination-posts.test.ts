@@ -10,6 +10,7 @@ afterEach(() => { delete process.env.TOKEN_ENC_KEY; resetEncryptionKeyCache(); }
 const a = 'https://first.micro.blog/'; const b = 'https://second.micro.blog/';
 async function setup() {
   let blogs = [a, b]; let sourceStatus = 200;
+  let updateStatus = 200; let updateDescription = 'No post found for this URL.';
   const writes: { destination: string | null; body: any }[] = [];
   const requests: string[] = [];
   let onCreate: (() => Promise<void>) | undefined;
@@ -25,6 +26,7 @@ async function setup() {
       else {
         const data = JSON.parse(init.body!); writes.push({ destination, body: data });
         if (!data.action) { await onCreate?.(); status = 201; location = `${destination || a}post.html`; }
+        else if (data.action === 'update') { status = updateStatus; body = { error: 'invalid_request', error_description: updateDescription }; }
       }
     }
     return { status, headers: { get: () => location }, json: async () => body, text: async () => JSON.stringify(body) };
@@ -43,6 +45,7 @@ async function setup() {
   const status = async () => (await app.request('/api/v1/connectors/microblog/clipping-posts', { headers })).json();
   return { db, app, uid, headers, http, writes, requests, choose, sync, recreate, status,
     setBlogs: (value: string[]) => { blogs = value; }, missing: (code = 404) => { sourceStatus = code; },
+    updateFailure: (code: number, description = 'No post found for this URL.') => { updateStatus = code; updateDescription = description; },
     onCreate: (fn: () => Promise<void>) => { onCreate = fn; },
     onDiscover: (fn: () => void) => { onDiscover = fn; },
     change: () => db.prepare('UPDATE clippings SET note=? WHERE user_id=?').run('New annotation', uid) };
@@ -98,6 +101,27 @@ it.each([401, 403, 429, 500])('does not offer recreation for an unconfirmed dele
   const s = await setup(); await s.choose(b); await s.sync(); s.missing(code); s.change(); await s.sync();
   expect(await s.status()).toMatchObject({ items: [{ missing: false }] });
   expect((await s.recreate()).status).not.toBe(200); expect(s.writes).toHaveLength(1); s.db.close();
+});
+it.each([404, 400])('offers explicit recreation when the update reports a deleted post after a successful lookup (%s)', async (code) => {
+  const s = await setup(); await s.choose(b); await s.sync();
+  s.updateFailure(code); s.change(); await s.sync();
+  expect(await s.status()).toMatchObject({ items: [{ document: DOC, missing: true, destination: b, url: `${b}post.html` }] });
+  await s.sync(); expect(s.writes).toHaveLength(2); // No automatic recreation.
+  s.missing();
+  expect((await s.recreate()).status).toBe(200);
+  await drainQueue(s.db, s.http);
+  expect(s.writes.filter((w) => !w.body.action)).toHaveLength(2);
+  expect(JSON.stringify(s.writes[2])).toContain('New annotation');
+  expect(await s.status()).toMatchObject({ items: [{ missing: false, error: null }] });
+  s.db.close();
+});
+it.each([400, 401, 403, 429, 500])('does not mark an unrelated update failure as deletion (%s)', async (code) => {
+  const s = await setup(); await s.choose(b); await s.sync();
+  s.updateFailure(code, 'Unsupported content format'); s.change(); await s.sync();
+  expect(await s.status()).toMatchObject({ items: [{ missing: false, url: `${b}post.html` }] });
+  expect((await s.recreate()).status).toBe(409);
+  expect(s.writes.filter((w) => !w.body.action)).toHaveLength(1);
+  s.db.close();
 });
 it('recreates on the current clippings blog when explicitly chosen and pins later updates there', async () => {
   const s = await setup(); await s.choose(b); await s.sync(); s.missing(); s.change(); await s.sync();

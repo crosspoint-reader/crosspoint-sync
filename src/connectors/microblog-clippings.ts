@@ -154,8 +154,9 @@ async function micropub(http: HttpTransport, token: string, destination: string,
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
   } catch { throw new ConnectorOperationError(`Micro.blog Micropub ${operation} connection failed; the next attempt will check for an existing post.`, true); }
-  if (sourceLookup && res.status === 404) throw new MissingMicroblogPost();
-  if (sourceLookup && res.status === 400) {
+  const existingPost = sourceLookup || operation === 'update';
+  if (existingPost && res.status === 404) throw new MissingMicroblogPost();
+  if (existingPost && res.status === 400) {
     const failure = await res.json().catch(() => null) as { error?: string; error_description?: string } | null;
     if (failure?.error === 'invalid_request' && /no post|not found|does not exist|could not find|unknown.*url/i.test(failure.error_description || '')) throw new MissingMicroblogPost();
   }
