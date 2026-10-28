@@ -18,6 +18,9 @@ remote collection post.
 
 ## Agreed behavior
 
+- Title collected clipping posts **📚 Highlights from {book title}**, as requested
+  for Micro.blog discovery. Apply this to new and recreated posts and to existing
+  collection posts when they are next updated.
 - Show **Post highlights to** under the linked Micro.blog plugin. Populate it
   from the token's authenticated Micropub `q=config` destination list.
 - Automatically select the sole available blog. When multiple blogs are
@@ -58,7 +61,8 @@ remote collection post.
 
 ## Verification
 
-Test selection among several blogs, sole-blog selection, invalid/revoked
+Test the 📚 title prefix on creation, recreation, and updates. Test selection
+among several blogs, sole-blog selection, invalid/revoked
 destinations, manual and automatic posting, explicit destination on every request,
 changing the choice while creation is in flight, existing collections staying on
 their original blog, legacy post identification, same-account token rotation,
