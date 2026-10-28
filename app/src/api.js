@@ -121,6 +121,23 @@ function keep(key, data, timestampSaved = false) {
   }
 }
 
+// Remove a successful deletion from every saved representation of that book.
+function removeCachedClipping(session, document, id) {
+  const hubKey = `${OFFLINE}${session.username}@${session.server}/api/v1/clippings`
+  const bookKey = `${hubKey}/${document}`
+  for (const key of Object.keys(localStorage)) {
+    const hub = key === hubKey
+    if (!hub && key !== bookKey && !key.startsWith(`${bookKey}?`)) continue
+    const data = read(key)
+    if (!Array.isArray(data?.items)) continue
+    const items = data.items.filter((c) => c.id !== id || (hub && c.document !== document))
+    if (items.length === data.items.length) continue
+    // Removing one item doesn't make a capped response a complete collection.
+    const truncated = hub && data.items.length >= 5000 ? { truncated: true } : {}
+    keep(key, { ...data, ...truncated, items })
+  }
+}
+
 const PROGRESS = '/api/v1/progress?limit=500'
 
 // Every synced book: follows the server's pages, then saves the whole list as the first page's offline copy.
@@ -230,7 +247,7 @@ export function syncShortcutsCache(session) {
     const at = read(`${key}:saved-at`)
     if (!per) continue
     if (all && (at ?? 0) < (allAt ?? 0)) {
-      if (all.items.length >= 5000) {
+      if (all.truncated || all.items.length >= 5000) {
         // The capped hub cannot establish that omitted passages were deleted.
         const known = new Set(clippings.items.filter((c) => c.document === doc).map((c) => c.id))
         clippings.items.push(...per.items.filter((c) => !known.has(c.id)).map((c) => ({ ...c, document: doc, cachedAt: at })))
@@ -242,7 +259,7 @@ export function syncShortcutsCache(session) {
     clippings.items.push(...per.items.map((c) => ({ ...c, document: doc, cachedAt: at })))
   }
   // Allowlist fields rather than exposing server responses or session credentials.
-  publishShortcuts({
+  return publishShortcuts({
     account: JSON.stringify([session.server, session.username]),
     books: books ? {
       savedAt: read(`${prefix}${PROGRESS}:saved-at`),
@@ -375,8 +392,15 @@ export const api = {
       return per.flat().sort((a, b) => b.created_at - a.created_at)
     }
   },
-  deleteClipping: (s, doc, id) =>
-    call(s, `/api/v1/clippings/${doc}`, { method: 'PUT', body: JSON.stringify({ items: [{ id, deleted: 1 }] }) }),
+  async deleteClipping(s, doc, id) {
+    const version = sessionVersion
+    const result = await call(s, `/api/v1/clippings/${doc}`, { method: 'PUT', body: JSON.stringify({ items: [{ id, deleted: 1 }] }) })
+    if (version === sessionVersion) {
+      removeCachedClipping(s, doc, id)
+      await syncShortcutsCache(s)
+    }
+    return result
+  },
   setStatus: (s, doc, status) =>
     call(s, `/api/v1/documents/${doc}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
   async clippings(s, doc, { syncShortcuts = true } = {}) {

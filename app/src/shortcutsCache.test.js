@@ -238,3 +238,56 @@ it('does not clear a newly selected account after a delayed old-account clearDat
   expect(snapshot().account).toBe('["https://sync.test","other"]')
   expect(apiModule.cached.books(other)).toHaveLength(1)
 })
+it('removes known deleted clips from hub, per-book and page caches without losing older book history', async () => {
+  const prefix = 'crosspoint-offline:v2:reader@https://sync.test'
+  const clips = [{ id: 'remove', text: 'Deleted', created_at: 2 }, { id: 'keep', text: 'Older passage', created_at: 1 }]
+  const hub = [{ ...clips[0], document: 'one' }, ...Array.from({ length: 4999 }, (_, i) => ({
+    document: 'two', id: i === 0 ? 'remove' : `other-${i}`, text: 'Other book', created_at: 3,
+  }))]
+  localStorage.setItem(`${prefix}/api/v1/progress?limit=500`, JSON.stringify({ items: [book] }))
+  localStorage.setItem(`${prefix}/api/v1/clippings`, JSON.stringify({ items: hub }))
+  localStorage.setItem(`${prefix}/api/v1/clippings:saved-at`, '200')
+  localStorage.setItem(`${prefix}/api/v1/clippings/one`, JSON.stringify({ items: clips }))
+  localStorage.setItem(`${prefix}/api/v1/clippings/one:saved-at`, '100')
+  localStorage.setItem(`${prefix}/api/v1/clippings/one?cursor=0&limit=100`, JSON.stringify({ items: clips, more: false }))
+  apiModule.syncShortcutsCache(session)
+  await flush()
+  http.mockResolvedValueOnce(response({ ok: true }))
+  await api.deleteClipping(session, 'one', 'remove')
+  await flush()
+  expect(snapshot().clippings.items.some((c) => c.document === 'one' && c.id === 'remove')).toBe(false)
+  expect(snapshot().clippings.items.some((c) => c.document === 'one' && c.id === 'keep')).toBe(true)
+  expect(snapshot().clippings.items.some((c) => c.document === 'two' && c.id === 'remove')).toBe(true)
+  expect(localStorage.getItem(`${prefix}/api/v1/clippings/one:saved-at`)).toBe('100')
+  // A subsequent capped hub refresh must not resurrect the deleted per-book item.
+  http.mockResolvedValueOnce(response({ items: [...hub.slice(1), { document: 'two', id: 'extra', text: 'Newest', created_at: 4 }] }))
+  await api.allClippings(session, [])
+  await flush()
+  expect(snapshot().clippings.items.filter((c) => c.document === 'one').map((c) => c.id)).toEqual(['keep'])
+  // Cached pages must also be pruned, or an offline book open could restore it.
+  http.mockRejectedValue(new Error('offline'))
+  expect((await api.clippings(session, 'one')).map((c) => c.id)).toEqual(['keep'])
+})
+it('retains clipping caches when a server deletion fails', async () => {
+  http.mockResolvedValueOnce(response({ items: [{ id: 'keep', text: 'Saved' }], more: false }))
+  await api.clippings(session, 'one')
+  await flush()
+  const before = snapshot()
+  http.mockRejectedValueOnce(new Error('offline'))
+  await expect(api.deleteClipping(session, 'one', 'keep')).rejects.toThrow('offline')
+  await flush()
+  expect(snapshot()).toEqual(before)
+})
+it('does not republish the old account when its clipping deletion completes after switching accounts', async () => {
+  let finishDelete
+  http.mockReturnValueOnce(new Promise((r) => { finishDelete = r }))
+  const pending = api.deleteClipping(session, 'one', 'old')
+  logout()
+  const other = { ...session, username: 'other' }
+  http.mockResolvedValueOnce(response({ items: [book] }))
+  await api.books(other)
+  finishDelete(response({ ok: true }))
+  await pending
+  await flush()
+  expect(snapshot().account).toBe('["https://sync.test","other"]')
+})
