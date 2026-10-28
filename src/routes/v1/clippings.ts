@@ -82,7 +82,12 @@ export function clippingRoutes(db: DB): Hono<AppEnv> {
     if (!Number.isSafeInteger(cursor) || cursor < 0) return kosyncError(c, 403, 2003, 'Invalid cursor');
     const revisionMode = cursorRaw !== undefined;
     const canonical = resolveDocument(db, user.id, document);
-    scheduleMicroblogClippings(db, user.id, canonical);
+    try {
+      scheduleMicroblogClippings(db, user.id, canonical);
+    } catch (err) {
+      console.error(JSON.stringify({ msg: 'microblog schedule failed', user_id: user.id, document: canonical,
+        error: err instanceof Error ? err.message : String(err) }));
+    }
     const documents = clippingDocuments(db, user.id, canonical);
     const rows = db
       .prepare(
@@ -280,7 +285,12 @@ export function clippingRoutes(db: DB): Hono<AppEnv> {
         );
       }
     }
-    scheduleMicroblogClippings(db, user.id, canonical);
+    try {
+      scheduleMicroblogClippings(db, user.id, canonical);
+    } catch (err) {
+      console.error(JSON.stringify({ msg: 'microblog schedule failed', user_id: user.id, document: canonical,
+        error: err instanceof Error ? err.message : String(err) }));
+    }
     return c.json({ until: now, accepted: ops.length });
   });
 

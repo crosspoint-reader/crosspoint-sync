@@ -40,7 +40,12 @@ const PER_BOOK_PULLERS: { id: string; strict: boolean; sidecarOnly: boolean; mat
 export function createProgressRefresh(db: DB, http: HttpTransport = fetchTransport): ProgressRefresh {
   const pending = new Map<string, Promise<void>>();
   return async (userId, document) => {
-    scheduleMicroblogClippings(db, userId, document);
+    try {
+      scheduleMicroblogClippings(db, userId, document);
+    } catch (err) {
+      console.error(JSON.stringify({ msg: 'microblog schedule failed', user_id: userId, document,
+        error: err instanceof Error ? err.message : String(err) }));
+    }
     const pullers: typeof PER_BOOK_PULLERS = [];
     for (const p of PER_BOOK_PULLERS) {
       const account = getAccount(db, userId, p.id);

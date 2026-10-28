@@ -6,6 +6,8 @@ import { drainQueue } from '../src/connectors/runner.js';
 import type { HttpTransport } from '../src/connectors/types.js';
 import { deleteDocumentData } from '../src/models/document.js';
 import { deleteKosyncUserData } from '../src/routes/account.js';
+import { fanOutProgress } from '../src/connectors/fanout.js';
+import { createProgressRefresh } from '../src/connectors/refresh.js';
 
 beforeEach(() => { process.env.TOKEN_ENC_KEY = 'a'.repeat(64); resetEncryptionKeyCache(); });
 afterEach(() => { delete process.env.TOKEN_ENC_KEY; resetEncryptionKeyCache(); });
@@ -29,6 +31,52 @@ async function setup() {
   const match = () => put(`/api/v1/connectors/microblog/matches/${DOC}`, { external_id: '123', external_edition: '9781786487849' });
   return { app, db, uid, headers, posts, http, put, clipping, select, match };
 }
+
+async function schedulingFailure() {
+  const s = await setup();
+  s.db.prepare('UPDATE connector_accounts SET options=? WHERE user_id=? AND connector_id=?')
+    .run(JSON.stringify({ sync_highlights: true }), s.uid, 'microblog');
+  s.db.exec(`CREATE TEMP TRIGGER fail_microblog_selection BEFORE INSERT ON microblog_clipping_selections
+    BEGIN SELECT RAISE(FAIL, 'simulated scheduling database failure'); END`);
+  return s;
+}
+
+it('still fans out progress to other connectors when Micro.blog scheduling fails', async () => {
+  const s = await schedulingFailure();
+  upsertAccount(s.db, s.uid, 'kosync', { server: 'mirror.test', username: 'reader', password: 'test' }, null);
+  expect(() => fanOutProgress(s.db, s.uid, DOC, 0.4, 100)).not.toThrow();
+  expect(s.db.prepare("SELECT kind FROM connector_queue WHERE connector_id='kosync'").get()).toEqual({ kind: 'progress' });
+  s.db.close();
+});
+
+it('does not reject progress refresh when Micro.blog scheduling fails', async () => {
+  const s = await schedulingFailure();
+  await expect(createProgressRefresh(s.db, s.http)(s.uid, DOC)).resolves.toBeUndefined();
+  s.db.close();
+});
+
+it('still returns clippings when Micro.blog scheduling fails', async () => {
+  const s = await schedulingFailure();
+  const res = await s.app.request(`/api/v1/clippings/${DOC}`, { headers: s.headers });
+  expect(res.status).toBe(200);
+  expect(await res.json()).toMatchObject({ items: [{ id: 'one', text: 'A passage' }] });
+  s.db.close();
+});
+
+it('acknowledges saved clippings and can schedule them on a later sync after a database failure', async () => {
+  const s = await schedulingFailure();
+  const res = await s.put(`/api/v1/clippings/${DOC}`, { items: [{ id: 'two', spine: 2, text: 'Another passage', created_at: 2 }] });
+  expect(res.status).toBe(200);
+  expect(await res.json()).toMatchObject({ accepted: 1 });
+  expect(s.db.prepare('SELECT text FROM clippings WHERE user_id=? AND id=?').get(s.uid, 'two')).toEqual({ text: 'Another passage' });
+  s.db.exec('DROP TRIGGER fail_microblog_selection');
+  await s.match();
+  expect((await s.app.request(`/api/v1/clippings/${DOC}`, { headers: s.headers })).status).toBe(200);
+  await drainQueue(s.db, s.http);
+  expect(s.posts).toHaveLength(1);
+  expect(JSON.stringify(s.posts[0])).toContain('Another passage');
+  s.db.close();
+});
 
 it('defaults automatic publication off and remembers a manually selected unmatched clipping', async () => {
   const s = await setup();

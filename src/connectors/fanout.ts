@@ -65,7 +65,12 @@ export function fanOutProgress(
   positionJson?: string | null,
   exceptConnectorId?: string
 ): void {
-  scheduleMicroblogClippings(db, userId, document);
+  try {
+    scheduleMicroblogClippings(db, userId, document);
+  } catch (err) {
+    console.error(JSON.stringify({ msg: 'microblog schedule failed', user_id: userId, document,
+      error: err instanceof Error ? err.message : String(err) }));
+  }
   const finished = percentage >= 0.98;
   let position: Record<string, unknown> | null = null;
   if (positionJson) {
