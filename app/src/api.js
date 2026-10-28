@@ -138,6 +138,35 @@ function removeCachedClipping(session, document, id) {
   }
 }
 
+// Stage complete clipping reads so a failed legacy batch cannot alter later snapshots.
+async function readClippings(s, doc) {
+  const items = []
+  const pages = []
+  let fromCache = false
+  for (let cursor = 0; ; ) {
+    const path = `/api/v1/clippings/${doc}?cursor=${cursor}&limit=100`
+    const page = await call(s, path, {}, true, { store: false })
+    const cached = offlineCopies.has(page)
+    fromCache ||= cached
+    if (!cached) pages.push({ path, data: page })
+    items.push(...page.items)
+    if (!page.more) break
+    cursor = page.cursor
+  }
+  const live = items.filter((c) => !c.deleted)
+    .sort((a, b) => a.spine - b.spine || (a.start_offset ?? a.para ?? a.start_page) - (b.start_offset ?? b.para ?? b.start_page))
+  return { items: live, pages, fromCache }
+}
+
+function cacheClippings(s, doc, result) {
+  const prefix = `${OFFLINE}${s.username}@${s.server}`
+  for (const { path, data } of result.pages) keep(`${prefix}${path}`, data)
+  // Migrate legacy offline data without replacing newer complete aggregates.
+  if (!result.fromCache || !saved(s, `/api/v1/clippings/${doc}`)) {
+    keep(`${prefix}/api/v1/clippings/${doc}`, { items: result.items }, !result.fromCache)
+  }
+}
+
 const PROGRESS = '/api/v1/progress?limit=500'
 
 // Every synced book: follows the server's pages, then saves the whole list as the first page's offline copy.
@@ -387,9 +416,13 @@ export const api = {
       return data.items
     } catch (e) {
       if (version !== sessionVersion || e.status !== 404) throw e
-      const per = await Promise.all(books.map((b) => api.clippings(s, b.document, { syncShortcuts: false }).then((items) => items.map((c) => ({ ...c, document: b.document })))))
-      if (version === sessionVersion) syncShortcutsCache(s)
-      return per.flat().sort((a, b) => b.created_at - a.created_at)
+      const per = await Promise.all(books.map(async (b) => ({ document: b.document, ...await readClippings(s, b.document) })))
+      if (version === sessionVersion) {
+        for (const result of per) cacheClippings(s, result.document, result)
+        syncShortcutsCache(s)
+      }
+      return per.flatMap((result) => result.items.map((c) => ({ ...c, document: result.document })))
+        .sort((a, b) => b.created_at - a.created_at)
     }
   },
   async deleteClipping(s, doc, id) {
@@ -406,25 +439,11 @@ export const api = {
     call(s, `/api/v1/documents/${doc}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
   async clippings(s, doc, { syncShortcuts = true } = {}) {
     const version = sessionVersion
-    const items = []
-    let fromCache = false
-    for (let cursor = 0; ; ) {
-      const page = await call(s, `/api/v1/clippings/${doc}?cursor=${cursor}&limit=100`)
-      fromCache ||= offlineCopies.has(page)
-      items.push(...page.items)
-      if (!page.more) break
-      cursor = page.cursor
-    }
-    const live = items.filter((c) => !c.deleted)
-      .sort((a, b) => a.spine - b.spine || (a.start_offset ?? a.para ?? a.start_page) - (b.start_offset ?? b.para ?? b.start_page))
+    const result = await readClippings(s, doc)
     if (version === sessionVersion) {
-      // Migrate a complete legacy offline copy, but never overwrite a newer
-      // complete snapshot with potentially mixed-age cached pages.
-      if (!fromCache || !saved(s, `/api/v1/clippings/${doc}`)) {
-        keep(`${OFFLINE}${s.username}@${s.server}/api/v1/clippings/${doc}`, { items: live }, !fromCache)
-      }
+      cacheClippings(s, doc, result)
       if (syncShortcuts) syncShortcutsCache(s)
     }
-    return live
+    return result.items
   },
 }
