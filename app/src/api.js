@@ -397,7 +397,8 @@ export const api = {
     const result = await call(s, `/api/v1/clippings/${doc}`, { method: 'PUT', body: JSON.stringify({ items: [{ id, deleted: 1 }] }) })
     if (version === sessionVersion) {
       removeCachedClipping(s, doc, id)
-      await syncShortcutsCache(s)
+      // Native publication already logs failures; the server deletion succeeded.
+      await syncShortcutsCache(s)?.catch(() => {})
     }
     return result
   },

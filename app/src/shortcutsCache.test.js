@@ -291,3 +291,21 @@ it('does not republish the old account when its clipping deletion completes afte
   await flush()
   expect(snapshot().account).toBe('["https://sync.test","other"]')
 })
+it('keeps a successful clipping deletion successful when native publication fails', async () => {
+  http.mockResolvedValueOnce(response({ items: [{ id: 'remove', text: 'Saved' }], more: false }))
+  await api.clippings(session, 'one')
+  await flush()
+  const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  try {
+    invoke.mockRejectedValueOnce(new Error('native write failed'))
+    http.mockResolvedValueOnce(response({ ok: true }))
+    await expect(api.deleteClipping(session, 'one', 'remove')).resolves.toEqual({ ok: true })
+    // The successful deletion still prunes offline data; later publications retry.
+    http.mockRejectedValueOnce(new Error('offline'))
+    expect(await api.clippings(session, 'one')).toEqual([])
+    await flush()
+    expect(snapshot().clippings.items).toEqual([])
+  } finally {
+    warning.mockRestore()
+  }
+})
