@@ -238,7 +238,11 @@ export async function publishMicroblogClippings(
     const rendered = microblogClippingsContent(db, userId, document, `https://micro.blog/books/${encodeURIComponent(isbn)}`);
     if (!rendered) return { ok: true };
     db.prepare('UPDATE microblog_clipping_posts SET destination=? WHERE user_id=? AND document=?').run(destination, userId, document);
-    if (rendered.fingerprint === state.fingerprint && state.url) return { ok: true };
+    if (rendered.fingerprint === state.fingerprint && state.url) {
+      db.prepare('UPDATE microblog_clipping_posts SET book_url=?,matched_book=? WHERE user_id=? AND document=?')
+        .run(`https://micro.blog/books/${encodeURIComponent(isbn)}`, match.externalId, userId, document);
+      return { ok: true };
+    }
     let url = state.url;
     if (!url && state.attempted) {
       url = await recoverPost(http, token, destination, state.identity);

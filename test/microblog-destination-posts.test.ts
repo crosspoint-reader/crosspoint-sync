@@ -59,6 +59,17 @@ it('creates 📚 collections on the selected blog and keeps updates there after 
   expect(s.requests.every((url) => new URL(url).searchParams.get('mp-destination') === b)).toBe(true);
   s.db.close();
 });
+it('acknowledges a rematch with unchanged ISBN and content without requeuing publication', async () => {
+  const s = await setup(); await s.choose(b); await s.sync();
+  saveMatch(s.db, s.uid, 'microblog', DOC, { externalId: '456', externalEdition: '9781786487849', confidence: 1 }, 'manual');
+  await s.sync();
+  expect(s.db.prepare('SELECT matched_book,book_url FROM microblog_clipping_posts WHERE user_id=? AND document=?').get(s.uid, DOC))
+    .toEqual({ matched_book: '456', book_url: 'https://micro.blog/books/9781786487849' });
+  expect(s.db.prepare("SELECT status FROM connector_queue WHERE kind='microblog:clippings'").get()).toEqual({ status: 'done' });
+  expect(scheduleMicroblogClippings(s.db, s.uid, DOC)).toBe(0);
+  expect(s.writes).toHaveLength(1);
+  s.db.close();
+});
 it('pins creation before a concurrent change of the plugin-wide blog choice', async () => {
   const s = await setup(); await s.choose(b);
   s.onCreate(async () => { await s.choose(a); });
