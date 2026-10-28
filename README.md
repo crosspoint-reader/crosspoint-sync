@@ -185,9 +185,9 @@ to that content on Micro.blog.
 
 Choose **Post clippings to** in Micro.blog settings when the token accesses
 multiple blogs. A sole available blog is selected automatically. The choice
-applies to new collections: existing posts, new clippings for those books, and
-explicitly recreated posts stay on the book's original blog. Revoked access pauses
-posting to that blog; selecting a different one never moves existing collections.
+applies to new collections: existing posts and new clippings for those books stay
+on the book's original blog. Revoked access pauses posting to that blog; selecting
+a different one never moves existing collections automatically.
 
 **Automatically sync clippings** is off by default. Enabling it includes existing
 and future clippings. Unmatched books wait without interrupting reader sync;
@@ -198,8 +198,13 @@ passages and manually selected clippings.
 Deleting a post on Micro.blog pauses publication for that book while preserving
 its clippings locally. After the missing post is detected on an update, the book's
 section on the Clippings page offers **Recreate clippings post**. This explicitly
-republishes the collected clippings to the original blog after verifying the post
-is missing. Network or permission errors do not trigger recreation.
+republishes the collected clippings to either the previous blog (the default) or
+the current clippings blog selected in Settings. Future updates for this book
+follow the replacement post. If the previous blog is accessible, Sync rechecks
+that the old post is still missing; a restored post can be resumed on the previous
+blog instead. A previously confirmed deletion can also be recreated on the current
+blog after access to the previous blog is lost. Network or permission errors do
+not trigger automatic recreation.
 
 For local testing, use Node 22.13 or newer, build the frontend with
 `npm run build:frontend`, and copy `.env.example` to `.env`. Set a separate

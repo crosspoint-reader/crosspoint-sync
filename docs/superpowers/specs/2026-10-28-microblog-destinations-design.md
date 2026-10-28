@@ -34,9 +34,11 @@ remote collection post.
 - If a collection post is deleted on Micro.blog, keep its clippings locally,
   report the missing post, and pause publication for that book. Reader sync and
   other books continue normally. Do not automatically recreate it.
-- Offer **Recreate clipping post** for an affected book. Explicit recreation
-  creates one replacement collection on that book's original blog and resumes
-  updates there. Include its eligible saved clippings and any new clippings.
+- Offer **Recreate clippings post** for an affected book. Explicit recreation
+  offers its previous blog (default) or the current clippings blog. Create one
+  replacement collection and pin later updates to the chosen blog. Include its
+  eligible saved clippings and any new clippings. This destination choice was
+  requested after local testing on October 28.
 
 ## Implementation choices
 
@@ -49,13 +51,17 @@ remote collection post.
   collection with an actionable error rather than choose a different blog.
 - Pin the destination before the first creation attempt so retries and uncertain
   creation recovery cannot be redirected by a concurrent settings change.
-- Recreation must verify the original post is missing. If it is still present,
-  resume updates to it rather than create a duplicate. Treat authorization or
-  network failures separately from deletion; do not permit recreation when
-  deletion is unconfirmed or access to the original blog has been revoked.
+- Recreation requires a confirmed missing post and a currently accessible target
+  blog. When the previous blog is accessible, recheck its post; if restored, only
+  resume updates there rather than create a duplicate elsewhere. With an existing
+  confirmed deletion, allow explicit recreation on the current blog after access
+  to the previous blog is revoked. Network and authorization failures during a
+  source recheck still stop recreation.
 - Keep ordinary **Sync now** and **Add clipping to Micro.blog** from silently
   clearing a missing-post pause. Use the existing action-sheet pattern to explain
-  that recreation republishes the collected clippings to the original blog.
+  that recreation republishes the collected clippings to the chosen blog. Show
+  addresses for both choices; disable the current choice if no available blog is
+  selected and show only the previous choice when both destinations are the same.
 - Refresh destination choices from the linked token without exposing credentials;
   preserve the saved choice across same-account token rotation when accessible.
 

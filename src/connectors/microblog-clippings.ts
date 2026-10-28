@@ -293,7 +293,7 @@ export async function publishMicroblogClippings(
   } finally { locks.delete(key); }
 }
 
-export async function recreateMicroblogClippings(db: DB, userId: number, doc: string, http: HttpTransport): Promise<{ queued: boolean }> {
+export async function recreateMicroblogClippings(db: DB, userId: number, doc: string, http: HttpTransport, target: 'original' | 'current' = 'original'): Promise<{ queued: boolean }> {
   const document = resolveDocument(db, userId, doc);
   const account = getAccount(db, userId, 'microblog');
   if (!account?.enabled) throw new ConnectorOperationError('Micro.blog is not linked or enabled', false);
@@ -310,12 +310,24 @@ export async function recreateMicroblogClippings(db: DB, userId: number, doc: st
   try {
     const cred = decryptCredential(account, db);
     const blogs = await listMicroblogDestinations(cred, http); current();
-    const destination = state.destination ?? destinationForPost(state.url, blogs);
-    if (!destination || !blogs.some((b) => b.uid === destination)) throw new ConnectorOperationError('Restore access to the original Micro.blog blog before recreating this post.', false);
-    let missing = false;
-    try { await micropub(http, String(cred.token), destination, `/micropub?q=source&url=${encodeURIComponent(state.url)}`, undefined, true); }
-    catch (error) { if (error instanceof MissingMicroblogPost) missing = true; else throw error; }
+    const original = state.destination ?? destinationForPost(state.url, blogs);
+    const destination = target === 'current'
+      ? selectedMicroblogDestination(db, userId) ?? (blogs.length === 1 ? blogs[0].uid : null)
+      : original;
+    if (!destination || !blogs.some((b) => b.uid === destination)) throw new ConnectorOperationError(target === 'current'
+      ? 'Choose an available clippings blog in Micro.blog settings before recreating this post.'
+      : 'Restore access to the original Micro.blog blog or choose the current clippings blog.', false);
+    // The durable missing flag permits an explicit move after original-blog access is lost.
+    // When accessible, recheck the original to avoid duplicating a restored post.
+    let missing = true;
+    if (original && blogs.some((b) => b.uid === original)) {
+      try {
+        await micropub(http, String(cred.token), original, `/micropub?q=source&url=${encodeURIComponent(state.url)}`, undefined, true);
+        missing = false;
+      } catch (error) { if (!(error instanceof MissingMicroblogPost)) throw error; }
+    }
     current();
+    if (!missing && destination !== original) throw new ConnectorOperationError('The previous post exists again. Choose the previous blog to resume updating it.', false);
     withTransaction(db, () => {
       if (missing) db.prepare(`UPDATE microblog_clipping_posts SET identity=?,url=NULL,fingerprint=NULL,attempted=0,error=NULL,missing=0,destination=? WHERE user_id=? AND document=?`)
         .run(randomUUID(), destination, userId, document);

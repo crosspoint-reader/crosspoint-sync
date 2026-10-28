@@ -486,7 +486,10 @@ export function connectorRoutes(
     if (!credentialRequestIsSecure(c, trustProxy, allowHttpLocalhost)) return c.json({ message: CREDENTIAL_HTTPS_REQUIRED }, 400);
     const document = c.req.param('document');
     if (!isValidDocument(document)) return c.json({ message: 'Invalid book' }, 400);
-    try { return c.json(await recreateMicroblogClippings(db, c.get('user').id, document, transport)); }
+    const body = await c.req.json().catch(() => null) as { target?: unknown } | null;
+    const target = body?.target ?? 'original';
+    if (target !== 'original' && target !== 'current') return c.json({ message: 'Choose the previous or current clippings blog' }, 400);
+    try { return c.json(await recreateMicroblogClippings(db, c.get('user').id, document, transport, target)); }
     catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Could not recreate post' }, error instanceof ConnectorOperationError && !error.retryable ? 409 : 502); }
   });
 

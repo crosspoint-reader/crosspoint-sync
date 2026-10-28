@@ -239,7 +239,7 @@ export const api = {
   microblogDestinations: (s) => call(s, '/api/v1/connectors/microblog/destinations'),
   setMicroblogDestination: (s, destination) => call(s, '/api/v1/connectors/microblog/destination', { method: 'PUT', body: JSON.stringify({ destination }) }),
   microblogClippingPosts: (s) => call(s, '/api/v1/connectors/microblog/clipping-posts'),
-  recreateMicroblogPost: (s, doc) => call(s, `/api/v1/connectors/microblog/clipping-posts/${encodeURIComponent(doc)}/recreate`, { method: 'POST' }),
+  recreateMicroblogPost: (s, doc, target = 'original') => call(s, `/api/v1/connectors/microblog/clipping-posts/${encodeURIComponent(doc)}/recreate`, { method: 'POST', body: JSON.stringify({ target }) }),
   syncBook: (s, id, doc) => call(s, `/api/v1/connectors/${id}/sync/${doc}`, { method: 'POST' }),
   setConnectorOptions: (s, id, options) => call(s, `/api/v1/connectors/${id}/options`, { method: 'PUT', body: JSON.stringify(options) }),
   beginLink: (s, id) => call(s, `/api/v1/connectors/${id}/link/begin`, { method: 'POST' }),

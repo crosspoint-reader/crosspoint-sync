@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 vi.hoisted(() => { window.scrollTo = vi.fn(); window.matchMedia = vi.fn(() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) })
-vi.mock('./api.js', () => ({ isApp: false, cached: { clippings: () => null }, api: { allClippings: vi.fn(), connectors: vi.fn(), addMicroblogClipping: vi.fn(), microblogClippingPosts: vi.fn(), recreateMicroblogPost: vi.fn() } }))
+vi.mock('./api.js', () => ({ isApp: false, cached: { clippings: () => null }, api: { allClippings: vi.fn(), connectors: vi.fn(), addMicroblogClipping: vi.fn(), microblogClippingPosts: vi.fn(), recreateMicroblogPost: vi.fn(), microblogDestinations: vi.fn() } }))
 vi.mock('./tabbar.js', () => ({ useSheet() {}, useNativeBack() {}, useNativeButton() {} }))
 import Clippings from './Clippings.jsx'
 import { api } from './api.js'
@@ -15,6 +15,7 @@ beforeEach(() => {
   api.addMicroblogClipping.mockResolvedValue({ queued: true, waiting_for_match: false })
   api.microblogClippingPosts.mockResolvedValue({ items: [] })
   api.recreateMicroblogPost.mockResolvedValue({ queued: true })
+  api.microblogDestinations.mockResolvedValue({ items: [{ uid: 'https://first.micro.blog/', name: 'Previous' }, { uid: 'https://new.micro.blog/', name: 'New' }], selected: 'https://new.micro.blog/' })
 })
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
@@ -64,7 +65,7 @@ it('queues explicit recreation and refreshes the book status', async () => {
   render(<Clippings session={session} books={books} />)
   fireEvent.click(await screen.findByRole('button', { name: 'Recreate clippings post' }))
   fireEvent.click(screen.getByRole('button', { name: 'Recreate post' }))
-  await waitFor(() => expect(api.recreateMicroblogPost).toHaveBeenCalledWith(session, 'book'))
+  await waitFor(() => expect(api.recreateMicroblogPost).toHaveBeenCalledWith(session, 'book', 'original'))
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   expect(screen.getByRole('status').textContent).toContain('queued')
 })
@@ -76,4 +77,26 @@ it('shows recreation errors and allows retry', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Recreate post' }))
   expect((await screen.findByRole('alert')).textContent).toContain('Original blog is unavailable')
   expect(screen.getByRole('button', { name: 'Recreate post' }).disabled).toBe(false)
+})
+it('lets the reader choose the current clippings blog when recreating a post', async () => {
+  api.microblogClippingPosts.mockResolvedValue({ items: [deletedPost] })
+  render(<Clippings session={session} books={books} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Recreate clippings post' }))
+  const choice = await screen.findByLabelText(/Current clippings blog/)
+  await waitFor(() => expect(choice.disabled).toBe(false))
+  expect(screen.getByLabelText(/Previous blog/).checked).toBe(true)
+  fireEvent.click(choice)
+  fireEvent.click(screen.getByRole('button', { name: 'Recreate post' }))
+  await waitFor(() => expect(api.recreateMicroblogPost).toHaveBeenCalledWith(session, 'book', 'current'))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+})
+it('keeps the previous blog usable when the current clippings blog is unavailable', async () => {
+  api.microblogClippingPosts.mockResolvedValue({ items: [deletedPost] })
+  api.microblogDestinations.mockResolvedValue({ items: [], selected: 'https://unavailable.micro.blog/' })
+  render(<Clippings session={session} books={books} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Recreate clippings post' }))
+  await screen.findByText(/Choose an available blog in Settings/)
+  expect(screen.getByLabelText(/Current clippings blog/).disabled).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Recreate post' }))
+  await waitFor(() => expect(api.recreateMicroblogPost).toHaveBeenCalledWith(session, 'book', 'original'))
 })

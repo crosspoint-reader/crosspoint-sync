@@ -39,7 +39,7 @@ async function setup() {
   selectMicroblogClipping(db, uid, DOC, 'one');
   const choose = (destination: string) => app.request('/api/v1/connectors/microblog/destination', { method: 'PUT', headers, body: JSON.stringify({ destination }) });
   const sync = async () => { scheduleMicroblogClippings(db, uid, DOC); await drainQueue(db, http); };
-  const recreate = () => app.request(`/api/v1/connectors/microblog/clipping-posts/${DOC}/recreate`, { method: 'POST', headers });
+  const recreate = (target?: string) => app.request(`/api/v1/connectors/microblog/clipping-posts/${DOC}/recreate`, { method: 'POST', headers, ...(target ? { body: JSON.stringify({ target }) } : {}) });
   const status = async () => (await app.request('/api/v1/connectors/microblog/clipping-posts', { headers })).json();
   return { db, app, uid, headers, http, writes, requests, choose, sync, recreate, status,
     setBlogs: (value: string[]) => { blogs = value; }, missing: (code = 404) => { sourceStatus = code; },
@@ -87,6 +87,45 @@ it.each([401, 403, 429, 500])('does not offer recreation for an unconfirmed dele
   const s = await setup(); await s.choose(b); await s.sync(); s.missing(code); s.change(); await s.sync();
   expect(await s.status()).toMatchObject({ items: [{ missing: false }] });
   expect((await s.recreate()).status).not.toBe(200); expect(s.writes).toHaveLength(1); s.db.close();
+});
+it('recreates on the current clippings blog when explicitly chosen and pins later updates there', async () => {
+  const s = await setup(); await s.choose(b); await s.sync(); s.missing(); s.change(); await s.sync();
+  await s.choose(a);
+  expect((await s.recreate('current')).status).toBe(200);
+  await drainQueue(s.db, s.http);
+  expect(s.writes[1]).toMatchObject({ destination: a, body: { properties: { name: ['📚 Clippings from Test book'] } } });
+  expect(JSON.stringify(s.writes[1])).toContain('First passage');
+  await s.choose(b); s.missing(200);
+  s.db.prepare('UPDATE clippings SET note=? WHERE user_id=?').run('Later annotation', s.uid);
+  await s.sync();
+  expect(s.writes[2]).toMatchObject({ destination: a, body: { action: 'update', url: `${a}post.html` } });
+  s.db.close();
+});
+it('allows explicit recreation on the current blog after access to the previous blog is lost', async () => {
+  const s = await setup(); await s.choose(b); await s.sync(); s.missing(); s.change(); await s.sync();
+  await s.choose(a); s.setBlogs([a]);
+  expect((await s.recreate('current')).status).toBe(200); await drainQueue(s.db, s.http);
+  expect(s.writes[1]?.destination).toBe(a); s.db.close();
+});
+it('rejects an invalid recreation choice without changing the paused post', async () => {
+  const s = await setup(); await s.choose(b); await s.sync(); s.missing(); s.change(); await s.sync();
+  expect((await s.recreate('elsewhere')).status).toBe(400);
+  expect(await s.status()).toMatchObject({ items: [{ missing: true, destination: b }] }); s.db.close();
+});
+it.each(['unselected', 'revoked'])('does not fall back to another blog when the current blog is %s', async (mode) => {
+  const s = await setup(); await s.choose(b); await s.sync(); s.missing(); s.change(); await s.sync();
+  if (mode === 'unselected') s.db.prepare("UPDATE connector_accounts SET options='{}' WHERE user_id=?").run(s.uid);
+  else { await s.choose(a); s.setBlogs([b]); }
+  expect((await s.recreate('current')).status).toBe(409);
+  expect(await s.status()).toMatchObject({ items: [{ missing: true, destination: b }] });
+  expect(s.writes).toHaveLength(1); s.db.close();
+});
+it('refuses to move a post that has been restored on the previous blog', async () => {
+  const s = await setup(); await s.choose(b); await s.sync(); s.missing(); s.change(); await s.sync();
+  await s.choose(a); s.missing(200);
+  expect((await s.recreate('current')).status).toBe(409);
+  expect(await s.status()).toMatchObject({ items: [{ missing: true, destination: b }] });
+  expect(s.writes).toHaveLength(1); s.db.close();
 });
 it('resumes an original post that has been restored instead of creating a duplicate', async () => {
   const s = await setup(); await s.choose(b); await s.sync(); s.missing(); s.change(); await s.sync();

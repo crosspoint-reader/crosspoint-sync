@@ -225,13 +225,10 @@ export default function Clippings({ session, books }) {
         </>
       )}
 
-      {recreating && <ActionSheet title="Recreate clippings post?" actionLabel="Recreate post" pendingLabel="Queuing…" onClose={() => setRecreating(null)} onConfirm={async () => {
-        await api.recreateMicroblogPost(session, recreating.document)
+      {recreating && <RecreateClippingsPost session={session} post={recreating} onClose={() => setRecreating(null)} onDone={() => {
         reloadPosts()
         setNote('Replacement clippings post queued for Micro.blog.')
-      }}>
-        This will republish this book’s collected clippings and resume updates on its original blog: {recreating.destination || recreating.url}.
-      </ActionSheet>}
+      }} />}
       {sharing && <ClipShare session={session} book={byDoc.get(sharing.document)} clip={sharing} onClose={() => setSharing(null)} />}
       {deleting && (
         <DeleteClip
@@ -246,5 +243,34 @@ export default function Clippings({ session, books }) {
         />
       )}
     </div>
+  )
+}
+
+function RecreateClippingsPost({ session, post, onClose, onDone }) {
+  const [blogs, error, reload] = useLoad(() => api.microblogDestinations(session), [session])
+  const [target, setTarget] = useState('original')
+  const [busy, setBusy] = useState(false)
+  const currentBlog = blogs?.items?.find((b) => b.uid === blogs.selected)
+  const original = post.destination || post.url
+  return (
+    <ActionSheet title="Recreate clippings post?" actionLabel="Recreate post" pendingLabel="Queuing…" onClose={onClose} onConfirm={async () => {
+      setBusy(true)
+      try {
+        await api.recreateMicroblogPost(session, post.document, target)
+        onDone()
+      } finally { setBusy(false) }
+    }}>
+      This republishes this book’s collected clippings. Future clippings for this book will update the replacement on the chosen blog.
+      <label className="mt-3 flex items-start gap-2">
+        <input type="radio" name="recreate-blog" value="original" checked={target === 'original'} disabled={busy} onChange={() => setTarget('original')} className="mt-1" />
+        <span className="break-all">Previous blog: {original}</span>
+      </label>
+      {currentBlog?.uid !== post.destination && <label className="mt-3 flex items-start gap-2">
+        <input type="radio" name="recreate-blog" value="current" checked={target === 'current'} disabled={busy || !currentBlog} onChange={() => setTarget('current')} className="mt-1" />
+        <span className="break-all">Current clippings blog: {currentBlog ? `${currentBlog.name} (${currentBlog.uid})` : blogs ? 'Choose an available blog in Settings first.' : 'Loading…'}</span>
+      </label>}
+      {currentBlog?.uid === post.destination && <span className="mt-3 block">The current clippings blog is also the previous blog.</span>}
+      {error && <span className="mt-3 block">Could not load the current clippings blog. <button type="button" onClick={reload} className="font-medium text-brand-600">Retry</button></span>}
+    </ActionSheet>
   )
 }
