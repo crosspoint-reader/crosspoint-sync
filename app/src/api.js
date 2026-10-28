@@ -418,6 +418,7 @@ export const api = {
       if (version !== sessionVersion || e.status !== 404) throw e
       const per = await Promise.all(books.map(async (b) => ({ document: b.document, ...await readClippings(s, b.document) })))
       if (version === sessionVersion) {
+        if (!per.length) keep(`${OFFLINE}${s.username}@${s.server}/api/v1/clippings`, { items: [] }, true)
         for (const result of per) cacheClippings(s, result.document, result)
         syncShortcutsCache(s)
       }
