@@ -37,6 +37,7 @@ import { resolveDocument } from '../../models/merge.js';
 import { hasDocumentData } from '../../models/document.js';
 import { selectMicroblogClipping, scheduleMicroblogClippings } from '../../connectors/microblog-clippings.js';
 import { isItemId } from '../../models/sync.js';
+import { listMicroblogDestinations, selectedMicroblogDestination } from '../../connectors/microblog-destinations.js';
 
 /** Where a provider sends the browser back: one https URL for web and native (an app link there). */
 export const oauthCallbackPath = (id: string) => `/connectors/${id}/callback`;
@@ -464,6 +465,35 @@ export function connectorRoutes(
     }
   });
 
+  app.get('/connectors/microblog/destinations', async (c) => {
+    const userId = c.get('user').id;
+    const account = getAccount(db, userId, 'microblog');
+    if (!account?.enabled) return c.json({ message: 'Micro.blog is not linked or enabled' }, 400);
+    try {
+      const items = await listMicroblogDestinations(decryptCredential(account, db), transport);
+      return c.json({ items, selected: selectedMicroblogDestination(db, userId) ?? (items.length === 1 ? items[0].uid : null) });
+    } catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Could not load blogs' }, 502); }
+  });
+
+  app.put('/connectors/microblog/destination', async (c) => {
+    if (!credentialRequestIsSecure(c, trustProxy, allowHttpLocalhost)) return c.json({ message: CREDENTIAL_HTTPS_REQUIRED }, 400);
+    const userId = c.get('user').id;
+    const account = getAccount(db, userId, 'microblog');
+    if (!account?.enabled) return c.json({ message: 'Micro.blog is not linked or enabled' }, 400);
+    const body = await c.req.json().catch(() => null) as { destination?: unknown } | null;
+    try {
+      const items = await listMicroblogDestinations(decryptCredential(account, db), transport);
+      if (!items.some((d) => d.uid === body?.destination)) return c.json({ message: 'Choose an available Micro.blog blog' }, 400);
+      if (getAccount(db, userId, 'microblog')?.cred_enc !== account.cred_enc) return c.json({ message: 'Micro.blog account changed; reload its blogs' }, 409);
+      const row = db.prepare("SELECT options FROM connector_accounts WHERE user_id=? AND connector_id='microblog'").get(userId) as { options: string | null };
+      let values: OptionValues = {};
+      try { values = JSON.parse(row.options || '{}'); } catch { /* Recover malformed settings. */ }
+      setConnectorOptions(db, userId, 'microblog', { ...values, highlight_blog: body!.destination as string });
+      scheduleMicroblogClippings(db, userId);
+      return c.json({ destination: body!.destination });
+    } catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Could not select blog' }, 502); }
+  });
+
   app.post('/connectors/microblog/clippings/:document/:clippingId', (c) => {
     const user = c.get('user');
     const account = getAccount(db, user.id, 'microblog');
@@ -490,6 +520,10 @@ export function connectorRoutes(
     }
     const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
     const next: OptionValues = connectorOptions(db, user.id, conn);
+    if (conn.id === 'microblog') {
+      const destination = selectedMicroblogDestination(db, user.id);
+      if (destination) next.highlight_blog = destination;
+    }
     for (const o of conn.options) {
       const v = body?.[o.key];
       if (o.choices ? o.choices.some((ch) => ch.value === v) : typeof v === 'boolean') next[o.key] = v as boolean | string;

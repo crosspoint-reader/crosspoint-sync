@@ -1,5 +1,6 @@
 import { decideMatch, type Candidate } from './matching.js';
 import { publishMicroblogClippings } from './microblog-clippings.js';
+import { listMicroblogDestinations } from './microblog-destinations.js';
 import {
   ConnectorOperationError,
   type Credential,
@@ -202,16 +203,12 @@ async function validateCredential(cred: Credential, http: HttpTransport): Promis
     // Never trust a destination supplied alongside a pasted token. Shelf-only
     // accounts still link when Micropub configuration is unavailable.
     delete cred.microblogDestination;
+    delete cred.microblogDestinations;
     try {
-      const config = await request(http, tokenOf(cred), '/micropub?q=config', { method: 'GET' }) as {
-        destination?: { uid?: unknown; 'microblog-default'?: boolean }[];
-      };
-      const destinations = Array.isArray(config.destination) ? config.destination : [];
-      const chosen = destinations.find((d) => d['microblog-default'] === true) ?? (destinations.length === 1 ? destinations[0] : null);
-      if (typeof chosen?.uid === 'string') {
-        const url = new URL(chosen.uid);
-        if (url.protocol === 'https:' && !url.username && !url.password) cred.microblogDestination = url.href;
-      }
+      const destinations = await listMicroblogDestinations(cred, http);
+      cred.microblogDestinations = destinations;
+      const chosen = destinations.find((d) => d.isDefault) ?? (destinations.length === 1 ? destinations[0] : null);
+      if (chosen) cred.microblogDestination = chosen.uid;
     } catch { /* Older servers/tokens can continue syncing bookshelves. */ }
     return { ok: true };
   } catch (error) {

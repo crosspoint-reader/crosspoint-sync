@@ -38,7 +38,9 @@ export function upsertAccount(
           .all(userId) as { url: string }[];
         const origins = new Set(urls.flatMap((r) => { try { return [new URL(r.url).origin + '/']; } catch { return []; } }));
         const oldDestination = old.microblogDestination ?? (origins.size === 1 ? [...origins][0] : null);
-        if (oldDestination && cred.microblogDestination) changedMicroblogAccount = oldDestination !== cred.microblogDestination;
+        const available = Array.isArray(cred.microblogDestinations) ? cred.microblogDestinations as { uid?: string }[] : [];
+        if (oldDestination && available.some((d) => d.uid === oldDestination)) changedMicroblogAccount = false;
+        else if (oldDestination && cred.microblogDestination) changedMicroblogAccount = oldDestination !== cred.microblogDestination;
         else verifyMicroblogPosts = true;
       }
     } catch { verifyMicroblogPosts = true; }
