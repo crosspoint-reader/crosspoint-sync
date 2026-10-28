@@ -140,30 +140,45 @@ function removeCachedClipping(session, document, id) {
 
 // Stage complete clipping reads so a failed legacy batch cannot alter later snapshots.
 async function readClippings(s, doc) {
+  const complete = saved(s, `/api/v1/clippings/${doc}`)
   const items = []
-  const pages = []
   let fromCache = false
-  for (let cursor = 0; ; ) {
-    const path = `/api/v1/clippings/${doc}?cursor=${cursor}&limit=100`
-    const page = await call(s, path, {}, true, { store: false })
-    const cached = offlineCopies.has(page)
-    fromCache ||= cached
-    if (!cached) pages.push({ path, data: page })
-    items.push(...page.items)
-    if (!page.more) break
-    cursor = page.cursor
+  try {
+    for (let cursor = 0; ; ) {
+      const path = `/api/v1/clippings/${doc}?cursor=${cursor}&limit=100`
+      const page = await call(s, path, {}, true, { store: false, offlineFallback: !complete })
+      fromCache ||= offlineCopies.has(page)
+      items.push(...page.items)
+      if (!page.more) break
+      cursor = page.cursor
+    }
+  } catch (error) {
+    if (!complete || error.status) throw error
+    return { items: complete.items, fromCache: true }
   }
   const live = items.filter((c) => !c.deleted)
     .sort((a, b) => a.spine - b.spine || (a.start_offset ?? a.para ?? a.start_page) - (b.start_offset ?? b.para ?? b.start_page))
-  return { items: live, pages, fromCache }
+  return { items: live, fromCache }
 }
 
 function cacheClippings(s, doc, result) {
-  const prefix = `${OFFLINE}${s.username}@${s.server}`
-  for (const { path, data } of result.pages) keep(`${prefix}${path}`, data)
-  // Migrate legacy offline data without replacing newer complete aggregates.
-  if (!result.fromCache || !saved(s, `/api/v1/clippings/${doc}`)) {
-    keep(`${prefix}/api/v1/clippings/${doc}`, { items: result.items }, !result.fromCache)
+  const key = `${OFFLINE}${s.username}@${s.server}/api/v1/clippings/${doc}`
+  const previous = result.fromCache && read(key)
+  const record = previous
+    ? { items: previous.items, savedAt: Object.hasOwn(previous, 'savedAt') ? previous.savedAt : read(`${key}:saved-at`) }
+    : { items: result.items, savedAt: result.fromCache ? null : Date.now() }
+  // Store one complete representation, including freshness. Free legacy page
+  // copies first so migration doesn't require twice the payload's storage quota.
+  const legacy = Object.keys(localStorage).filter((k) => k.startsWith(`${key}?`) || k === `${key}:saved-at`)
+    .map((k) => [k, localStorage.getItem(k)])
+  for (const [k] of legacy) localStorage.removeItem(k)
+  try {
+    localStorage.setItem(key, JSON.stringify(record))
+  } catch {
+    // setItem is atomic; the prior aggregate remains. Restore legacy fallbacks.
+    for (const [k, value] of legacy) {
+      try { localStorage.setItem(k, value) } catch { /* storage unavailable */ }
+    }
   }
 }
 
@@ -273,8 +288,8 @@ export function syncShortcutsCache(session) {
     if (!key.startsWith(perPrefix) || key.includes('?') || key.endsWith(':saved-at')) continue
     const doc = key.slice(perPrefix.length)
     const per = read(key)
-    const at = read(`${key}:saved-at`)
     if (!per) continue
+    const at = Object.hasOwn(per, 'savedAt') ? per.savedAt : read(`${key}:saved-at`)
     if (all && (at ?? 0) < (allAt ?? 0)) {
       if (all.truncated || all.items.length >= 5000) {
         // The capped hub cannot establish that omitted passages were deleted.

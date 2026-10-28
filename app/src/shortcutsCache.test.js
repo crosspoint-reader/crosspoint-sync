@@ -4,7 +4,7 @@ import { JSDOM } from 'jsdom'
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn().mockResolvedValue() }))
 vi.mock('@tauri-apps/plugin-http', () => ({ fetch: vi.fn() }))
 window.__TAURI_INTERNALS__ = {}
-const userAgent = vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('iPhone OS 26_0')
+vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('iPhone OS 26_0')
 vi.stubGlobal('localStorage', new JSDOM('', { url: 'https://app.test' }).window.localStorage)
 const { invoke } = await import('@tauri-apps/api/core')
 const { fetch: http } = await import('@tauri-apps/plugin-http')
@@ -20,7 +20,7 @@ const snapshot = () => {
   return json ? JSON.parse(json) : null
 }
 beforeEach(async () => {
-  userAgent.mockReturnValue('iPhone OS 26_0')
+  vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('iPhone OS 26_0')
   Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 0 })
   window.__TAURI_INTERNALS__ = {}
   logout()
@@ -391,5 +391,62 @@ it('skips Shortcuts cache work in an iPhone browser without the native bridge', 
     expect(invoke).not.toHaveBeenCalled()
   } finally {
     readCache.mockRestore()
+  }
+})
+
+function limitStorage(limit) {
+  const prototype = Object.getPrototypeOf(localStorage)
+  const original = prototype.setItem
+  return vi.spyOn(prototype, 'setItem').mockImplementation(function (key, value) {
+    const size = Object.keys(this).filter((k) => k !== key)
+      .reduce((total, k) => total + k.length + this.getItem(k).length, 0) + key.length + String(value).length
+    if (size > limit) throw new DOMException('Storage quota exceeded', 'QuotaExceededError')
+    return original.call(this, key, value)
+  })
+}
+it('stores a single complete clipping copy when quota only permits one representation', async () => {
+  const clip = { id: 'large', text: 'x'.repeat(2400), created_at: 1 }
+  const quota = limitStorage(3500)
+  try {
+    http.mockResolvedValueOnce(response({ items: [clip], more: false }))
+    await api.clippings(session, 'one')
+    await flush()
+    expect(snapshot().clippings.items[0].text).toBe(clip.text)
+    expect(Object.keys(localStorage).filter((k) => k.includes('/clippings/one?'))).toEqual([])
+    http.mockRejectedValueOnce(new Error('offline'))
+    expect(await api.clippings(session, 'one')).toEqual([clip])
+  } finally {
+    quota.mockRestore()
+  }
+})
+it('migrates complete legacy pages within single-copy storage quota', async () => {
+  const pageKey = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/clippings/one?cursor=0&limit=100'
+  const clip = { id: 'legacy-large', text: 'x'.repeat(2400), created_at: 1 }
+  localStorage.setItem(pageKey, JSON.stringify({ items: [clip], more: false }))
+  const quota = limitStorage(3500)
+  try {
+    http.mockRejectedValue(new Error('offline'))
+    expect(await api.clippings(session, 'one')).toEqual([clip])
+    await flush()
+    expect(snapshot().clippings.items[0]).toMatchObject({ id: 'legacy-large', cachedAt: null })
+    expect(localStorage.getItem(pageKey)).toBeNull()
+    expect(await api.clippings(session, 'one')).toEqual([clip])
+  } finally {
+    quota.mockRestore()
+  }
+})
+it('restores legacy pages if a new complete clipping payload cannot fit', async () => {
+  const pageKey = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/clippings/one?cursor=0&limit=100'
+  const saved = { items: [{ id: 'saved', text: 'Existing' }], more: false }
+  localStorage.setItem(pageKey, JSON.stringify(saved))
+  const quota = limitStorage(1000)
+  try {
+    http.mockResolvedValueOnce(response({ items: [{ id: 'large', text: 'x'.repeat(2400) }], more: false }))
+    await api.clippings(session, 'one')
+    expect(JSON.parse(localStorage.getItem(pageKey))).toEqual(saved)
+    http.mockRejectedValueOnce(new Error('offline'))
+    expect(await api.clippings(session, 'one')).toEqual(saved.items)
+  } finally {
+    quota.mockRestore()
   }
 })
