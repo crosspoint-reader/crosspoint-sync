@@ -1,5 +1,5 @@
 import SparkMD5 from 'spark-md5'
-import { publishShortcuts } from './shortcutsCache.js'
+import { publishShortcuts, supportsShortcuts } from './shortcutsCache.js'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 
 // In the app, requests go through Rust (plain-http LAN servers, any CORS_ORIGINS);
@@ -260,7 +260,7 @@ const bookList = (r) =>
 
 // A credential-free mirror of the data already saved by this app. No requests.
 export function syncShortcutsCache(session) {
-  if (!isApp) return
+  if (!supportsShortcuts()) return
   if (!session) return publishShortcuts(null)
   const prefix = `${OFFLINE}${session.username}@${session.server}`
   const books = saved(session, PROGRESS)

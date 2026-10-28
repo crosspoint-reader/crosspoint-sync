@@ -4,6 +4,7 @@ import { JSDOM } from 'jsdom'
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn().mockResolvedValue() }))
 vi.mock('@tauri-apps/plugin-http', () => ({ fetch: vi.fn() }))
 window.__TAURI_INTERNALS__ = {}
+const userAgent = vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('iPhone OS 26_0')
 vi.stubGlobal('localStorage', new JSDOM('', { url: 'https://app.test' }).window.localStorage)
 const { invoke } = await import('@tauri-apps/api/core')
 const { fetch: http } = await import('@tauri-apps/plugin-http')
@@ -19,6 +20,9 @@ const snapshot = () => {
   return json ? JSON.parse(json) : null
 }
 beforeEach(async () => {
+  userAgent.mockReturnValue('iPhone OS 26_0')
+  Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 0 })
+  window.__TAURI_INTERNALS__ = {}
   logout()
   await flush()
   localStorage.clear()
@@ -348,4 +352,44 @@ it('records an empty legacy clipping collection and restores it offline', async 
   expect(await api.allClippings(session, [])).toEqual([])
   await flush()
   expect(snapshot().clippings).toEqual({ items: [] })
+})
+it.each([
+  ['Android', 'Mozilla/5.0 (Linux; Android 16)', 5],
+  ['macOS', 'Mozilla/5.0 (Macintosh; Intel Mac OS X)', 0],
+  ['Windows', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', 5],
+  ['Linux', 'Mozilla/5.0 (X11; Linux x86_64)', 0],
+])('skips cache reads and native IPC for Shortcuts on %s', (_, agent, touches) => {
+  vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(agent)
+  Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: touches })
+  const readCache = vi.spyOn(Object.getPrototypeOf(localStorage), 'getItem')
+  try {
+    apiModule.syncShortcutsCache(session)
+    expect(readCache).not.toHaveBeenCalled()
+    expect(invoke).not.toHaveBeenCalled()
+  } finally {
+    readCache.mockRestore()
+  }
+})
+it.each([
+  ['iPhone', 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0)', 5],
+  ['iPad', 'Mozilla/5.0 (iPad; CPU OS 26_0)', 5],
+  ['iPad desktop user agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X)', 5],
+])('publishes cached data on %s', async (_, agent, touches) => {
+  vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(agent)
+  Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: touches })
+  localStorage.setItem('crosspoint-offline:v2:reader@https://sync.test/api/v1/progress?limit=500', JSON.stringify({ items: [book] }))
+  apiModule.syncShortcutsCache(session)
+  await flush()
+  expect(snapshot().books.items[0].title).toBe('One')
+})
+it('skips Shortcuts cache work in an iPhone browser without the native bridge', () => {
+  delete window.__TAURI_INTERNALS__
+  const readCache = vi.spyOn(Object.getPrototypeOf(localStorage), 'getItem')
+  try {
+    apiModule.syncShortcutsCache(session)
+    expect(readCache).not.toHaveBeenCalled()
+    expect(invoke).not.toHaveBeenCalled()
+  } finally {
+    readCache.mockRestore()
+  }
 })
