@@ -624,3 +624,56 @@ it('retains both old hub data and freshness when a replacement exceeds quota', a
     storage.mockRestore()
   }
 })
+
+it('saves book freshness with its payload when quota only permits one record', async () => {
+  const key = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/progress?limit=500'
+  // An upgraded cache can already contain the payload without freshness metadata.
+  localStorage.setItem(key, JSON.stringify({ items: [book], next: null }))
+  const fresh = { ...book, title: 'Updated title' }
+  const record = { items: [fresh], next: null, savedAt: 200 }
+  const storage = limitStorage(key.length + JSON.stringify(record).length)
+  const now = vi.spyOn(Date, 'now').mockReturnValue(200)
+  try {
+    http.mockResolvedValueOnce(response({ items: [fresh] }))
+    await api.books(session)
+    await flush()
+    expect(snapshot().books).toMatchObject({ savedAt: 200, items: [{ title: 'Updated title' }] })
+    expect(JSON.parse(localStorage.getItem(key))).toEqual(record)
+    now.mockReturnValue(300)
+    http.mockRejectedValueOnce(new Error('offline'))
+    await api.books(session)
+    await flush()
+    expect(snapshot().books.savedAt).toBe(200)
+  } finally {
+    storage.mockRestore()
+    now.mockRestore()
+  }
+})
+
+it.each(['legacy', 'embedded'])('preserves %s book freshness on offline reads', async (format) => {
+  const key = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/progress?limit=500'
+  const previous = { items: [book], next: null }
+  localStorage.setItem(key, JSON.stringify(format === 'embedded' ? { ...previous, savedAt: 100 } : previous))
+  if (format === 'legacy') localStorage.setItem(`${key}:saved-at`, '100')
+  http.mockRejectedValueOnce(new Error('offline'))
+  await api.books(session)
+  await flush()
+  expect(snapshot().books.savedAt).toBe(100)
+  expect(JSON.parse(localStorage.getItem(key))).toEqual({ ...previous, savedAt: 100 })
+})
+
+it('retains both old book data and freshness when a replacement exceeds quota', async () => {
+  const key = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/progress?limit=500'
+  const previous = { items: [book], next: null, savedAt: 100 }
+  localStorage.setItem(key, JSON.stringify(previous))
+  const storage = limitStorage(key.length + JSON.stringify(previous).length)
+  try {
+    http.mockResolvedValueOnce(response({ items: [{ ...book, title: 'x'.repeat(2000) }] }))
+    await api.books(session)
+    await flush()
+    expect(JSON.parse(localStorage.getItem(key))).toEqual(previous)
+    expect(snapshot().books).toMatchObject({ savedAt: 100, items: [{ title: book.title }] })
+  } finally {
+    storage.mockRestore()
+  }
+})

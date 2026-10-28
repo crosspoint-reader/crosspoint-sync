@@ -241,7 +241,12 @@ async function allProgress(session) {
   assertReadingVersion(version, reading)
   const all = { items, next: null }
   if (version === sessionVersion) {
-    keep(`${OFFLINE}${session.username}@${session.server}${PROGRESS}`, all, !offlineCopies.has(first))
+    const key = `${OFFLINE}${session.username}@${session.server}${PROGRESS}`
+    const savedAt = offlineCopies.has(first)
+      ? Object.hasOwn(first, 'savedAt') ? first.savedAt : read(`${key}:saved-at`)
+      : Date.now()
+    // Commit the complete library and its freshness in one atomic write.
+    keep(key, { ...all, savedAt })
     syncShortcutsCache(session)
   }
   return all
@@ -347,7 +352,7 @@ export function syncShortcutsCache(session) {
   return publishShortcuts({
     account: JSON.stringify([session.server, session.username]),
     books: books ? {
-      savedAt: read(`${prefix}${PROGRESS}:saved-at`),
+      savedAt: Object.hasOwn(books, 'savedAt') ? books.savedAt : read(`${prefix}${PROGRESS}:saved-at`),
       items: bookList(books).map((b) => ({
         document: b.document, title: b.title || b.filename, author: b.author ?? '',
         status: b.status ?? 'reading', percentage: b.percentage, timestamp: b.timestamp,
