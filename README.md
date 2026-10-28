@@ -161,6 +161,26 @@ Native app association files, when enabled, remain at domain-root `/.well-known/
 Treat the token like a password: Micro.blog app tokens have full account access. CrossPoint Sync
 encrypts the token at rest using `TOKEN_ENC_KEY`.
 
+With Micro.blog linked, each clipping on the **Clippings** page has an
+**Add highlight to Micro.blog** action. Selected highlights are collected into
+one published post per book, linking to its matched Micro.blog book page.
+Further selections update that post. CrossPoint Sync manages its generated
+content, so later updates replace edits made directly to that content on Micro.blog.
+
+**Automatically sync highlights** in the Micro.blog settings is off by default.
+Enabling it includes existing and future clippings. Unmatched books wait without
+interrupting reader sync; after matching a book, its eligible highlights are sent
+on the next reader sync or **Sync now**. Turning automatic sync off stops automatic
+additions while retaining published passages and manually selected highlights.
+
+For local testing, use Node 22.13 or newer, build the frontend with
+`npm run build:frontend`, and copy `.env.example` to `.env`. Set a separate
+`DATABASE_PATH` (such as `./data/microblog-test.db`), `PORT=8081`, and a persistent
+`TOKEN_ENC_KEY` generated with `openssl rand -hex 32`. Run `npm run dev` and open
+[the local app](http://localhost:8081/app/). Create a local account, sync a book
+and its clippings from a reader, link Micro.blog, and match the book before trying
+the clipping action or automatic sync. These actions publish to the linked blog.
+
 ## Point your reader at it
 
 - **KOReader:** Tools → Progress sync → Custom sync server → `http://your-host:8080`

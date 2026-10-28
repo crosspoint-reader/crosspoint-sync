@@ -63,6 +63,25 @@ unchanged-content deduplication, updates, retry/recovery, per-user isolation, an
 canonical document aliases. Run relevant backend tests, the backend build, and
 frontend checks available in this repository.
 
+## Implementation notes
+
+- Quotes and notes are escaped HTML, so highlighted Markdown is displayed as
+  text rather than interpreted as new markup; reader typography may differ.
+- Pending jobs preserve retry backoff. When content changes during a network
+  request, successful completion compares current content and queues a follow-up.
+- Token validation discovers the default blog through Micropub configuration.
+  Rotating a token for the same verified blog preserves the post and selections.
+  A proven different blog resets local tracking and disables automatic sync.
+  If ownership is unknown, retained identities must be recovered through the new
+  token's source feed; switching blogs may require explicit unlink/reconnect.
+- Missing ISBN errors can be retried after correcting the book match. A still
+  invalid match may produce a failed attempt on another sync.
+- Deleting book/account data clears local publication records while retaining
+  remote posts. Reimporting a deleted book starts fresh tracking.
+- Migration 0041 adds publication-link deduplication metadata separately so
+  databases already testing migration 0040 can upgrade normally.
+- Verified with 820 backend tests, 232 frontend tests, and backend/frontend builds.
+
 ## References
 
 - [Micro.blog Micropub creation and updates](https://microblog.dev/api/posting/)

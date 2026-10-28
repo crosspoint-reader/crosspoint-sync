@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Copy, FileDown, Quote, Search } from 'lucide-react'
 import { api, cached, isApp } from './api.js'
 import { saveFile } from './shareCard.js'
@@ -25,7 +25,7 @@ function markdown(groups) {
     .join('\n\n---\n\n')
 }
 
-function Clip({ session, clip, book, onShare, onDelete, showBook }) {
+function Clip({ session, clip, book, onShare, onDelete, showBook, onMicroblog, sending }) {
   return (
     <article className={`group relative select-none [-webkit-touch-callout:none] ${showBook
       ? 'border-b border-stone-200 pt-6 pb-4 md:pr-8'
@@ -42,10 +42,15 @@ function Clip({ session, clip, book, onShare, onDelete, showBook }) {
           </div>
         </a>
       )}
-      <div className="mt-2 flex items-center justify-between gap-3">
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
         <button onClick={() => onShare(clip)} className="-ml-2 flex h-11 items-center gap-1.5 rounded-full px-2 text-sm font-medium text-brand-600 active:bg-stone-100">
           <ShareIcon className="size-4" /> Share
         </button>
+        {onMicroblog && (
+          <button type="button" disabled={sending} onClick={() => onMicroblog(clip)} className="min-h-11 rounded-full px-2 text-sm font-medium text-brand-600 disabled:opacity-50">
+            Add highlight to Micro.blog
+          </button>
+        )}
         <p className="truncate text-xs text-stone-500">{[clip.chapter, date(clip.created_at)].filter(Boolean).join(' · ')}</p>
       </div>
     </article>
@@ -54,11 +59,16 @@ function Clip({ session, clip, book, onShare, onDelete, showBook }) {
 
 export default function Clippings({ session, books }) {
   const [items, error, reload] = useLoad(() => api.allClippings(session, books), [session], `clippings:${session.username}`, () => cached.clippings(session))
+  const [connectors] = useLoad(() => api.connectors(session).then((r) => r.connectors), [session], `clipping-connectors:${session.username}`)
+  const microblog = connectors?.some((c) => c.id === 'microblog' && c.linked)
   const [query, setQuery] = useState('')
   const [only, setOnly] = useState(null) // document
   const [sharing, setSharing] = useState(null)
   const [deleting, setDeleting] = useState(null)
   const [note, setNote] = useState(null)
+  const [sending, setSending] = useState(false)
+  const pending = useRef(false)
+  const [sendError, setSendError] = useState(null)
   const byDoc = useMemo(() => new Map(books.map((b) => [b.document, b])), [books])
 
   // Only clippings of books the library shows (metadata-less ones are hidden everywhere).
@@ -73,6 +83,26 @@ export default function Clippings({ session, books }) {
   const groups = [...new Set(matches.map((c) => c.document))].map((doc) => ({ book: byDoc.get(doc), clips: matches.filter((c) => c.document === doc) }))
   const counts = all.reduce((m, c) => m.set(c.document, (m.get(c.document) ?? 0) + 1), new Map())
   const daily = all.length ? ofTheDay(all) : null
+
+  async function addToMicroblog(clip) {
+    if (pending.current) return
+    pending.current = true
+    setSending(true)
+    setNote(null)
+    setSendError(null)
+    try {
+      const result = await api.addMicroblogHighlight(session, clip.document, clip.id)
+      setNote(result.waiting_for_match
+        ? 'Highlight saved for Micro.blog. Match this book in Settings; it will be included on the next sync.'
+        : result.queued ? 'Highlight selected for the book’s Micro.blog post. The update is queued.'
+          : 'Highlight is selected for the book’s Micro.blog post.')
+    } catch (error) {
+      setSendError(error.message || 'Could not add this highlight to Micro.blog.')
+    } finally {
+      pending.current = false
+      setSending(false)
+    }
+  }
 
   async function exportMd(save, e) {
     // A <details> menu stays open until toggled; close it so the note shows.
@@ -90,6 +120,7 @@ export default function Clippings({ session, books }) {
   return (
     <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
       <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">Clippings</h1>
+      {sendError && <p role="alert" className="mt-3 text-sm text-red-600">{sendError}</p>}
 
       {error && !items ? (
         <ErrorNote error={error} />
@@ -107,7 +138,7 @@ export default function Clippings({ session, books }) {
             <section className="mt-6">
               <p className="inline-block -rotate-1 font-hand text-xl text-brand-600">Highlight of the day</p>
               <div className="mt-2 md:max-w-2xl">
-                <Clip session={session} clip={daily} book={byDoc.get(daily.document)} onShare={setSharing} onDelete={setDeleting} showBook />
+                <Clip session={session} clip={daily} book={byDoc.get(daily.document)} onShare={setSharing} onDelete={setDeleting} showBook onMicroblog={microblog ? addToMicroblog : null} sending={sending} />
               </div>
             </section>
           )}
@@ -140,7 +171,7 @@ export default function Clippings({ session, books }) {
               </div>
             </details>
           </div>
-          {note && <p className="mt-2 text-sm text-stone-600">{note}</p>}
+          {note && <p role="status" className="mt-2 text-sm text-stone-600">{note}</p>}
 
           <div className="-mx-4 mt-4 flex gap-5 overflow-x-auto px-4 pb-1 [scrollbar-width:none] md:mx-0 md:flex-wrap md:px-0">
             <button
@@ -178,7 +209,7 @@ export default function Clippings({ session, books }) {
               </a>
               <div className="mt-3 grid grid-cols-1 gap-x-8 md:grid-cols-2">
                 {clips.map((c) => (
-                  <Clip key={c.id} session={session} clip={c} book={book} onShare={setSharing} onDelete={setDeleting} />
+                  <Clip key={c.id} session={session} clip={c} book={book} onShare={setSharing} onDelete={setDeleting} onMicroblog={microblog ? addToMicroblog : null} sending={sending} />
                 ))}
               </div>
             </section>

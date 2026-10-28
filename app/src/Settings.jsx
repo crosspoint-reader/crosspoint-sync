@@ -38,7 +38,7 @@ function Appearance({ theme: [pref, setPref] }) {
 // What each service does, as on the web dashboard.
 const HINTS = {
   hardcover: 'Syncs your reading progress and shelf status to Hardcover, and your highlights if you turn them on.',
-  microblog: 'Keeps your Currently reading and Finished reading bookshelves in sync.',
+  microblog: 'Keeps your Currently reading and Finished reading bookshelves in sync. Optional highlight sync publishes one post per book and updates its generated content on later syncs, replacing edits made on Micro.blog.',
   readwise: 'Syncs your highlights to Readwise.',
   'readwise-reader': 'Archives books in Reader when you finish them, and brings your Reader progress back.',
   kosync: 'Mirrors your reading progress to another KOReader-compatible (KOSync) server. For Calibre-Web, use your library URL ending in /kosync.',

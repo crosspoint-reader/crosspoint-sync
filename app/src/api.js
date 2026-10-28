@@ -235,6 +235,7 @@ export const api = {
   linkConnector: (s, id, credential) => call(s, `/api/v1/connectors/${id}`, { method: 'PUT', body: JSON.stringify({ credential }) }),
   unlinkConnector: (s, id) => call(s, `/api/v1/connectors/${id}`, { method: 'DELETE' }),
   syncConnector: (s, id) => call(s, `/api/v1/connectors/${id}/sync`, { method: 'POST' }),
+  addMicroblogHighlight: (s, doc, clippingId) => call(s, `/api/v1/connectors/microblog/clippings/${encodeURIComponent(doc)}/${encodeURIComponent(clippingId)}`, { method: 'POST' }),
   syncBook: (s, id, doc) => call(s, `/api/v1/connectors/${id}/sync/${doc}`, { method: 'POST' }),
   setConnectorOptions: (s, id, options) => call(s, `/api/v1/connectors/${id}/options`, { method: 'PUT', body: JSON.stringify(options) }),
   beginLink: (s, id) => call(s, `/api/v1/connectors/${id}/link/begin`, { method: 'POST' }),

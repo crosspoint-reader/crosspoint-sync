@@ -56,7 +56,7 @@ describe('Micro.blog web setup', () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(getElement('desc').textContent).toBe(
+    expect(getElement('desc').textContent).toContain(
       'Connect an app token to keep your Currently reading and Finished reading bookshelves in sync.',
     );
     expect(getElement('form').innerHTML).toContain('Sign in to Micro.blog');

@@ -613,7 +613,7 @@ async function linkCredential(body) {
 
 const HINTS = {
   hardcover: 'Syncs your reading progress and shelf status to Hardcover.',
-  microblog: 'Connect an app token to keep your Currently reading and Finished reading bookshelves in sync.',
+  microblog: 'Connect an app token to keep your Currently reading and Finished reading bookshelves in sync. Optional highlight sync publishes one post per book and updates its generated content on later syncs, replacing edits made on Micro.blog.',
   readwise: 'Paste your Readwise access token from readwise.io/access_token. Syncs your highlights.',
   'readwise-reader': 'Paste your Readwise access token from readwise.io/access_token. Archives books in Reader when you finish them, and brings your Reader progress back to your device.',
   kosync: 'Mirror your reading progress to another KOReader-compatible (KOSync) server, so your other devices see it too.',
