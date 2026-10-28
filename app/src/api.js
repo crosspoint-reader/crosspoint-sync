@@ -66,9 +66,10 @@ export const offline = new EventTarget()
 let sessionVersion = 0
 const offlineCopies = new WeakSet()
 
-function clearOffline() {
+function clearOffline(session) {
+  const prefix = session ? `${OFFLINE}${session.username}@${session.server}/` : OFFLINE_PREFIX
   for (const key of Object.keys(localStorage)) {
-    if (key.startsWith(OFFLINE_PREFIX)) localStorage.removeItem(key)
+    if (key.startsWith(prefix)) localStorage.removeItem(key)
   }
 }
 
@@ -341,7 +342,16 @@ export const api = {
   setProfile: (s, enabled) => call(s, '/api/v1/profile', { method: 'PUT', body: JSON.stringify({ enabled }) }),
   // The sync account itself.
   changePassword: (s, password) => call(s, '/api/v1/account/password', { method: 'POST', body: JSON.stringify({ key: SparkMD5.hash(password) }) }),
-  clearData: (s) => call(s, '/api/v1/account/data', { method: 'DELETE' }),
+  async clearData(s) {
+    const version = sessionVersion
+    const result = await call(s, '/api/v1/account/data', { method: 'DELETE' })
+    if (version === sessionVersion) {
+      sessionVersion++ // Older in-flight reads must not restore pre-clear data.
+      clearOffline(s)
+      await publishShortcuts(null) // Settings reloads as soon as this resolves.
+    }
+    return result
+  },
   deleteAccount: (s) => call(s, '/api/v1/account', { method: 'DELETE' }),
   removeBook: (s, doc) => call(s, `/api/v1/progress/${doc}`, { method: 'DELETE' }),
   // Manual reading dates: { start_date, finished_date } as 'YYYY-MM-DD', null clears, omitted = unchanged.

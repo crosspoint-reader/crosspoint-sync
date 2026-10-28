@@ -171,3 +171,70 @@ it('does not publish partial legacy clipping data if a book fetch fails', async 
   await flush()
   expect(invoke.mock.calls.filter(([name]) => name === 'update_shortcuts')).toHaveLength(0)
 })
+it('clears reading caches before resolving clearData, waits for native clearing and keeps sign-in', async () => {
+  apiModule.saveSession(session)
+  localStorage.setItem('crosspoint-theme', 'dark')
+  localStorage.setItem('crosspoint-offline:v2:other@https://sync.test/api/v1/clippings', JSON.stringify({ items: [] }))
+  http.mockResolvedValueOnce(response({ items: [book] }))
+  await api.books(session)
+  http.mockResolvedValueOnce(response({ items: [{ document: 'one', id: 'old', text: 'Old' }] }))
+  await api.allClippings(session, [])
+  await flush()
+  let finishNative
+  invoke.mockImplementationOnce(() => new Promise((r) => { finishNative = r }))
+  http.mockResolvedValueOnce(response({ ok: true }))
+  let finished = false
+  const pending = api.clearData(session).then(() => { finished = true })
+  try {
+    await flush()
+    expect(apiModule.cached.books(session)).toBeNull()
+    expect(apiModule.cached.clippings(session)).toBeNull()
+    expect(snapshot()).toBeNull()
+    expect(finished).toBe(false)
+    expect(apiModule.loadSession()).toEqual(session)
+    expect(localStorage.getItem('crosspoint-theme')).toBe('dark')
+    expect(localStorage.getItem('crosspoint-offline:v2:other@https://sync.test/api/v1/clippings')).not.toBeNull()
+    finishNative()
+    await pending
+  } finally {
+    finishNative?.()
+    invoke.mockReset().mockResolvedValue()
+  }
+})
+it('does not restore reading data from a fetch that completes after clearData', async () => {
+  let finishFetch
+  http.mockReturnValueOnce(new Promise((r) => { finishFetch = r }))
+  const pending = api.books(session)
+  http.mockResolvedValueOnce(response({ ok: true }))
+  await api.clearData(session)
+  finishFetch(response({ items: [book] }))
+  await pending
+  await flush()
+  expect(apiModule.cached.books(session)).toBeNull()
+  expect(snapshot()).toBeNull()
+})
+it('retains cached data if clearing reading data fails', async () => {
+  http.mockResolvedValueOnce(response({ items: [book] }))
+  await api.books(session)
+  await flush()
+  const before = snapshot()
+  http.mockRejectedValueOnce(new Error('offline'))
+  await expect(api.clearData(session)).rejects.toThrow('offline')
+  await flush()
+  expect(apiModule.cached.books(session)).toHaveLength(1)
+  expect(snapshot()).toEqual(before)
+})
+it('does not clear a newly selected account after a delayed old-account clearData response', async () => {
+  let finishClear
+  http.mockReturnValueOnce(new Promise((r) => { finishClear = r }))
+  const pending = api.clearData(session)
+  logout()
+  const other = { ...session, username: 'other' }
+  http.mockResolvedValueOnce(response({ items: [book] }))
+  await api.books(other)
+  finishClear(response({ ok: true }))
+  await pending
+  await flush()
+  expect(snapshot().account).toBe('["https://sync.test","other"]')
+  expect(apiModule.cached.books(other)).toHaveLength(1)
+})

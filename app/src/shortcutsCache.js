@@ -8,4 +8,5 @@ export function publishShortcuts(snapshot) {
   writes = writes.catch(() => {}).then(() => invoke('update_shortcuts', { json }))
   // A native bridge failure must not break normal app use. The next publication retries.
   writes.catch((error) => console.warn('Could not update Shortcuts offline data', error))
+  return writes
 }
