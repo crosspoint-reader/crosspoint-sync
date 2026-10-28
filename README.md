@@ -39,6 +39,20 @@ For local image builds from the checkout, use:
 docker compose -f docker-compose.dev.yml up -d --build
 ```
 
+For localhost testing with connector credentials, Docker can forward requests
+from a bridge address instead of a loopback address. Put your persistent
+`TOKEN_ENC_KEY` in `.env`, then run:
+
+```sh
+HOST_BIND=127.0.0.1 HOST_PORT=8081 ALLOW_HTTP_LOCALHOST=true \
+  docker compose -f docker-compose.dev.yml up -d --build
+```
+
+Open `http://localhost:8081/app/`. This opt-in allows credential entry over HTTP
+only for localhost URLs; keep the host port bound to `127.0.0.1`. For `docker run`,
+use `-p 127.0.0.1:8081:8080 -e ALLOW_HTTP_LOCALHOST=true` and your existing encryption
+key and data volume. Public/self-hosted network deployments should use HTTPS.
+
 To serve under a subpath, pass `-e BASE_PATH=/crosspoint-sync` to `docker run`,
 or run `BASE_PATH=/crosspoint-sync docker compose up -d`. The same image works
 at any prefix; no frontend rebuild is needed.
@@ -137,6 +151,7 @@ DATABASE_PATH=./data/crosspoint.db PORT=8080 node dist/index.js
 | `REGISTRATION_DISABLED` | `false` | Set `true` to lock down a private instance |
 | `AUTH_RATE_LIMIT_PER_MINUTE` | `30` | Per-IP limit on registration (0 disables) |
 | `TOKEN_ENC_KEY` | _(unset)_ | Enables external-service connectors. 64 hex chars, a base64 32-byte key, or a ≥32-char passphrase. Encrypts stored connector credentials at rest; unset = connectors disabled. |
+| `ALLOW_HTTP_LOCALHOST` | `false` | Local Docker testing only: allow connector credentials over HTTP at `localhost`, `127.0.0.1`, or `[::1]` when Docker forwards from a bridge peer. Bind the published port to `127.0.0.1`; leave disabled on network-facing deployments. |
 | `TRUST_PROXY` | `false` (`true` on Railway) | Set `true` only when direct access is blocked and a trusted reverse proxy overwrites any client-supplied `X-Forwarded-Proto`; permits connector linking through an HTTPS-terminating proxy. Defaults to `true` when `RAILWAY_ENVIRONMENT` is present, since Railway always fronts the service with its TLS-terminating edge; set `TRUST_PROXY=false` to override. |
 | `GOOGLE_BOOKS_API_KEY` | _(unset)_ | Optional. Fallback source for print page counts when Open Library has none (keyless Google Books has no quota). |
 | `HARDCOVER_API_KEY` | _(unset)_ | Optional. A Hardcover API key (`read:catalog` is enough) for book details from Hardcover's catalog: moods, genres, content warnings, rating, series, release year, and page counts/covers where other sources miss. One lookup per distinct book, cached for all users, throttled under Hardcover's free-plan limits. |

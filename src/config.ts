@@ -6,6 +6,8 @@ export interface Config {
   authRateLimitPerMinute: number;
   /** Trust the deployment's reverse proxy to set X-Forwarded-Proto. */
   trustProxy: boolean;
+  /** Opt-in for Docker localhost testing with the host port bound to loopback. */
+  allowHttpLocalhost?: boolean;
   /**
    * Origins allowed to call the sync API from a browser. '*' (the default)
    *   is safe because the API authenticates with headers, not cookies, so
@@ -32,6 +34,7 @@ export function fromEnv(env: NodeJS.ProcessEnv = process.env): Config {
     trustProxy: env.TRUST_PROXY
       ? env.TRUST_PROXY === 'true' || env.TRUST_PROXY === '1'
       : Boolean(env.RAILWAY_ENVIRONMENT),
+    allowHttpLocalhost: env.ALLOW_HTTP_LOCALHOST === 'true' || env.ALLOW_HTTP_LOCALHOST === '1',
     corsOrigins: env.CORS_ORIGINS
       ? env.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
       : '*',

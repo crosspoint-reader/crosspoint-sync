@@ -137,12 +137,15 @@ export const CREDENTIAL_HTTPS_REQUIRED = 'Connector credentials require HTTPS to
   + 'If HTTPS ends at a reverse proxy, configure TRUST_PROXY=true on the Sync server '
   + 'and have the proxy send X-Forwarded-Proto: https. Only enable proxy trust when direct access to Sync is blocked.';
 
-export function credentialRequestIsSecure(c: Context<AppEnv>, trustProxy: boolean): boolean {
+export function credentialRequestIsSecure(c: Context<AppEnv>, trustProxy: boolean, allowHttpLocalhost = false): boolean {
   const url = new URL(c.req.url);
   if (url.protocol === 'https:') return true;
   const incoming = c.env?.incoming;
   const peerAddress = incoming?.socket?.remoteAddress;
-  if (loopbackHostname(url.hostname) && (!incoming || (peerAddress && loopbackAddress(peerAddress)))) {
+  // Docker NAT can give a host-local request a bridge peer address. Only an
+  // explicit localhost-testing opt-in bypasses the peer check; the host port
+  // must be bound to 127.0.0.1. Host alone is not trusted on ordinary installs.
+  if (loopbackHostname(url.hostname) && (!incoming || (peerAddress && (loopbackAddress(peerAddress) || allowHttpLocalhost)))) {
     return true;
   }
   return trustProxy
@@ -161,7 +164,8 @@ export function connectorRoutes(
   db: DB,
   transport: HttpTransport = fetchTransport,
   trustProxy = false,
-  basePath = ''
+  basePath = '',
+  allowHttpLocalhost = false
 ): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
@@ -227,7 +231,7 @@ export function connectorRoutes(
     if (conn.oauth) {
       return c.json({ code: 2003, message: `Update the CrossPoint Sync app to sign in with ${conn.displayName}.` }, 400);
     }
-    if (!credentialRequestIsSecure(c, trustProxy)) {
+    if (!credentialRequestIsSecure(c, trustProxy, allowHttpLocalhost)) {
       return c.json({ code: 2003, message: CREDENTIAL_HTTPS_REQUIRED }, 400);
     }
     if (!secretsEnabled()) {
@@ -271,7 +275,7 @@ export function connectorRoutes(
     const conn = getConnector(c.req.param('id'));
     if (!conn) return c.json({ code: 2003, message: 'Unknown connector' }, 404);
     if (!conn.beginLink) return c.json({ code: 2003, message: 'Connector has no device link' }, 400);
-    if (!credentialRequestIsSecure(c, trustProxy)) {
+    if (!credentialRequestIsSecure(c, trustProxy, allowHttpLocalhost)) {
       return c.json({ code: 2003, message: CREDENTIAL_HTTPS_REQUIRED }, 400);
     }
     if (!secretsEnabled()) {
@@ -297,7 +301,7 @@ export function connectorRoutes(
     const conn = getConnector(c.req.param('id'));
     if (!conn) return c.json({ code: 2003, message: 'Unknown connector' }, 404);
     if (!conn.pollLink) return c.json({ code: 2003, message: 'Connector has no device link' }, 400);
-    if (!credentialRequestIsSecure(c, trustProxy)) {
+    if (!credentialRequestIsSecure(c, trustProxy, allowHttpLocalhost)) {
       return c.json({ code: 2003, message: CREDENTIAL_HTTPS_REQUIRED }, 400);
     }
     let deviceCode: unknown;
@@ -365,7 +369,7 @@ export function connectorRoutes(
     const config = conn.oauth!();
     const clientId = getClientId(db, user.id, conn.id) ?? config.clientId;
     if (!clientId) return c.json({ code: 2003, message: `Add your ${conn.displayName} app's Client ID first.` }, 400);
-    if (!credentialRequestIsSecure(c, trustProxy)) {
+    if (!credentialRequestIsSecure(c, trustProxy, allowHttpLocalhost)) {
       return c.json({ code: 2003, message: CREDENTIAL_HTTPS_REQUIRED }, 400);
     }
     if (!secretsEnabled()) {
