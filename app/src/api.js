@@ -166,6 +166,7 @@ async function readClippings(s, doc) {
     }
   } catch (error) {
     if (!complete || error.status || error.stale) throw error
+    offline.dispatchEvent(new Event('offline'))
     return { items: complete.items, fromCache: true }
   }
   const live = items.filter((c) => !c.deleted)

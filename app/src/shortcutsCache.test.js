@@ -556,3 +556,18 @@ it('does not prune a new session when an old book removal completes', async () =
   await flush()
   expect(snapshot().books.items).toHaveLength(1)
 })
+
+it('announces offline state when falling back to complete book clippings', async () => {
+  const clip = { id: 'saved', text: 'Cached passage' }
+  http.mockResolvedValueOnce(response({ items: [clip], more: false }))
+  await api.clippings(session, 'one')
+  const onOffline = vi.fn()
+  apiModule.offline.addEventListener('offline', onOffline)
+  try {
+    http.mockRejectedValueOnce(new Error('offline'))
+    expect(await api.clippings(session, 'one')).toEqual([clip])
+    expect(onOffline).toHaveBeenCalledOnce()
+  } finally {
+    apiModule.offline.removeEventListener('offline', onOffline)
+  }
+})
