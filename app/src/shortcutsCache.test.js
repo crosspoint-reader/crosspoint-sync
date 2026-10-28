@@ -500,3 +500,59 @@ it('does not fall back to a complete clipping copy captured before deletion', as
   await rejected
   expect(snapshot().clippings.items).toEqual([])
 })
+
+it('prunes a removed book and its clippings before any library reload', async () => {
+  const prefix = 'crosspoint-offline:v2:reader@https://sync.test'
+  http.mockResolvedValueOnce(response({ items: [book, { ...book, document: 'two', title: 'Two' }] }))
+  await api.books(session)
+  http.mockResolvedValueOnce(response({ items: [{ document: 'one', id: 'remove' }, { document: 'two', id: 'keep' }] }))
+  await api.allClippings(session, [])
+  http.mockResolvedValueOnce(response({ items: [{ id: 'remove' }], more: false }))
+  await api.clippings(session, 'one')
+  localStorage.setItem(`${prefix}/api/v1/clippings/one?cursor=0&limit=100`, JSON.stringify({ items: [{ id: 'remove' }] }))
+  http.mockResolvedValueOnce(response({ ok: true }))
+  await api.removeBook(session, 'one')
+  expect(snapshot().books.items.map((b) => b.document)).toEqual(['two'])
+  expect(snapshot().clippings.items.map((c) => c.id)).toEqual(['keep'])
+  expect(Object.keys(localStorage).some((key) => key.startsWith(`${prefix}/api/v1/clippings/one`))).toBe(false)
+  http.mockRejectedValue(new Error('offline'))
+  expect((await api.books(session)).map((b) => b.document)).toEqual(['two'])
+  expect((await api.allClippings(session, [])).map((c) => c.id)).toEqual(['keep'])
+})
+
+it.each(['books', 'clippings'])('rejects a delayed %s read after removing its book', async (source) => {
+  let resolve
+  http.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+  const pending = source === 'books' ? api.books(session) : api.clippings(session, 'one')
+  const rejected = expect(pending).rejects.toThrow('Reading data changed')
+  http.mockResolvedValueOnce(response({ ok: true }))
+  await api.removeBook(session, 'one')
+  resolve(response({ items: source === 'books' ? [book] : [{ id: 'removed' }], more: false }))
+  await rejected
+  expect(snapshot().books).toBeNull()
+  expect(snapshot().clippings).toBeNull()
+})
+
+it('keeps cached books when removal fails', async () => {
+  http.mockResolvedValueOnce(response({ items: [book] }))
+  await api.books(session)
+  await flush()
+  const before = snapshot()
+  http.mockRejectedValue(new Error('offline'))
+  await expect(api.removeBook(session, 'one')).rejects.toThrow('offline')
+  expect(snapshot()).toEqual(before)
+  expect(apiModule.cached.books(session)).toHaveLength(1)
+})
+
+it('does not prune a new session when an old book removal completes', async () => {
+  let resolve
+  http.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+  const pending = api.removeBook(session, 'one')
+  logout()
+  http.mockResolvedValueOnce(response({ items: [book] }))
+  await api.books(session)
+  resolve(response({ ok: true }))
+  await pending
+  await flush()
+  expect(snapshot().books.items).toHaveLength(1)
+})

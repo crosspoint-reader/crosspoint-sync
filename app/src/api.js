@@ -133,6 +133,7 @@ function keep(key, data, timestampSaved = false) {
 }
 
 // Remove a successful deletion from every saved representation of that book.
+// An omitted id removes all of the book's clippings.
 function removeCachedClipping(session, document, id) {
   const hubKey = `${OFFLINE}${session.username}@${session.server}/api/v1/clippings`
   const bookKey = `${hubKey}/${document}`
@@ -141,7 +142,7 @@ function removeCachedClipping(session, document, id) {
     if (!hub && key !== bookKey && !key.startsWith(`${bookKey}?`)) continue
     const data = read(key)
     if (!Array.isArray(data?.items)) continue
-    const items = data.items.filter((c) => c.id !== id || (hub && c.document !== document))
+    const items = data.items.filter((c) => (id !== undefined && c.id !== id) || (hub && c.document !== document))
     if (items.length === data.items.length) continue
     // Removing one item doesn't make a capped response a complete collection.
     const truncated = hub && data.items.length >= 5000 ? { truncated: true } : {}
@@ -194,6 +195,23 @@ function cacheClippings(s, doc, result) {
 }
 
 const PROGRESS = '/api/v1/progress?limit=500'
+
+function removeCachedBook(session, document) {
+  const prefix = `${OFFLINE}${session.username}@${session.server}`
+  const key = `${prefix}${PROGRESS}`
+  const progress = read(key)
+  if (Array.isArray(progress?.items)) {
+    keep(key, { ...progress, items: progress.items.filter((b) => b.document !== document) })
+  }
+  removeCachedClipping(session, document)
+  // Discard complete and legacy per-book copies, including freshness metadata.
+  for (const key of Object.keys(localStorage)) {
+    for (const kind of ['progress', 'clippings']) {
+      const bookKey = `${prefix}/api/v1/${kind}/${document}`
+      if (key === bookKey || key === `${bookKey}:saved-at` || key.startsWith(`${bookKey}?`)) localStorage.removeItem(key)
+    }
+  }
+}
 
 // Every synced book: follows the server's pages, then saves the whole list as the first page's offline copy.
 // A page that fails leaves the previous complete copy in place.
@@ -427,7 +445,16 @@ export const api = {
     return result
   },
   deleteAccount: (s) => call(s, '/api/v1/account', { method: 'DELETE' }),
-  removeBook: (s, doc) => call(s, `/api/v1/progress/${doc}`, { method: 'DELETE' }),
+  async removeBook(s, doc) {
+    const version = sessionVersion
+    const result = await call(s, `/api/v1/progress/${doc}`, { method: 'DELETE' })
+    if (version === sessionVersion) {
+      readingVersion++
+      removeCachedBook(s, doc)
+      await syncShortcutsCache(s)?.catch(() => {})
+    }
+    return result
+  },
   // Manual reading dates: { start_date, finished_date } as 'YYYY-MM-DD', null clears, omitted = unchanged.
   setDates: (s, doc, dates) => call(s, `/api/v1/documents/${doc}/dates`, { method: 'PUT', body: JSON.stringify(dates) }),
   setInfo: (s, doc, patch) => call(s, `/api/v1/documents/${doc}/info`, { method: 'PUT', body: JSON.stringify(patch) }),
