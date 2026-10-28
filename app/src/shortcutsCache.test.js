@@ -852,3 +852,40 @@ it.each([false, true])('preserves unrelated hub-only clippings during a merge (c
   await flush()
   expect(snapshot().clippings.items.some((c) => c.document === 'two' && c.id === 'merged')).toBe(true)
 })
+
+it('removes a merged source from cached books when the library reload is offline', async () => {
+  const key = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/progress?limit=500'
+  const books = [book, { ...book, document: 'two', title: 'Target' }, { ...book, document: 'other', title: 'Unrelated' }]
+  localStorage.setItem(key, JSON.stringify({ items: books, next: null, savedAt: 100 }))
+  http.mockResolvedValueOnce(response({ ok: true }))
+  await api.merge(session, 'one', 'two')
+  expect(apiModule.cached.books(session).map((b) => b.document)).toEqual(['two', 'other'])
+  expect(snapshot().books.items.map((b) => b.document)).toEqual(['two', 'other'])
+  expect(snapshot().books.savedAt).toBe(100)
+  http.mockRejectedValueOnce(new Error('offline'))
+  expect((await api.books(session)).map((b) => b.document)).toEqual(['two', 'other'])
+  await flush()
+  expect(snapshot().books.items.map((b) => b.document)).toEqual(['two', 'other'])
+  expect(snapshot().books.savedAt).toBe(100)
+})
+
+it('rejects library reads begun before a merge', async () => {
+  let resolve
+  http.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+  const pending = api.books(session)
+  const rejected = expect(pending).rejects.toThrow('Reading data changed')
+  http.mockResolvedValueOnce(response({ ok: true }))
+  await api.merge(session, 'one', 'two')
+  resolve(response({ items: [book, { ...book, document: 'two' }] }))
+  await rejected
+  expect(apiModule.cached.books(session)).toBeNull()
+})
+
+it('retains cached books when the merge request fails', async () => {
+  const key = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/progress?limit=500'
+  const previous = { items: [book, { ...book, document: 'two' }], next: null, savedAt: 100 }
+  localStorage.setItem(key, JSON.stringify(previous))
+  http.mockRejectedValueOnce(new Error('offline'))
+  await expect(api.merge(session, 'one', 'two')).rejects.toThrow('offline')
+  expect(JSON.parse(localStorage.getItem(key))).toEqual(previous)
+})

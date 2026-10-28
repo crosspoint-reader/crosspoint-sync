@@ -529,6 +529,7 @@ export const api = {
     if (version === sessionVersion) {
       readingVersion++
       invalidateClippingCaches(s, [document, into])
+      removeCachedBook(s, document)
       await syncShortcutsCache(s)?.catch(() => {})
     }
     return result
