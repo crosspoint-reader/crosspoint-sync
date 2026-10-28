@@ -12,7 +12,8 @@ afterEach(() => { delete process.env.TOKEN_ENC_KEY; resetEncryptionKeyCache(); }
 async function setup() {
   const posts: unknown[] = [];
   const http: HttpTransport = async (url, init) => {
-    if (url.endsWith('/micropub') && init.method === 'POST') posts.push(JSON.parse(init.body!));
+    if (new URL(url).searchParams.get('q') === 'config') return { status: 200, json: async () => ({ destination: [{ uid: 'https://example.micro.blog/' }] }), text: async () => '' };
+    if (new URL(url).pathname === '/micropub' && init.method === 'POST') posts.push(JSON.parse(init.body!));
     else if (!url.includes('/micropub?')) throw new Error(`Unexpected network request: ${url}`);
     return { status: 201, headers: { get: () => 'https://example.micro.blog/highlights.html' }, json: async () => ({}), text: async () => '' };
   };

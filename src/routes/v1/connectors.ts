@@ -35,7 +35,7 @@ import { ConnectorOperationError, type HttpTransport } from '../../connectors/ty
 import { importBookorbitStats } from '../../connectors/bookorbit-stats.js';
 import { resolveDocument } from '../../models/merge.js';
 import { hasDocumentData } from '../../models/document.js';
-import { selectMicroblogClipping, scheduleMicroblogClippings } from '../../connectors/microblog-clippings.js';
+import { selectMicroblogClipping, scheduleMicroblogClippings, recreateMicroblogClippings } from '../../connectors/microblog-clippings.js';
 import { isItemId } from '../../models/sync.js';
 import { listMicroblogDestinations, selectedMicroblogDestination } from '../../connectors/microblog-destinations.js';
 
@@ -473,6 +473,21 @@ export function connectorRoutes(
       const items = await listMicroblogDestinations(decryptCredential(account, db), transport);
       return c.json({ items, selected: selectedMicroblogDestination(db, userId) ?? (items.length === 1 ? items[0].uid : null) });
     } catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Could not load blogs' }, 502); }
+  });
+
+  app.get('/connectors/microblog/clipping-posts', (c) => {
+    const userId = c.get('user').id;
+    if (!getAccount(db, userId, 'microblog')?.enabled) return c.json({ items: [] });
+    const rows = db.prepare('SELECT document,url,destination,missing,error FROM microblog_clipping_posts WHERE user_id=?').all(userId);
+    return c.json({ items: rows.map((row) => ({ ...row, missing: !!row.missing })) });
+  });
+
+  app.post('/connectors/microblog/clipping-posts/:document/recreate', async (c) => {
+    if (!credentialRequestIsSecure(c, trustProxy, allowHttpLocalhost)) return c.json({ message: CREDENTIAL_HTTPS_REQUIRED }, 400);
+    const document = c.req.param('document');
+    if (!isValidDocument(document)) return c.json({ message: 'Invalid book' }, 400);
+    try { return c.json(await recreateMicroblogClippings(db, c.get('user').id, document, transport)); }
+    catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Could not recreate post' }, error instanceof ConnectorOperationError && !error.retryable ? 409 : 502); }
   });
 
   app.put('/connectors/microblog/destination', async (c) => {

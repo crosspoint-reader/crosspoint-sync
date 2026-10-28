@@ -3,11 +3,18 @@ import { makeTestApp, registerUser, DOC } from './helpers.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
 import { upsertAccount, saveMatch } from '../src/connectors/store.js';
 import { selectMicroblogClipping, scheduleMicroblogClippings } from '../src/connectors/microblog-clippings.js';
-import { drainQueue } from '../src/connectors/runner.js';
+import { drainQueue as runQueue } from '../src/connectors/runner.js';
 import type { HttpTransport } from '../src/connectors/types.js';
 
 beforeEach(() => { process.env.TOKEN_ENC_KEY = 'a'.repeat(64); resetEncryptionKeyCache(); });
 afterEach(() => { delete process.env.TOKEN_ENC_KEY; resetEncryptionKeyCache(); });
+const drainQueue: typeof runQueue = (db, http, limit, now) => runQueue(db, async (url, init) => {
+  if (new URL(url).searchParams.get('q') === 'config') {
+    const uid = init.headers?.authorization === 'Bearer replacement' ? 'https://replacement.micro.blog/' : 'https://example.micro.blog/';
+    return response(200, { destination: [{ uid, name: 'Test blog' }] });
+  }
+  return http!(url, init);
+}, limit, now);
 const remoteUrl = 'https://example.micro.blog/2026/10/28/highlights.html';
 async function setup() {
   const { app, db } = makeTestApp();

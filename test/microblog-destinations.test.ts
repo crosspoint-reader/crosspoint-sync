@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import { makeTestApp, registerUser } from './helpers.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
 import { upsertAccount } from '../src/connectors/store.js';
+import { destinationForPost } from '../src/connectors/microblog-destinations.js';
 
 beforeEach(() => { process.env.TOKEN_ENC_KEY = 'a'.repeat(64); resetEncryptionKeyCache(); });
 afterEach(() => { delete process.env.TOKEN_ENC_KEY; resetEncryptionKeyCache(); });
@@ -54,4 +55,10 @@ it('preserves original collections when a rotated token has a different default 
   upsertAccount(s.db, s.uid, 'microblog', { token: 'new', microblogDestination: b, microblogDestinations: [{ uid: a }, { uid: b }] }, null);
   expect(s.db.prepare('SELECT identity,url FROM microblog_clipping_posts').get()).toEqual({ identity: 'identity', url: `${a}post.html` });
   s.db.close();
+});
+it('identifies URL path boundaries and the longest matching blog prefix', () => {
+  const blogs = ['https://shared.test/blog/', 'https://shared.test/blog/reading/'].map((uid) => ({ uid, name: uid, isDefault: false }));
+  expect(destinationForPost('https://shared.test/blog/reading/post.html', blogs)).toBe('https://shared.test/blog/reading/');
+  expect(destinationForPost('https://shared.test/blogging/post.html', blogs)).toBeNull();
+  expect(destinationForPost('https://shared.test.evil/blog/post.html', blogs)).toBeNull();
 });

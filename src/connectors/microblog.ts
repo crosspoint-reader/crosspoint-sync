@@ -387,7 +387,7 @@ export const microblogConnector: Connector = {
   tier: 1,
   capabilities: { read: false, write: true },
   carries: ['progress', 'finished', 'highlight'],
-  options: [{ key: 'sync_highlights', label: 'Automatically sync highlights', default: false }],
+  options: [{ key: 'sync_highlights', label: 'Automatically sync clippings', default: false }],
   credentialKind: 'token',
   beta: false,
   matchBy: 'metadata',

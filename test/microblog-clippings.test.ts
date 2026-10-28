@@ -29,7 +29,7 @@ it('persists manual intent without a match and queues one book after matching', 
   scheduleMicroblogClippings(db, uid, DOC);
   expect(db.prepare("SELECT COUNT(*) n FROM connector_queue WHERE connector_id='microblog'").get()).toEqual({ n: 1 });
   const content = microblogClippingsContent(db, uid, DOC, 'https://micro.blog/books/9781786487849');
-  expect(content?.title).toBe('Highlights from Test book');
+  expect(content?.title).toBe('📚 Clippings from Test book');
   expect(content?.content).toContain('Second passage');
   expect(content?.content).not.toContain('First passage');
   expect(microblogClippingsContent(db, uid, DOC, 'https://micro.blog/books/9781786487849')?.fingerprint).toBe(content?.fingerprint);
