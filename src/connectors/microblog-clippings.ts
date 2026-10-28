@@ -198,7 +198,6 @@ export async function publishMicroblogClippings(
   let locks = publishing.get(db);
   if (!locks) { locks = new Set(); publishing.set(db, locks); }
   if (locks.has(key)) return { ok: false, retryable: true, error: 'Micro.blog book publication is already in progress' };
-  locks.add(key);
   const account = getAccount(db, userId, 'microblog');
   let identity: string | undefined;
   const assertCurrent = () => {
@@ -213,6 +212,7 @@ export async function publishMicroblogClippings(
     db.prepare('UPDATE microblog_clipping_posts SET error=? WHERE user_id=? AND document=?').run(error, userId, document);
     return { ok: false, retryable: false, error };
   };
+  locks.add(key);
   try {
     const token = typeof cred.token === 'string' ? cred.token.trim() : '';
     if (!token) throw new ConnectorOperationError('Missing Micro.blog token', false, true);

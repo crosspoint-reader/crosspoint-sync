@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import { makeTestApp, registerUser, DOC } from './helpers.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
 import { upsertAccount, saveMatch } from '../src/connectors/store.js';
-import { selectMicroblogClipping, scheduleMicroblogClippings } from '../src/connectors/microblog-clippings.js';
+import { publishMicroblogClippings, selectMicroblogClipping, scheduleMicroblogClippings } from '../src/connectors/microblog-clippings.js';
 import { drainQueue as runQueue } from '../src/connectors/runner.js';
 import type { HttpTransport } from '../src/connectors/types.js';
 
@@ -31,6 +31,21 @@ async function setup() {
 function response(status: number, body: unknown = {}, location?: string) {
   return { status, json: async () => body, text: async () => JSON.stringify(body), headers: { get: (key: string) => key.toLowerCase() === 'location' ? location ?? null : null } };
 }
+
+it('allows retry after an account read fails before publication starts', async () => {
+  const { db, uid } = await setup();
+  db.exec('ALTER TABLE connector_accounts RENAME TO unavailable_accounts');
+  try {
+    await expect(publishMicroblogClippings(
+      { token: 'token' }, { externalId: '123', externalEdition: '9781786487849', confidence: 1 },
+      { kind: 'highlight', document: DOC, timestamp: 1 }, async () => response(201, {}, remoteUrl), { db, userId: uid },
+    )).rejects.toThrow('no such table');
+  } finally { db.exec('ALTER TABLE unavailable_accounts RENAME TO connector_accounts'); }
+  await drainQueue(db, async () => response(201, {}, remoteUrl));
+  expect(db.prepare('SELECT url FROM microblog_clipping_posts').get()).toEqual({ url: remoteUrl });
+  expect(db.prepare('SELECT status FROM connector_queue').get()).toEqual({ status: 'done' });
+  db.close();
+});
 
 it('publishes one escaped collected post, skips unchanged content, then updates the saved URL', async () => {
   const { db, uid } = await setup();
