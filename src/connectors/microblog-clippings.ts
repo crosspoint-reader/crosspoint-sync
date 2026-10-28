@@ -142,6 +142,8 @@ class MissingMicroblogPost extends ConnectorOperationError {
 }
 
 async function micropub(http: HttpTransport, token: string, destination: string, path: string, body?: unknown, sourceLookup = false) {
+  const operation = body ? (body as { action?: string }).action === 'update' ? 'update' : 'create'
+    : sourceLookup ? 'source lookup' : 'post recovery';
   let res;
   try {
     const url = new URL(path, 'https://micro.blog');
@@ -151,14 +153,14 @@ async function micropub(http: HttpTransport, token: string, destination: string,
       headers: { authorization: `Bearer ${token}`, ...(body ? { 'content-type': 'application/json' } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
-  } catch { throw new ConnectorOperationError('Micro.blog Micropub connection failed; the next attempt will check for an existing post.', true); }
+  } catch { throw new ConnectorOperationError(`Micro.blog Micropub ${operation} connection failed; the next attempt will check for an existing post.`, true); }
   if (sourceLookup && res.status === 404) throw new MissingMicroblogPost();
   if (sourceLookup && res.status === 400) {
     const failure = await res.json().catch(() => null) as { error?: string; error_description?: string } | null;
     if (failure?.error === 'invalid_request' && /no post|not found|does not exist|could not find|unknown.*url/i.test(failure.error_description || '')) throw new MissingMicroblogPost();
   }
   if (res.status >= 300) {
-    throw new ConnectorOperationError(`Micro.blog Micropub failed (${res.status})`, res.status === 429 || res.status >= 500,
+    throw new ConnectorOperationError(`Micro.blog Micropub ${operation} failed (${res.status})`, res.status === 429 || res.status >= 500,
       res.status === 401 || res.status === 403);
   }
   return res;
@@ -250,7 +252,7 @@ export async function publishMicroblogClippings(
         await micropub(http, token, destination, `/micropub?q=source&url=${encodeURIComponent(url)}`, undefined, true);
         assertCurrent();
         await micropub(http, token, destination, '/micropub', { action: 'update', url,
-          replace: { name: [rendered.title], content: [{ html: rendered.content }] } });
+          replace: { name: [rendered.title], content: [rendered.content] } });
         assertCurrent();
       } catch (err) {
         assertCurrent();

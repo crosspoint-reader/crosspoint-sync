@@ -54,7 +54,27 @@ it('publishes one escaped collected post, skips unchanged content, then updates 
   await drainQueue(db, http);
   expect(writes).toHaveLength(2);
   expect(writes[1]).toMatchObject({ action: 'update', url: remoteUrl });
+  // Micro.blog's update API accepts the generated HTML as a string, unlike
+  // the html-value object supported on initial creation.
+  expect((writes[1] as any).replace.content).toEqual([expect.stringContaining('&lt;First passage&gt;')]);
   expect(JSON.stringify(writes[1])).toContain('A note');
+  db.close();
+});
+
+it.each(['source lookup', 'update'])('identifies a failed %s and preserves the existing post for retry', async (operation) => {
+  const { db, uid } = await setup();
+  const http: HttpTransport = async (_url, init) => {
+    if (init.method === 'GET') return response(operation === 'source lookup' ? 500 : 200);
+    return response(500);
+  };
+  db.prepare('UPDATE microblog_clipping_posts SET url=?,attempted=1').run(remoteUrl);
+  await drainQueue(db, http);
+  expect(db.prepare('SELECT status,last_error FROM connector_queue').get()).toMatchObject({
+    status: 'pending', last_error: expect.stringContaining(`Micropub ${operation} failed (500)`),
+  });
+  expect(db.prepare('SELECT url,missing,error,fingerprint FROM microblog_clipping_posts WHERE user_id=?').get(uid)).toEqual({
+    url: remoteUrl, missing: 0, error: null, fingerprint: null,
+  });
   db.close();
 });
 
