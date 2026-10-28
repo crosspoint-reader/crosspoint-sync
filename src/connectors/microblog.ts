@@ -1,4 +1,5 @@
 import { decideMatch, type Candidate } from './matching.js';
+import { publishMicroblogClippings } from './microblog-clippings.js';
 import {
   ConnectorOperationError,
   type Credential,
@@ -361,6 +362,7 @@ async function reconcileBook(
 }
 
 function shouldPush(ev: OutboundEvent, canonicalPercentage?: number | null): boolean {
+  if (ev.kind === 'highlight') return true;
   if (ev.kind === 'progress' && (ev.percentage ?? 0) <= 0) return false;
   if (canonicalPercentage == null) return true;
   if (canonicalPercentage <= 0) return false;
@@ -382,7 +384,16 @@ export const microblogConnector: Connector = {
   search: searchBooks,
   match: matchBook,
   createBook,
-  push: reconcileBook,
+  async push(cred, match, ev, http, ctx) {
+    if (ev.kind !== 'highlight') return reconcileBook(cred, match, ev, http);
+    if (!ctx) return { ok: false, retryable: false, error: 'Micro.blog publication requires local storage' };
+    let isbn = match.externalEdition;
+    if (!isbn) {
+      if (/^(?:\d{13}|\d{9}[\dXx])$/.test(match.externalId)) isbn = match.externalId;
+      else isbn = (await loadInventory(cred, http)).find((b) => b.externalId === match.externalId)?.isbn;
+    }
+    return publishMicroblogClippings(cred, { ...match, externalEdition: isbn }, ev, http, ctx);
+  },
 };
 
 export const _microblog = {

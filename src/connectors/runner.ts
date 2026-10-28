@@ -126,6 +126,12 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
   }
 
   const ev = JSON.parse(row.payload) as OutboundEvent;
+  if (row.connector_id === 'microblog' && ev.kind === 'highlight'
+      && !getMatch(db, row.user_id, 'microblog', row.document)?.external_id) {
+    // Publication intent remains durable; a later matched sync reschedules it.
+    markDone(db, row.id);
+    return;
+  }
   if (connector.shouldPush?.(
     ev,
     latestPercentage(db, row.user_id, row.document)
