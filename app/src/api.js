@@ -234,10 +234,16 @@ function cacheClippingsHub(s, data) {
 
 function invalidateClippingCaches(s, documents) {
   const hubKey = `${OFFLINE}${s.username}@${s.server}/api/v1/clippings`
-  // The hub's document identities and both complete book copies are no longer
-  // authoritative after a merge. A subsequent fetch resolves server conflicts.
-  localStorage.removeItem(hubKey)
-  localStorage.removeItem(`${hubKey}:saved-at`)
+  const hub = read(hubKey)
+  if (Array.isArray(hub?.items)) {
+    const items = hub.items.filter((c) => !documents.includes(c.document))
+    // Retain unrelated passages and their original freshness. The affected
+    // books still need a fetch, so this filtered hub is an incomplete copy.
+    if (items.length !== hub.items.length && !keep(hubKey, { ...hub, items, truncated: true })) {
+      localStorage.removeItem(hubKey)
+      localStorage.removeItem(`${hubKey}:saved-at`)
+    }
+  }
   for (const key of Object.keys(localStorage)) {
     if (documents.some((doc) => {
       const bookKey = `${hubKey}/${doc}`

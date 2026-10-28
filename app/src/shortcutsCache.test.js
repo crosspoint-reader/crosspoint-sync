@@ -691,7 +691,7 @@ it('invalidates merged clipping caches before reloads and preserves unrelated pe
   localStorage.setItem(`${prefix}/api/v1/clippings/one?cursor=0&limit=100`, JSON.stringify({ items: [{ id: 'legacy' }] }))
   http.mockResolvedValueOnce(response({ ok: true }))
   await api.merge(session, 'one', 'two')
-  expect(localStorage.getItem(`${prefix}/api/v1/clippings`)).toBeNull()
+  expect(JSON.parse(localStorage.getItem(`${prefix}/api/v1/clippings`))).toMatchObject({ items: [], truncated: true })
   expect(Object.keys(localStorage).some((key) => /^.*\/clippings\/(one|two)([?:]|$)/.test(key))).toBe(false)
   expect(localStorage.getItem(`${prefix}/api/v1/clippings/other`)).not.toBeNull()
   expect(snapshot().clippings.items.map((c) => c.document)).toEqual(['other'])
@@ -827,4 +827,28 @@ it('preserves a book copy with an equal timestamp when replaying an offline hub'
   http.mockRejectedValueOnce(new Error('offline'))
   await api.allClippings(session, [])
   expect(JSON.parse(localStorage.getItem(`${key}/one`))).toEqual(per)
+})
+
+it.each([false, true])('preserves unrelated hub-only clippings during a merge (capped: %s)', async (capped) => {
+  const key = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/clippings'
+  const unrelated = Array.from({ length: capped ? 4998 : 1 }, (_, i) => ({ document: 'other', id: `other-${i}`, text: 'Unrelated' }))
+  localStorage.setItem(key, JSON.stringify({ items: [
+    { document: 'one', id: 'source' }, { document: 'two', id: 'target' }, ...unrelated,
+  ], savedAt: 100 }))
+  if (capped) localStorage.setItem(`${key}/other`, JSON.stringify({ items: [{ id: 'history' }], savedAt: 90 }))
+  http.mockResolvedValueOnce(response({ ok: true }))
+  await api.merge(session, 'one', 'two')
+  const saved = JSON.parse(localStorage.getItem(key))
+  expect(saved).toEqual({ items: unrelated, savedAt: 100, truncated: true })
+  expect(snapshot().clippings.items.filter((c) => c.id !== 'history')).toHaveLength(unrelated.length)
+  if (capped) expect(snapshot().clippings.items.some((c) => c.id === 'history')).toBe(true)
+  // The normal target refresh must retain unrelated books in the native copy.
+  http.mockResolvedValueOnce(response({ items: [{ id: 'merged' }], more: false }))
+  await api.clippings(session, 'two')
+  await flush()
+  expect(snapshot().clippings.items.filter((c) => c.document === 'other')).toHaveLength(unrelated.length + Number(capped))
+  http.mockRejectedValueOnce(new Error('offline'))
+  expect(await api.allClippings(session, [])).toEqual(unrelated)
+  await flush()
+  expect(snapshot().clippings.items.some((c) => c.document === 'two' && c.id === 'merged')).toBe(true)
 })
