@@ -571,3 +571,56 @@ it('announces offline state when falling back to complete book clippings', async
     apiModule.offline.removeEventListener('offline', onOffline)
   }
 })
+
+it('saves hub freshness with its payload when quota only permits one record', async () => {
+  const key = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/clippings'
+  localStorage.setItem(`${key}/one`, JSON.stringify({ items: [{ id: 'old' }], savedAt: 100 }))
+  const fresh = [{ document: 'one', id: 'fresh' }]
+  const used = Object.keys(localStorage).reduce((total, k) => total + k.length + localStorage.getItem(k).length, 0)
+  const storage = limitStorage(used + key.length + JSON.stringify({ items: fresh, savedAt: 200 }).length)
+  const now = vi.spyOn(Date, 'now').mockReturnValue(200)
+  try {
+    http.mockResolvedValueOnce(response({ items: fresh }))
+    await api.allClippings(session, [])
+    await flush()
+    expect(snapshot().clippings.items).toMatchObject([{ id: 'fresh', cachedAt: 200 }])
+    expect(JSON.parse(localStorage.getItem(key))).toEqual({ items: fresh, savedAt: 200 })
+    now.mockReturnValue(300)
+    http.mockRejectedValueOnce(new Error('offline'))
+    await api.allClippings(session, [])
+    await flush()
+    expect(snapshot().clippings.items).toMatchObject([{ id: 'fresh', cachedAt: 200 }])
+  } finally {
+    storage.mockRestore()
+    now.mockRestore()
+  }
+})
+
+it.each(['legacy', 'embedded'])('preserves %s hub freshness on offline reads', async (format) => {
+  const key = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/clippings'
+  const items = [{ document: 'one', id: 'old-hub' }]
+  localStorage.setItem(key, JSON.stringify(format === 'embedded' ? { items, savedAt: 100 } : { items }))
+  if (format === 'legacy') localStorage.setItem(`${key}:saved-at`, '100')
+  localStorage.setItem(`${key}/one`, JSON.stringify({ items: [{ id: 'newer-book' }], savedAt: 150 }))
+  http.mockRejectedValueOnce(new Error('offline'))
+  await api.allClippings(session, [])
+  await flush()
+  expect(snapshot().clippings.items).toMatchObject([{ id: 'newer-book', cachedAt: 150 }])
+  expect(JSON.parse(localStorage.getItem(key))).toEqual({ items, savedAt: 100 })
+})
+
+it('retains both old hub data and freshness when a replacement exceeds quota', async () => {
+  const key = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/clippings'
+  const previous = { items: [{ document: 'one', id: 'saved' }], savedAt: 100 }
+  localStorage.setItem(key, JSON.stringify(previous))
+  const storage = limitStorage(key.length + JSON.stringify(previous).length)
+  try {
+    http.mockResolvedValueOnce(response({ items: [{ document: 'one', id: 'new', text: 'x'.repeat(2000) }] }))
+    await api.allClippings(session, [])
+    await flush()
+    expect(JSON.parse(localStorage.getItem(key))).toEqual(previous)
+    expect(snapshot().clippings.items).toMatchObject([{ id: 'saved', cachedAt: 100 }])
+  } finally {
+    storage.mockRestore()
+  }
+})

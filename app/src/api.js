@@ -195,6 +195,15 @@ function cacheClippings(s, doc, result) {
   }
 }
 
+function cacheClippingsHub(s, data) {
+  const key = `${OFFLINE}${s.username}@${s.server}/api/v1/clippings`
+  const savedAt = offlineCopies.has(data)
+    ? Object.hasOwn(data, 'savedAt') ? data.savedAt : read(`${key}:saved-at`)
+    : Date.now()
+  // One atomic write keeps payload and freshness consistent even at quota.
+  keep(key, { ...data, savedAt })
+}
+
 const PROGRESS = '/api/v1/progress?limit=500'
 
 function removeCachedBook(session, document) {
@@ -312,7 +321,7 @@ export function syncShortcutsCache(session) {
   const prefix = `${OFFLINE}${session.username}@${session.server}`
   const books = saved(session, PROGRESS)
   const all = saved(session, '/api/v1/clippings')
-  const allAt = read(`${prefix}/api/v1/clippings:saved-at`)
+  const allAt = all && Object.hasOwn(all, 'savedAt') ? all.savedAt : read(`${prefix}/api/v1/clippings:saved-at`)
   let clippings = all ? { items: all.items.map((c) => ({ ...c, cachedAt: allAt })) } : null
   // Complete per-book fetches supersede older hub data, including deletions.
   const perPrefix = `${prefix}/api/v1/clippings/`
@@ -468,9 +477,12 @@ export const api = {
     const version = sessionVersion
     const reading = readingVersion
     try {
-      const data = await call(s, '/api/v1/clippings', {}, true, { timestampSaved: true })
+      const data = await call(s, '/api/v1/clippings', {}, true, { store: false })
       assertReadingVersion(version, reading)
-      if (version === sessionVersion) syncShortcutsCache(s)
+      if (version === sessionVersion) {
+        cacheClippingsHub(s, data)
+        syncShortcutsCache(s)
+      }
       return data.items
     } catch (e) {
       if (version !== sessionVersion || e.status !== 404) throw e
@@ -478,7 +490,7 @@ export const api = {
       const per = await Promise.all(books.map(async (b) => ({ document: b.document, ...await readClippings(s, b.document) })))
       assertReadingVersion(version, reading)
       if (version === sessionVersion) {
-        if (!per.length) keep(`${OFFLINE}${s.username}@${s.server}/api/v1/clippings`, { items: [] }, true)
+        if (!per.length) cacheClippingsHub(s, { items: [] })
         for (const result of per) cacheClippings(s, result.document, result)
         syncShortcutsCache(s)
       }
