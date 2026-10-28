@@ -4,6 +4,8 @@ import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
 import { upsertAccount } from '../src/connectors/store.js';
 import { drainQueue } from '../src/connectors/runner.js';
 import type { HttpTransport } from '../src/connectors/types.js';
+import { deleteDocumentData } from '../src/models/document.js';
+import { deleteKosyncUserData } from '../src/routes/account.js';
 
 beforeEach(() => { process.env.TOKEN_ENC_KEY = 'a'.repeat(64); resetEncryptionKeyCache(); });
 afterEach(() => { delete process.env.TOKEN_ENC_KEY; resetEncryptionKeyCache(); });
@@ -17,7 +19,7 @@ async function setup() {
   const { app, db } = makeTestApp({}, { connectorTransport: http });
   const { username, headers } = await registerUser(app);
   const uid = (db.prepare('SELECT id FROM users WHERE username=?').get(username) as { id: number }).id;
-  upsertAccount(db, uid, 'microblog', { token: 'token' }, null);
+  upsertAccount(db, uid, 'microblog', { token: 'token', microblogDestination: 'https://example.micro.blog/' }, null);
   const put = (path: string, body: unknown) => app.request(path, { method: 'PUT', headers, body: JSON.stringify(body) });
   await put('/api/v1/documents', { items: [{ document: DOC, title: 'Test book', author: 'Author' }] });
   const clipping = () => put(`/api/v1/clippings/${DOC}`, { items: [{ id: 'one', spine: 1, text: 'A passage', created_at: 1 }] });
@@ -85,10 +87,20 @@ it('rejects missing, deleted, foreign, unlinked, disabled and unauthenticated se
 it('a replacement token cannot inherit another account’s published post or automatic preference', async () => {
   const s = await setup(); await s.match(); await s.select(); await drainQueue(s.db, s.http);
   s.db.prepare("UPDATE connector_accounts SET options='{" + '"sync_highlights":true' + "}' WHERE user_id=?").run(s.uid);
-  upsertAccount(s.db, s.uid, 'microblog', { token: 'replacement' }, null);
+  upsertAccount(s.db, s.uid, 'microblog', { token: 'replacement', microblogDestination: 'https://replacement.micro.blog/' }, null);
   expect(s.db.prepare('SELECT COUNT(*) n FROM microblog_clipping_posts').get()).toEqual({ n: 0 });
   expect(s.db.prepare("SELECT options FROM connector_accounts WHERE user_id=?").get(s.uid)).toEqual({ options: '{}' });
   expect(s.db.prepare('SELECT COUNT(*) n FROM connector_matches WHERE user_id=?').get(s.uid)).toEqual({ n: 0 });
+  s.db.close();
+});
+
+it.each(['book', 'account'])('clears local publication data on %s removal without deleting the remote post', async (scope) => {
+  const s = await setup(); await s.match(); await s.select(); await drainQueue(s.db, s.http);
+  if (scope === 'book') deleteDocumentData(s.db, s.uid, DOC);
+  else deleteKosyncUserData(s.db, s.uid, s.headers['x-auth-user'], { keepUser: true });
+  expect(s.db.prepare('SELECT COUNT(*) n FROM microblog_clipping_posts').get()).toEqual({ n: 0 });
+  expect(s.db.prepare('SELECT COUNT(*) n FROM microblog_clipping_selections').get()).toEqual({ n: 0 });
+  expect(s.posts).toHaveLength(1);
   s.db.close();
 });
 

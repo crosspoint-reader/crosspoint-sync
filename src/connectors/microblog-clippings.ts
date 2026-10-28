@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { withTransaction, type DB } from '../db/db.js';
 import { clippingDocuments, mergedClippingsCte, resolveDocument } from '../models/merge.js';
-import { documentMeta, getAccount, getMatch } from './store.js';
+import { decryptCredential, documentMeta, getAccount, getMatch } from './store.js';
 import { enqueue } from './queue.js';
 import { nowSeconds } from '../models/sync.js';
 import { ConnectorOperationError, type Credential, type Match, type OutboundEvent, type HttpTransport, type ConnectorContext, type PushResult } from './types.js';
@@ -10,6 +10,8 @@ export interface ClippingsPost {
   identity: string;
   url: string | null;
   fingerprint: string | null;
+  book_url: string | null;
+  matched_book: string | null;
   attempted: number;
   error: string | null;
 }
@@ -33,7 +35,7 @@ function liveClippings(db: DB, userId: number, document: string): Passage[] {
 export function clippingsPost(db: DB, userId: number, document: string): ClippingsPost {
   db.prepare('INSERT OR IGNORE INTO microblog_clipping_posts(user_id,document,identity) VALUES(?,?,?)')
     .run(userId, document, randomUUID());
-  return db.prepare('SELECT identity,url,fingerprint,attempted,error FROM microblog_clipping_posts WHERE user_id=? AND document=?')
+  return db.prepare('SELECT identity,url,fingerprint,book_url,matched_book,attempted,error FROM microblog_clipping_posts WHERE user_id=? AND document=?')
     .get(userId, document) as unknown as ClippingsPost;
 }
 
@@ -93,9 +95,14 @@ export function scheduleMicroblogClippings(db: DB, userId: number, document?: st
       const insert = db.prepare('INSERT OR IGNORE INTO microblog_clipping_selections(user_id,document,clipping_id) VALUES(?,?,?)');
       for (const c of liveClippings(db, userId, doc)) insert.run(userId, doc, c.id);
     }
-    if (!getMatch(db, userId, 'microblog', doc)?.external_id || !passages(db, userId, doc).length) continue;
+    const match = getMatch(db, userId, 'microblog', doc);
+    if (!match?.external_id || !passages(db, userId, doc).length) continue;
     const state = clippingsPost(db, userId, doc);
     if (state.error) continue;
+    const isbn = match.external_edition ?? (/^(?:\d{13}|\d{9}[\dXx])$/.test(match.external_id) ? match.external_id : null);
+    const bookUrl = isbn ? `https://micro.blog/books/${encodeURIComponent(isbn)}` : state.book_url;
+    if (state.url && bookUrl && state.matched_book === match.external_id
+        && state.fingerprint === microblogClippingsContent(db, userId, doc, bookUrl)?.fingerprint) continue;
     const existing = db.prepare("SELECT status FROM connector_queue WHERE user_id=? AND connector_id='microblog' AND document=? AND kind='microblog:clippings'")
       .get(userId, doc) as { status: string } | undefined;
     if (existing?.status === 'pending') continue; // Preserve backoff after a transient failure.
@@ -176,13 +183,25 @@ export async function publishMicroblogClippings(
   if (!locks) { locks = new Set(); publishing.set(db, locks); }
   if (locks.has(key)) return { ok: false, retryable: true, error: 'Micro.blog book publication is already in progress' };
   locks.add(key);
+  const account = getAccount(db, userId, 'microblog');
+  let identity: string | undefined;
+  const assertCurrent = () => {
+    const current = getAccount(db, userId, 'microblog');
+    const saved = db.prepare('SELECT identity FROM microblog_clipping_posts WHERE user_id=? AND document=?').get(userId, document) as { identity: string } | undefined;
+    if (!account?.enabled || !current?.enabled || current.cred_enc !== account.cred_enc || (identity && saved?.identity !== identity)) {
+      throw new ConnectorOperationError('Micro.blog account or book changed during publication', false);
+    }
+  };
   const permanent = (error: string): PushResult => {
+    assertCurrent();
     db.prepare('UPDATE microblog_clipping_posts SET error=? WHERE user_id=? AND document=?').run(error, userId, document);
     return { ok: false, retryable: false, error };
   };
   try {
     const token = typeof cred.token === 'string' ? cred.token.trim() : '';
     if (!token) throw new ConnectorOperationError('Missing Micro.blog token', false, true);
+    assertCurrent();
+    if (decryptCredential(account!).token !== cred.token) throw new ConnectorOperationError('Micro.blog credential changed before publication', false);
     // Caller resolves a verified ISBN; internal bookshelf IDs are never used as ISBNs.
     const isbn = match.externalEdition;
     if (!isbn || !/^(?:\d{13}|\d{9}[\dXx])$/.test(isbn)) return { ok: false, retryable: false, error: 'Micro.blog book ISBN is unavailable; choose a book match with an ISBN.' };
@@ -190,21 +209,26 @@ export async function publishMicroblogClippings(
     const rendered = microblogClippingsContent(db, userId, document, `https://micro.blog/books/${encodeURIComponent(isbn)}`);
     if (!rendered) return { ok: true };
     const state = clippingsPost(db, userId, document);
+    identity = state.identity;
     if (state.error) return { ok: false, retryable: false, error: state.error };
     if (rendered.fingerprint === state.fingerprint && state.url) return { ok: true };
     let url = state.url;
     if (!url && state.attempted) {
       url = await recoverPost(http, token, state.identity);
-      if (!url) return permanent('Micro.blog post creation could not be resolved uniquely. Review your blog posts before retrying; no duplicate was created.');
+      assertCurrent();
+      if (!url) return permanent('Micro.blog post creation could not be resolved uniquely. Review your blog posts before retrying; no duplicate was created. If switching blogs, unlink Micro.blog and connect the new blog.');
       db.prepare('UPDATE microblog_clipping_posts SET url=? WHERE user_id=? AND document=?').run(url, userId, document);
     }
     if (url) {
       try {
         // Detect deleted posts before replacing generated content.
         await micropub(http, token, `/micropub?q=source&url=${encodeURIComponent(url)}`);
+        assertCurrent();
         await micropub(http, token, '/micropub', { action: 'update', url,
           replace: { name: [rendered.title], content: [{ html: rendered.content }] } });
+        assertCurrent();
       } catch (err) {
+        assertCurrent();
         if (err instanceof ConnectorOperationError && !err.retryable && !err.needsReauth) return permanent(`${err.message}. Review the saved Micro.blog post before syncing again.`);
         throw err;
       }
@@ -217,11 +241,13 @@ export async function publishMicroblogClippings(
           'mp-slug': [`crosspoint-highlights-${state.identity}`],
         } });
       } catch (err) {
+        assertCurrent();
         if (err instanceof ConnectorOperationError && (err.needsReauth || err.message.includes('(429)'))) {
           db.prepare('UPDATE microblog_clipping_posts SET attempted=0 WHERE user_id=? AND document=?').run(userId, document);
         } else if (err instanceof ConnectorOperationError && !err.retryable) return permanent(err.message);
         throw err;
       }
+      assertCurrent();
       url = postUrl(res.headers?.get('location'));
       if (!url) {
         throw new ConnectorOperationError('Micro.blog accepted the post without its URL; the next attempt will recover it.', true);
@@ -231,8 +257,8 @@ export async function publishMicroblogClippings(
     }
     withTransaction(db, () => {
       savePublishedClippings(db, userId, document, selected);
-      db.prepare('UPDATE microblog_clipping_posts SET fingerprint=?,error=NULL WHERE user_id=? AND document=?')
-        .run(rendered.fingerprint, userId, document);
+      db.prepare('UPDATE microblog_clipping_posts SET fingerprint=?,book_url=?,matched_book=?,error=NULL WHERE user_id=? AND document=?')
+        .run(rendered.fingerprint, `https://micro.blog/books/${encodeURIComponent(isbn)}`, match.externalId, userId, document);
     });
     return { ok: true };
   } finally { locks.delete(key); }

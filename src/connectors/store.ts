@@ -27,9 +27,21 @@ export function upsertAccount(
   const enc = encryptSecret(JSON.stringify(cred));
   const previous = connectorId === 'bookorbit' || connectorId === 'microblog' ? getAccount(db, userId, connectorId) : null;
   let changedMicroblogAccount = false;
+  let verifyMicroblogPosts = false;
   if (connectorId === 'microblog' && previous) {
-    try { changedMicroblogAccount = decryptCredential(previous).token !== cred.token; }
-    catch { changedMicroblogAccount = true; }
+    try {
+      const old = decryptCredential(previous);
+      if (old.token !== cred.token) {
+        // Existing installs may have published before destination discovery was
+        // added. Location URLs provide a conservative same-blog identity hint.
+        const urls = db.prepare('SELECT url FROM microblog_clipping_posts WHERE user_id=? AND url IS NOT NULL')
+          .all(userId) as { url: string }[];
+        const origins = new Set(urls.flatMap((r) => { try { return [new URL(r.url).origin + '/']; } catch { return []; } }));
+        const oldDestination = old.microblogDestination ?? (origins.size === 1 ? [...origins][0] : null);
+        if (oldDestination && cred.microblogDestination) changedMicroblogAccount = oldDestination !== cred.microblogDestination;
+        else verifyMicroblogPosts = true;
+      }
+    } catch { verifyMicroblogPosts = true; }
   }
   let sameOrbitAccount = false;
   if (previous) {
@@ -39,6 +51,13 @@ export function upsertAccount(
     } catch { /* Reconnecting also recovers an unreadable old credential. */ }
   }
   withTransaction(db, () => {
+    if (verifyMicroblogPosts) {
+      // Unknown ownership: preserve intent/identity, but recover each existing
+      // post under the new token before reusing a URL or creating anything.
+      db.prepare(`UPDATE microblog_clipping_posts SET attempted=CASE WHEN url IS NOT NULL THEN 1 ELSE attempted END,
+        url=NULL,fingerprint=NULL,error=NULL WHERE user_id=?`).run(userId);
+      db.prepare("DELETE FROM connector_queue WHERE user_id=? AND connector_id='microblog'").run(userId);
+    }
     if (changedMicroblogAccount) {
       for (const table of ['microblog_clipping_selections', 'microblog_clipping_posts']) db.prepare(`DELETE FROM ${table} WHERE user_id=?`).run(userId);
       for (const table of ['connector_matches', 'connector_queue']) db.prepare(`DELETE FROM ${table} WHERE user_id=? AND connector_id='microblog'`).run(userId);

@@ -20,6 +20,7 @@ import {
   setMatchNote,
 } from './store.js';
 import { decideMatch, extractTitleAuthor } from './matching.js';
+import { scheduleMicroblogClippings } from './microblog-clippings.js';
 import {
   ConnectorOperationError,
   type HttpTransport,
@@ -126,6 +127,13 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
   }
 
   const ev = JSON.parse(row.payload) as OutboundEvent;
+  const publication = row.connector_id === 'microblog' && ev.kind === 'highlight';
+  const originalPost = publication ? db.prepare('SELECT identity FROM microblog_clipping_posts WHERE user_id=? AND document=?')
+    .get(row.user_id, row.document) as { identity: string } | undefined : undefined;
+  const stillCurrent = () => row.connector_id !== 'microblog' || (
+    getAccount(db, row.user_id, row.connector_id)?.cred_enc === account.cred_enc && (!originalPost ||
+      (db.prepare('SELECT identity FROM microblog_clipping_posts WHERE user_id=? AND document=?').get(row.user_id, row.document) as { identity: string } | undefined)?.identity === originalPost.identity)
+  );
   if (row.connector_id === 'microblog' && ev.kind === 'highlight'
       && !getMatch(db, row.user_id, 'microblog', row.document)?.external_id) {
     // Publication intent remains durable; a later matched sync reschedules it.
@@ -143,7 +151,9 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
   let match: Match | null;
   try {
     match = await resolveMatch(db, row.connector_id, row.user_id, row.document, http, ev);
+    if (!stillCurrent()) return;
   } catch (err) {
+    if (!stillCurrent()) return;
     failOperation(db, row, err, 'match failed');
     return;
   }
@@ -157,10 +167,13 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
   const cred = decryptCredential(account, db);
   try {
     const result = await connector.push(cred, match, ev, http, { db, userId: row.user_id });
+    if (!stillCurrent()) return;
     if (result.ok) {
       // Persist (or clear) the per-book condition so the review UI can show it.
       setMatchNote(db, row.user_id, row.connector_id, row.document, result.note ?? null);
       markDone(db, row.id);
+      // A clipping may have arrived while the network request was in flight.
+      if (publication) scheduleMicroblogClippings(db, row.user_id, row.document);
       return;
     }
     if (result.needsReauth) {
@@ -169,6 +182,7 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
     logPushFailure(row, result.error, result.retryable);
     markFailed(db, row, result.error, result.retryable);
   } catch (err) {
+    if (!stillCurrent()) return;
     failOperation(db, row, err, 'push failed');
   }
 }
