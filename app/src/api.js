@@ -64,6 +64,13 @@ const OFFLINE_PREFIX = 'crosspoint-offline:'
 const OFFLINE = `${OFFLINE_PREFIX}v2:`
 export const offline = new EventTarget()
 let sessionVersion = 0
+let readingVersion = 0
+
+function assertReadingVersion(session, reading) {
+  if (session === sessionVersion && reading !== readingVersion) {
+    throw Object.assign(new Error('Reading data changed while loading'), { stale: true })
+  }
+}
 const offlineCopies = new WeakSet()
 
 function clearOffline(session) {
@@ -76,6 +83,8 @@ function clearOffline(session) {
 // store: false keeps the offline fallback but leaves saving to the caller.
 async function call(session, path, init = {}, keepOffline = true, { offlineFallback = true, timestampSaved = false, store = true } = {}) {
   const version = sessionVersion
+  const reading = readingVersion
+  const readingGet = (!init.method || init.method === 'GET') && /^\/api\/v1\/(clippings|progress)([/?]|$)/.test(path)
   const key = `${OFFLINE}${session.username}@${session.server}${path}`
   const isGet = keepOffline && (!init.method || init.method === 'GET')
   let res
@@ -91,6 +100,7 @@ async function call(session, path, init = {}, keepOffline = true, { offlineFallb
       },
     })
   } catch (e) {
+    if (readingGet) assertReadingVersion(version, reading)
     const saved = isGet && version === sessionVersion && localStorage.getItem(key)
     if (!saved || !offlineFallback) throw e
     offline.dispatchEvent(new Event('offline'))
@@ -105,6 +115,7 @@ async function call(session, path, init = {}, keepOffline = true, { offlineFallb
     throw Object.assign(new Error(body?.message || `Server error ${res.status}`), { status: res.status })
   }
   const data = await res.json()
+  if (readingGet) assertReadingVersion(version, reading)
   if (isGet && version === sessionVersion) {
     offline.dispatchEvent(new Event('online'))
     if (store) keep(key, data, timestampSaved)
@@ -153,7 +164,7 @@ async function readClippings(s, doc) {
       cursor = page.cursor
     }
   } catch (error) {
-    if (!complete || error.status) throw error
+    if (!complete || error.status || error.stale) throw error
     return { items: complete.items, fromCache: true }
   }
   const live = items.filter((c) => !c.deleted)
@@ -188,6 +199,7 @@ const PROGRESS = '/api/v1/progress?limit=500'
 // A page that fails leaves the previous complete copy in place.
 async function allProgress(session) {
   const version = sessionVersion
+  const reading = readingVersion
   const first = await call(session, PROGRESS, {}, true, { store: false })
   const items = [...first.items]
   for (let next = first.next, seen = new Set(); next; ) {
@@ -198,6 +210,7 @@ async function allProgress(session) {
     items.push(...page.items)
     next = page.next
   }
+  assertReadingVersion(version, reading)
   const all = { items, next: null }
   if (version === sessionVersion) {
     keep(`${OFFLINE}${session.username}@${session.server}${PROGRESS}`, all, !offlineCopies.has(first))
@@ -425,13 +438,17 @@ export const api = {
   // Every clipping across books; older servers without /clippings get fetched book by book.
   async allClippings(s, books) {
     const version = sessionVersion
+    const reading = readingVersion
     try {
       const data = await call(s, '/api/v1/clippings', {}, true, { timestampSaved: true })
+      assertReadingVersion(version, reading)
       if (version === sessionVersion) syncShortcutsCache(s)
       return data.items
     } catch (e) {
       if (version !== sessionVersion || e.status !== 404) throw e
+      assertReadingVersion(version, reading)
       const per = await Promise.all(books.map(async (b) => ({ document: b.document, ...await readClippings(s, b.document) })))
+      assertReadingVersion(version, reading)
       if (version === sessionVersion) {
         if (!per.length) keep(`${OFFLINE}${s.username}@${s.server}/api/v1/clippings`, { items: [] }, true)
         for (const result of per) cacheClippings(s, result.document, result)
@@ -445,6 +462,7 @@ export const api = {
     const version = sessionVersion
     const result = await call(s, `/api/v1/clippings/${doc}`, { method: 'PUT', body: JSON.stringify({ items: [{ id, deleted: 1 }] }) })
     if (version === sessionVersion) {
+      readingVersion++ // Reads begun before this deletion cannot restore it.
       removeCachedClipping(s, doc, id)
       // Native publication already logs failures; the server deletion succeeded.
       await syncShortcutsCache(s)?.catch(() => {})
@@ -455,7 +473,9 @@ export const api = {
     call(s, `/api/v1/documents/${doc}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
   async clippings(s, doc, { syncShortcuts = true } = {}) {
     const version = sessionVersion
+    const reading = readingVersion
     const result = await readClippings(s, doc)
+    assertReadingVersion(version, reading)
     if (version === sessionVersion) {
       cacheClippings(s, doc, result)
       if (syncShortcuts) syncShortcutsCache(s)

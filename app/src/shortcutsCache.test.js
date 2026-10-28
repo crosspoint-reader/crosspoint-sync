@@ -450,3 +450,53 @@ it('restores legacy pages if a new complete clipping payload cannot fit', async 
     quota.mockRestore()
   }
 })
+
+it.each(['hub', 'book', 'legacy'])('rejects a %s clipping read started before a successful deletion', async (source) => {
+  const clip = { document: 'one', id: 'remove', text: 'Removed' }
+  http.mockResolvedValueOnce(response({ items: [clip] }))
+  await api.allClippings(session, [])
+  let resolve
+  if (source === 'legacy') http.mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({}) })
+  http.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+  const pending = source === 'book' ? api.clippings(session, 'one') : api.allClippings(session, [book])
+  const rejected = expect(pending).rejects.toThrow('Reading data changed')
+  await flush()
+  http.mockResolvedValueOnce(response({ ok: true }))
+  await api.deleteClipping(session, 'one', 'remove')
+  resolve(response({ items: [clip], more: false }))
+  await rejected
+  await flush()
+  expect(snapshot().clippings.items).toEqual([])
+  http.mockRejectedValue(new Error('offline'))
+  expect(await api.allClippings(session, [])).toEqual([])
+})
+
+it('applies both concurrent clipping deletions', async () => {
+  http.mockResolvedValueOnce(response({ items: ['a', 'b'].map((id) => ({ document: 'one', id })) }))
+  await api.allClippings(session, [])
+  let resolveA, resolveB
+  http.mockReturnValueOnce(new Promise((r) => { resolveA = r }))
+    .mockReturnValueOnce(new Promise((r) => { resolveB = r }))
+  const a = api.deleteClipping(session, 'one', 'a')
+  const b = api.deleteClipping(session, 'one', 'b')
+  resolveA(response({ ok: true }))
+  await a
+  resolveB(response({ ok: true }))
+  await b
+  expect(snapshot().clippings.items).toEqual([])
+})
+
+it('does not fall back to a complete clipping copy captured before deletion', async () => {
+  const clip = { id: 'remove', text: 'Removed' }
+  http.mockResolvedValueOnce(response({ items: [clip], more: false }))
+  await api.clippings(session, 'one')
+  let reject
+  http.mockReturnValueOnce(new Promise((_, r) => { reject = r }))
+  const pending = api.clippings(session, 'one')
+  const rejected = expect(pending).rejects.toThrow('Reading data changed')
+  http.mockResolvedValueOnce(response({ ok: true }))
+  await api.deleteClipping(session, 'one', 'remove')
+  reject(new Error('offline'))
+  await rejected
+  expect(snapshot().clippings.items).toEqual([])
+})
