@@ -2,6 +2,7 @@ import { withTransaction, type DB } from '../db/db.js';
 import { nextChangeSeq } from './changes.js';
 import { md5Hex } from '../auth/password.js';
 import { autoUnpause } from './pause.js';
+import { mergeMicroblogClippings } from '../connectors/microblog-clippings.js';
 import { MANUAL_COLUMNS, mergeManualSql } from './manual-details.js';
 
 /**
@@ -173,6 +174,7 @@ export function mergeDocuments(
     const last = db.prepare('SELECT MAX(at) AS at FROM progress_log WHERE user_id = ? AND document = ?').get(userId, into) as { at: number | null };
     if (last.at !== null) autoUnpause(db, userId, into, last.at);
 
+    mergeMicroblogClippings(db, userId, from, into);
     // Uniquely-keyed side tables: move what fits, drop the (rare) conflicts.
     for (const table of ['bookmarks', 'clippings', 'connector_matches', 'connector_queue']) {
       db.prepare(`UPDATE OR IGNORE ${table} SET document = ? WHERE user_id = ? AND document = ?`).run(
