@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Select the blog for new highlight collections, keep existing collections on their original blogs, and explicitly recreate deleted posts.
+**Goal:** Select the blog for new clipping collections, keep existing collections on their original blogs, and explicitly recreate deleted posts.
 
 **Architecture:** A focused destination module reads and validates the token's available blogs. Persist each collection's destination independently of the plugin-wide choice, and route every Micropub request explicitly. Extend the existing clippings publication state with confirmed deletion and a guarded recreation operation; reuse the settings and action-sheet patterns.
 
@@ -12,9 +12,9 @@
 
 ## Global Constraints
 
-- **Post highlights to** chooses the destination only for new collections.
+- **Post clippings to** chooses the destination only for new collections.
 - Existing collections stay on their original blog, including subsequent clippings and explicit recreation.
-- Title collection posts **📚 Highlights from {book title}** on creation, recreation, and next update.
+- Title collection posts **📚 Clippings from {book title}** on creation, recreation, and next update.
 - Require a selection when multiple blogs are available; automatically use the sole available blog.
 - Do not move, copy, or delete existing collections when changing the selected blog.
 - Never automatically recreate a deleted post or treat a network/authorization failure as confirmed deletion.
@@ -48,7 +48,7 @@
 
 **Interfaces:** Consume Task 1 discovery and choice functions. Extend `ClippingsPost` with `destination: string | null` and `missing: number`. Export `recreateMicroblogClippings(db: DB, userId: number, document: string, http: HttpTransport): Promise<{ queued: boolean }>`; add `GET /api/v1/connectors/microblog/clipping-posts` returning this user's post status by canonical document, and `POST /api/v1/connectors/microblog/clipping-posts/:document/recreate`.
 
-- [ ] Write failing publication tests for the **📚 Highlights from Test book** title, selected non-default blog on every Micropub request, sole-blog fallback, no creation without a multi-blog choice, changed selection leaving existing posts pinned, an in-flight selection change, and revoked access refusing to publish rather than falling back.
+- [ ] Write failing publication tests for the **📚 Clippings from Test book** title, selected non-default blog on every Micropub request, sole-blog fallback, no creation without a multi-blog choice, changed selection leaving existing posts pinned, an in-flight selection change, and revoked access refusing to publish rather than falling back.
 - [ ] Add failing legacy tests using an existing post URL: infer the unique matching available destination, prefer the longest valid blog URL prefix, and pause when no unique destination is provable. Test credential rotation with multiple accessible original destinations.
 - [ ] Add failing deletion/recreation tests: a confirmed missing source pauses publication and retains clippings; 401/403/429/5xx do not set `missing`; explicit recreation verifies absence, stays on the original blog, includes saved and new eligible passages, and preserves normal uncertain-creation recovery. Repeated/concurrent requests create at most one replacement; an existing original post resumes updates without creating another.
 - [ ] Run `npm test -- test/microblog-clippings-post.test.ts test/microblog-clippings-api.test.ts test/microblog-clippings.test.ts`; confirm new tests fail before implementation.
@@ -64,10 +64,10 @@
 
 **Interfaces:** Add `api.microblogDestinations(session)`, `api.setMicroblogDestination(session, uid)`, `api.microblogClippingPosts(session)`, and `api.recreateMicroblogPost(session, document)` for Task 1/2 endpoints. `MicroblogPosting({ session, onChange })` owns destination loading and saving.
 
-- [ ] Write failing UI tests for **Post highlights to**, sole-blog selection, a required choice with multiple blogs, saved-choice restoration, loading/saving errors, unavailable selected blogs, and preventing overlapping saves. Keep **Automatically sync highlights** and its default unchanged.
-- [ ] Write failing clipping tests for a per-book **Recreate highlight post** action shown only for missing collections, the confirmation explaining publication on the original blog, cancel without requests, success/refetch, failure feedback, and disabled repeated clicks.
+- [ ] Write failing UI tests for **Post clippings to**, sole-blog selection, a required choice with multiple blogs, saved-choice restoration, loading/saving errors, unavailable selected blogs, and preventing overlapping saves. Keep **Automatically sync clippings** and its default unchanged.
+- [ ] Write failing clipping tests for a per-book **Recreate clipping post** action shown only for missing collections, the confirmation explaining publication on the original blog, cancel without requests, success/refetch, failure feedback, and disabled repeated clicks.
 - [ ] Run `npm --prefix app test -- src/MicroblogPosting.test.jsx src/Clippings.test.jsx`; verify the new behaviors fail first.
 - [ ] Implement the plugin selector using the existing app form style. Explain that it affects new collections while existing posts stay on their original blog. Include an unavailable saved value rather than silently displaying a different blog; show load/save errors and allow retry.
-- [ ] Show the recreation action once per affected book on the clippings hub, with an action sheet confirming that eligible collected highlights will be republished to the original blog. Refresh post status after the request and report queuing without claiming publication is already complete. Wire the API methods and update setup documentation, including the emoji title.
+- [ ] Show the recreation action once per affected book on the clippings hub, with an action sheet confirming that eligible collected clippings will be republished to the original blog. Refresh post status after the request and report queuing without claiming publication is already complete. Wire the API methods and update setup documentation, including the emoji title.
 - [ ] Run `npm test`, `npm run build`, `npm --prefix app test`, and `npm --prefix app run build`. Use bundled Node entrypoints if the execution shell lacks npm; report failures by name. Request one independent review of the full change, reproduce important findings with failing tests, and complete one fix pass.
 - [ ] Commit the tested result on `codex/microblog-clippings`. Keep the worktree available for local Docker testing and report the new settings/recreation behavior, verification, and material limitations. Do not create real Micro.blog posts or alter the user's running container during development.

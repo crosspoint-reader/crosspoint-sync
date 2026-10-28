@@ -3,7 +3,7 @@ import { Copy, FileDown, Quote, Search } from 'lucide-react'
 import { api, cached, isApp } from './api.js'
 import { saveFile } from './shareCard.js'
 import { ClipMenu, ClipShare, DeleteClip, hold } from './Book.jsx'
-import { Cover, EmptyState, ErrorNote, ShareIcon, Spinner, useLoad } from './ui.jsx'
+import { ActionSheet, Cover, EmptyState, ErrorNote, ShareIcon, Spinner, useLoad } from './ui.jsx'
 
 const date = (unix) => new Date(unix * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 
@@ -48,7 +48,7 @@ function Clip({ session, clip, book, onShare, onDelete, showBook, onMicroblog, s
         </button>
         {onMicroblog && (
           <button type="button" disabled={sending} onClick={() => onMicroblog(clip)} className="min-h-11 rounded-full px-2 text-sm font-medium text-brand-600 disabled:opacity-50">
-            Add highlight to Micro.blog
+            Add clipping to Micro.blog
           </button>
         )}
         <p className="truncate text-xs text-stone-500">{[clip.chapter, date(clip.created_at)].filter(Boolean).join(' · ')}</p>
@@ -61,6 +61,9 @@ export default function Clippings({ session, books }) {
   const [items, error, reload] = useLoad(() => api.allClippings(session, books), [session], `clippings:${session.username}`, () => cached.clippings(session))
   const [connectors] = useLoad(() => api.connectors(session).then((r) => r.connectors), [session], `clipping-connectors:${session.username}`)
   const microblog = connectors?.some((c) => c.id === 'microblog' && c.linked)
+  const [postData, postError, reloadPosts] = useLoad(() => microblog ? api.microblogClippingPosts(session) : Promise.resolve({ items: [] }), [session, microblog])
+  const postByDocument = new Map((postData?.items || []).map((p) => [p.document, p]))
+  const [recreating, setRecreating] = useState(null)
   const [query, setQuery] = useState('')
   const [only, setOnly] = useState(null) // document
   const [sharing, setSharing] = useState(null)
@@ -91,13 +94,13 @@ export default function Clippings({ session, books }) {
     setNote(null)
     setSendError(null)
     try {
-      const result = await api.addMicroblogHighlight(session, clip.document, clip.id)
+      const result = await api.addMicroblogClipping(session, clip.document, clip.id)
       setNote(result.waiting_for_match
-        ? 'Highlight saved for Micro.blog. Match this book in Settings; it will be included on the next sync.'
-        : result.queued ? 'Highlight selected for the book’s Micro.blog post. The update is queued.'
-          : 'Highlight is selected for the book’s Micro.blog post.')
+        ? 'Clipping saved for Micro.blog. Match this book in Settings; it will be included on the next sync.'
+        : result.queued ? 'Clipping selected for the book’s Micro.blog post. The update is queued.'
+          : 'Clipping is selected for the book’s Micro.blog post.')
     } catch (error) {
-      setSendError(error.message || 'Could not add this highlight to Micro.blog.')
+      setSendError(error.message || 'Could not add this clipping to Micro.blog.')
     } finally {
       pending.current = false
       setSending(false)
@@ -121,6 +124,7 @@ export default function Clippings({ session, books }) {
     <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
       <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">Clippings</h1>
       {sendError && <p role="alert" className="mt-3 text-sm text-red-600">{sendError}</p>}
+      {postError && microblog && <p role="alert" className="mt-3 text-sm text-red-600">Could not load Micro.blog post status: {postError.message}</p>}
 
       {error && !items ? (
         <ErrorNote error={error} />
@@ -129,14 +133,14 @@ export default function Clippings({ session, books }) {
       ) : all.length === 0 ? (
         <div className="mt-6 md:max-w-2xl">
           <EmptyState icon={Quote} note="Clean margins, for now" title="No clippings yet">
-            Highlight a passage on your reader with clipping sync on, and it lands here, ready to search and share.
+            Clippings saved on your reader land here, ready to search and share.
           </EmptyState>
         </div>
       ) : (
         <>
           {daily && !q && !only && (
             <section className="mt-6">
-              <p className="inline-block -rotate-1 font-hand text-xl text-brand-600">Highlight of the day</p>
+              <p className="inline-block -rotate-1 font-hand text-xl text-brand-600">Clipping of the day</p>
               <div className="mt-2 md:max-w-2xl">
                 <Clip session={session} clip={daily} book={byDoc.get(daily.document)} onShare={setSharing} onDelete={setDeleting} showBook onMicroblog={microblog ? addToMicroblog : null} sending={sending} />
               </div>
@@ -207,6 +211,10 @@ export default function Clippings({ session, books }) {
                   <p className="truncate text-sm text-stone-500">{book.author}</p>
                 </div>
               </a>
+              {postByDocument.get(book.document)?.missing && <div className="mt-3 text-sm">
+                <p className="text-stone-600">The Micro.blog clippings post was deleted. Clippings are saved here while publishing is paused.</p>
+                <button type="button" onClick={() => setRecreating(postByDocument.get(book.document))} className="min-h-11 font-medium text-brand-600">Recreate clippings post</button>
+              </div>}
               <div className="mt-3 grid grid-cols-1 gap-x-8 md:grid-cols-2">
                 {clips.map((c) => (
                   <Clip key={c.id} session={session} clip={c} book={book} onShare={setSharing} onDelete={setDeleting} onMicroblog={microblog ? addToMicroblog : null} sending={sending} />
@@ -217,6 +225,13 @@ export default function Clippings({ session, books }) {
         </>
       )}
 
+      {recreating && <ActionSheet title="Recreate clippings post?" actionLabel="Recreate post" pendingLabel="Queuing…" onClose={() => setRecreating(null)} onConfirm={async () => {
+        await api.recreateMicroblogPost(session, recreating.document)
+        reloadPosts()
+        setNote('Replacement clippings post queued for Micro.blog.')
+      }}>
+        This will republish this book’s collected clippings and resume updates on its original blog: {recreating.destination || recreating.url}.
+      </ActionSheet>}
       {sharing && <ClipShare session={session} book={byDoc.get(sharing.document)} clip={sharing} onClose={() => setSharing(null)} />}
       {deleting && (
         <DeleteClip

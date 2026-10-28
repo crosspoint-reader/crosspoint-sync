@@ -613,7 +613,7 @@ async function linkCredential(body) {
 
 const HINTS = {
   hardcover: 'Syncs your reading progress and shelf status to Hardcover.',
-  microblog: 'Connect an app token to keep your Currently reading and Finished reading bookshelves in sync. Optional highlight sync publishes one post per book and updates its generated content on later syncs, replacing edits made on Micro.blog.',
+  microblog: 'Connect an app token to keep your Currently reading and Finished reading bookshelves in sync. Optional clipping sync publishes one post per book and updates its generated content on later syncs, replacing edits made on Micro.blog.',
   readwise: 'Paste your Readwise access token from readwise.io/access_token. Syncs your highlights.',
   'readwise-reader': 'Paste your Readwise access token from readwise.io/access_token. Archives books in Reader when you finish them, and brings your Reader progress back to your device.',
   kosync: 'Mirror your reading progress to another KOReader-compatible (KOSync) server, so your other devices see it too.',
@@ -637,7 +637,8 @@ const TOKEN_HELP = {
     + '<li>Open <a href="https://micro.blog/account/apps" target="_blank" rel="noopener noreferrer">Account → App tokens</a>.</li>'
     + '<li>Create a separate token for <b>CrossPoint Sync</b>.</li>'
     + '<li>Copy the new token and paste it below.</li>'
-    + '</ol><p style="margin-bottom:0">Treat this token like a password: it has full access to your Micro.blog account. CrossPoint Sync encrypts it before storing it.</p></div>',
+    + '</ol><p>Choose the posting blog and automatic clipping sync in <a href="${basePath}/app/#/settings">app Settings</a>.</p>'
+    + '<p style="margin-bottom:0">Treat this token like a password: it has full access to your Micro.blog account. CrossPoint Sync encrypts it before storing it.</p></div>',
   kindle: '<div class="muted" style="margin-bottom:18px">'
     + '<p style="margin-top:0"><b>Set up with the CrossPoint Kindle Link extension (recommended):</b></p>'
     + '<ol style="padding-left:20px;margin-bottom:10px">'

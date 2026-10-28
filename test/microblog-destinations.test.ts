@@ -62,3 +62,11 @@ it('identifies URL path boundaries and the longest matching blog prefix', () => 
   expect(destinationForPost('https://shared.test/blogging/post.html', blogs)).toBeNull();
   expect(destinationForPost('https://shared.test.evil/blog/post.html', blogs)).toBeNull();
 });
+it.each([b, 'https://third.micro.blog/'])('never discards original collections when rotating to access %s', async (accessible) => {
+  const s = await setup([{ uid: a }, { uid: b }]);
+  upsertAccount(s.db, s.uid, 'microblog', { token: 'old', microblogDestination: a }, null);
+  s.db.prepare('INSERT INTO microblog_clipping_posts(user_id,document,identity,url,destination) VALUES(?,?,?,?,?)').run(s.uid, 'book', 'identity', `${b}post.html`, b);
+  upsertAccount(s.db, s.uid, 'microblog', { token: 'new', microblogDestination: accessible, microblogDestinations: [{ uid: accessible }] }, null);
+  expect(s.db.prepare('SELECT identity,url,destination FROM microblog_clipping_posts').get()).toEqual({ identity: 'identity', url: `${b}post.html`, destination: b });
+  s.db.close();
+});

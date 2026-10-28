@@ -34,12 +34,12 @@ export function upsertAccount(
       if (old.token !== cred.token) {
         // Existing installs may have published before destination discovery was
         // added. Location URLs provide a conservative same-blog identity hint.
-        const urls = db.prepare('SELECT url FROM microblog_clipping_posts WHERE user_id=? AND url IS NOT NULL')
-          .all(userId) as { url: string }[];
-        const origins = new Set(urls.flatMap((r) => { try { return [new URL(r.url).origin + '/']; } catch { return []; } }));
+        const posts = db.prepare('SELECT url,destination FROM microblog_clipping_posts WHERE user_id=?')
+          .all(userId) as { url: string | null; destination: string | null }[];
+        const origins = new Set(posts.flatMap((r) => { try { return r.url ? [new URL(r.url).origin + '/'] : []; } catch { return []; } }));
         const oldDestination = old.microblogDestination ?? (origins.size === 1 ? [...origins][0] : null);
         const available = Array.isArray(cred.microblogDestinations) ? cred.microblogDestinations as { uid?: string }[] : [];
-        if (oldDestination && available.some((d) => d.uid === oldDestination)) changedMicroblogAccount = false;
+        if (available.some((d) => d.uid === oldDestination || posts.some((p) => p.destination === d.uid))) changedMicroblogAccount = false;
         else if (oldDestination && cred.microblogDestination) changedMicroblogAccount = oldDestination !== cred.microblogDestination;
         else verifyMicroblogPosts = true;
       }
@@ -54,14 +54,13 @@ export function upsertAccount(
   }
   withTransaction(db, () => {
     if (verifyMicroblogPosts) {
-      // Unknown ownership: preserve intent/identity, but recover each existing
-      // post under the new token before reusing a URL or creating anything.
-      db.prepare(`UPDATE microblog_clipping_posts SET attempted=CASE WHEN url IS NOT NULL THEN 1 ELSE attempted END,
-        url=NULL,fingerprint=NULL,error=NULL WHERE user_id=?`).run(userId);
+      // Retain URL/destination/history. Publication validates access to each
+      // original blog and its source URL before any further update.
       db.prepare("DELETE FROM connector_queue WHERE user_id=? AND connector_id='microblog'").run(userId);
     }
     if (changedMicroblogAccount) {
-      for (const table of ['microblog_clipping_selections', 'microblog_clipping_posts']) db.prepare(`DELETE FROM ${table} WHERE user_id=?`).run(userId);
+      // A new token's default blog cannot prove that older collections should
+      // be forgotten. Only explicit unlink erases their publication history.
       for (const table of ['connector_matches', 'connector_queue']) db.prepare(`DELETE FROM ${table} WHERE user_id=? AND connector_id='microblog'`).run(userId);
       db.prepare("UPDATE connector_accounts SET options='{}' WHERE user_id=? AND connector_id='microblog'").run(userId);
     }

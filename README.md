@@ -177,16 +177,29 @@ Treat the token like a password: Micro.blog app tokens have full account access.
 encrypts the token at rest using `TOKEN_ENC_KEY`.
 
 With Micro.blog linked, each clipping on the **Clippings** page has an
-**Add highlight to Micro.blog** action. Selected highlights are collected into
-one published post per book, linking to its matched Micro.blog book page.
-Further selections update that post. CrossPoint Sync manages its generated
-content, so later updates replace edits made directly to that content on Micro.blog.
+**Add clipping to Micro.blog** action. Selected clippings are collected into
+one post per book, titled **📚 Clippings from {book title}**, with a link to the
+matched Micro.blog book page. Later clippings update the same post. CrossPoint
+Sync manages its generated content, so later updates replace edits made directly
+to that content on Micro.blog.
 
-**Automatically sync highlights** in the Micro.blog settings is off by default.
-Enabling it includes existing and future clippings. Unmatched books wait without
-interrupting reader sync; after matching a book, its eligible highlights are sent
-on the next reader sync or **Sync now**. Turning automatic sync off stops automatic
-additions while retaining published passages and manually selected highlights.
+Choose **Post clippings to** in Micro.blog settings when the token accesses
+multiple blogs. A sole available blog is selected automatically. The choice
+applies to new collections: existing posts, new clippings for those books, and
+explicitly recreated posts stay on the book's original blog. Revoked access pauses
+posting to that blog; selecting a different one never moves existing collections.
+
+**Automatically sync clippings** is off by default. Enabling it includes existing
+and future clippings. Unmatched books wait without interrupting reader sync;
+after matching, eligible clippings are sent on the next reader sync or **Sync now**.
+Turning automatic sync off stops automatic additions while retaining published
+passages and manually selected clippings.
+
+Deleting a post on Micro.blog pauses publication for that book while preserving
+its clippings locally. After the missing post is detected on an update, the book's
+section on the Clippings page offers **Recreate clippings post**. This explicitly
+republishes the collected clippings to the original blog after verifying the post
+is missing. Network or permission errors do not trigger recreation.
 
 For local testing, use Node 22.13 or newer, build the frontend with
 `npm run build:frontend`, and copy `.env.example` to `.env`. Set a separate

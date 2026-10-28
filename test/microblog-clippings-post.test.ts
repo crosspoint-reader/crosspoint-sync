@@ -213,7 +213,7 @@ it('an in-flight old-account upload cannot overwrite replacement-account state o
   expect(db.prepare('SELECT url,fingerprint FROM microblog_clipping_posts').get()).toEqual({ url: null, fingerprint: null });
   expect(db.prepare('SELECT status FROM connector_queue').get()).toEqual({ status: 'pending' });
   await drainQueue(db, http);
-  expect(db.prepare('SELECT url FROM microblog_clipping_posts').get()).toEqual({ url: 'https://replacement.micro.blog/highlights.html' });
+  expect(db.prepare('SELECT url,destination FROM microblog_clipping_posts').get()).toEqual({ url: null, destination: 'https://example.micro.blog/' });
   db.close();
 });
 

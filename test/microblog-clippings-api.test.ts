@@ -85,11 +85,11 @@ it('rejects missing, deleted, foreign, unlinked, disabled and unauthenticated se
   s.db.close();
 });
 
-it('a replacement token cannot inherit another account’s published post or automatic preference', async () => {
+it('a replacement token preserves original post history while resetting inaccessible-account preferences', async () => {
   const s = await setup(); await s.match(); await s.select(); await drainQueue(s.db, s.http);
   s.db.prepare("UPDATE connector_accounts SET options='{" + '"sync_highlights":true' + "}' WHERE user_id=?").run(s.uid);
   upsertAccount(s.db, s.uid, 'microblog', { token: 'replacement', microblogDestination: 'https://replacement.micro.blog/' }, null);
-  expect(s.db.prepare('SELECT COUNT(*) n FROM microblog_clipping_posts').get()).toEqual({ n: 0 });
+  expect(s.db.prepare('SELECT url FROM microblog_clipping_posts').get()).toEqual({ url: 'https://example.micro.blog/highlights.html' });
   expect(s.db.prepare("SELECT options FROM connector_accounts WHERE user_id=?").get(s.uid)).toEqual({ options: '{}' });
   expect(s.db.prepare('SELECT COUNT(*) n FROM connector_matches WHERE user_id=?').get(s.uid)).toEqual({ n: 0 });
   s.db.close();
