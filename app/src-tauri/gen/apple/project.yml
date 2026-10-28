@@ -105,6 +105,7 @@ targets:
       - sdk: QuartzCore.framework
       - sdk: Security.framework
       - sdk: UIKit.framework
+      - sdk: AppIntents.framework
       - sdk: WebKit.framework
       - sdk: WidgetKit.framework
     preBuildScripts:

@@ -35,3 +35,48 @@ npm run tauri ios dev                # iOS simulator (needs Xcode)
 npm run tauri android init && npm run tauri android dev
 npm run tauri build                  # release desktop bundle
 ```
+
+## iOS Shortcuts (iOS 16+)
+
+The iOS build provides three read-only actions in Shortcuts under **CrossPoint Sync**:
+
+- **Find Books**: optional reading-status and title/author filters. Returns books newest sync first.
+- **Get Book**: select a book, or pass one from Find Books, to get its current saved details.
+- **Find Clippings**: optional book, text (passage/note/chapter), and creation-date filters. Returns newest first.
+
+Book results expose Title, Author, Reading Status, Progress (%) (0–100), Last Sync,
+and Cached At. Clippings expose Text, Note, Chapter, Created At, Book, and Cached At.
+For example: Find Books with Reading Status = Reading → Repeat with Each → get
+Title, Progress (%) and Last Sync → append to a note. Use status Finished for a
+finished-book list. Find Clippings → get Text can feed a quote collection.
+
+Actions read the app's existing offline data through a credential-free snapshot in
+the main app’s private Application Support storage. They do not contact the server
+or require the app's UI to be open. Open the Library to save books; open Clippings to save the all-book list,
+or an individual book to save its clippings. Only data the app has loaded is
+available. The all-book clippings endpoint currently returns at most 5,000 items;
+opening a book also saves its complete paginated clipping list. Unsynced reader
+data cannot appear until the reader uploads it and the app refreshes.
+
+**Last Sync** is the server's latest recorded progress update. **Cached At** is when
+the app fetched the data; offline reads and restarts preserve it. Older caches may
+have an unknown Cached At until refreshed online. Clippings can have different
+cache times because books can refresh separately. Signing out clears the shared
+snapshot; saved Shortcuts book selections are scoped to their server and account.
+An uncached collection gives instructions to open the relevant app screen, while a
+cached empty collection returns an empty list.
+
+Native store checks (no simulator needed):
+
+```sh
+swiftc -module-cache-path /tmp/crosspoint-swift-cache \
+  src-tauri/gen/apple/Sources/crosspoint-sync-app/ShortcutsStore.swift \
+  scripts/shortcuts-tests/main.swift -o /tmp/crosspoint-shortcuts-tests
+/tmp/crosspoint-shortcuts-tests
+```
+
+Before release, build/install using Xcode and verify all three actions appear in
+Shortcuts. Load the Library and Clippings online, turn on airplane mode, close the
+app and run each action; check the returned fields and unchanged Cached At. Sign
+out and confirm actions no longer return the previous account's data. Sign into a
+different account and verify a previously selected book cannot resolve to it.

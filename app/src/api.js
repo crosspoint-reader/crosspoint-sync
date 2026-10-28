@@ -1,4 +1,5 @@
 import SparkMD5 from 'spark-md5'
+import { publishShortcuts } from './shortcutsCache.js'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 
 // In the app, requests go through Rust (plain-http LAN servers, any CORS_ORIGINS);
@@ -52,6 +53,7 @@ export function logout() {
   sessionVersion++
   localStorage.removeItem(KEY)
   clearOffline()
+  publishShortcuts(null)
 }
 
 // Offline: every successful GET is kept on the device; when the network is down
@@ -62,6 +64,7 @@ const OFFLINE_PREFIX = 'crosspoint-offline:'
 const OFFLINE = `${OFFLINE_PREFIX}v2:`
 export const offline = new EventTarget()
 let sessionVersion = 0
+const offlineCopies = new WeakSet()
 
 function clearOffline() {
   for (const key of Object.keys(localStorage)) {
@@ -90,7 +93,9 @@ async function call(session, path, init = {}, keepOffline = true, { offlineFallb
     const saved = isGet && version === sessionVersion && localStorage.getItem(key)
     if (!saved || !offlineFallback) throw e
     offline.dispatchEvent(new Event('offline'))
-    return JSON.parse(saved)
+    const data = JSON.parse(saved)
+    offlineCopies.add(data)
+    return data
   }
   if (res.status === 401) throw Object.assign(new Error('Signed out'), { status: 401 })
   if (!res.ok) {
@@ -132,7 +137,10 @@ async function allProgress(session) {
     next = page.next
   }
   const all = { items, next: null }
-  if (version === sessionVersion) keep(`${OFFLINE}${session.username}@${session.server}${PROGRESS}`, all)
+  if (version === sessionVersion) {
+    keep(`${OFFLINE}${session.username}@${session.server}${PROGRESS}`, all, !offlineCopies.has(first))
+    syncShortcutsCache(session)
+  }
   return all
 }
 
@@ -182,6 +190,7 @@ export async function login(server, username, password) {
   await call(session, '/users/auth', {}, false)
   sessionVersion++
   clearOffline()
+  publishShortcuts(null)
   localStorage.setItem(KEY, JSON.stringify(session))
   localStorage.setItem(LAST_SERVER, JSON.stringify(session.server))
   return session
@@ -201,6 +210,52 @@ const bookList = (r) =>
   r.items
     .filter((b) => b.title || b.filename)
     .map((b) => (b.status === 'finished' ? { ...b, device_percentage: b.percentage, percentage: 1 } : b))
+
+// A credential-free mirror of the data already saved by this app. No requests.
+export function syncShortcutsCache(session) {
+  if (!isApp) return
+  if (!session) return publishShortcuts(null)
+  const prefix = `${OFFLINE}${session.username}@${session.server}`
+  const books = saved(session, PROGRESS)
+  const all = saved(session, '/api/v1/clippings')
+  const allAt = read(`${prefix}/api/v1/clippings:saved-at`)
+  let clippings = all ? { items: all.items.map((c) => ({ ...c, cachedAt: allAt })) } : null
+  // Complete per-book fetches supersede older hub data, including deletions.
+  const perPrefix = `${prefix}/api/v1/clippings/`
+  for (const key of Object.keys(localStorage)) {
+    if (!key.startsWith(perPrefix) || key.includes('?') || key.endsWith(':saved-at')) continue
+    const doc = key.slice(perPrefix.length)
+    const per = read(key)
+    const at = read(`${key}:saved-at`)
+    if (!per) continue
+    if (all && (at ?? 0) < (allAt ?? 0)) {
+      if (all.items.length >= 5000) {
+        // The capped hub cannot establish that omitted passages were deleted.
+        const known = new Set(clippings.items.filter((c) => c.document === doc).map((c) => c.id))
+        clippings.items.push(...per.items.filter((c) => !known.has(c.id)).map((c) => ({ ...c, document: doc, cachedAt: at })))
+      }
+      continue
+    }
+    clippings ??= { items: [] }
+    clippings.items = clippings.items.filter((c) => c.document !== doc)
+    clippings.items.push(...per.items.map((c) => ({ ...c, document: doc, cachedAt: at })))
+  }
+  // Allowlist fields rather than exposing server responses or session credentials.
+  publishShortcuts({
+    account: JSON.stringify([session.server, session.username]),
+    books: books ? {
+      savedAt: read(`${prefix}${PROGRESS}:saved-at`),
+      items: bookList(books).map((b) => ({
+        document: b.document, title: b.title || b.filename, author: b.author ?? '',
+        status: b.status ?? 'reading', percentage: b.percentage, timestamp: b.timestamp,
+      })),
+    } : null,
+    clippings: clippings ? { items: clippings.items.map((c) => ({
+      document: c.document, id: c.id, text: c.text ?? '', note: c.note ?? '',
+      chapter: c.chapter ?? '', created_at: c.created_at ?? 0, cachedAt: c.cachedAt,
+    })) } : null,
+  })
+}
 
 export const cached = {
   books: (s) => {
@@ -298,10 +353,13 @@ export const api = {
   unmerge: (s, alias) => call(s, `/api/v1/documents/merge/${alias}`, { method: 'DELETE' }),
   // Every clipping across books; older servers without /clippings get fetched book by book.
   async allClippings(s, books) {
+    const version = sessionVersion
     try {
-      return (await call(s, '/api/v1/clippings')).items
+      const data = await call(s, '/api/v1/clippings', {}, true, { timestampSaved: true })
+      if (version === sessionVersion) syncShortcutsCache(s)
+      return data.items
     } catch (e) {
-      if (e.status !== 404) throw e
+      if (version !== sessionVersion || e.status !== 404) throw e
       const per = await Promise.all(books.map((b) => api.clippings(s, b.document).then((items) => items.map((c) => ({ ...c, document: b.document })))))
       return per.flat().sort((a, b) => b.created_at - a.created_at)
     }
@@ -311,14 +369,26 @@ export const api = {
   setStatus: (s, doc, status) =>
     call(s, `/api/v1/documents/${doc}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
   async clippings(s, doc) {
+    const version = sessionVersion
     const items = []
+    let fromCache = false
     for (let cursor = 0; ; ) {
       const page = await call(s, `/api/v1/clippings/${doc}?cursor=${cursor}&limit=100`)
+      fromCache ||= offlineCopies.has(page)
       items.push(...page.items)
       if (!page.more) break
       cursor = page.cursor
     }
-    return items.filter((c) => !c.deleted)
+    const live = items.filter((c) => !c.deleted)
       .sort((a, b) => a.spine - b.spine || (a.start_offset ?? a.para ?? a.start_page) - (b.start_offset ?? b.para ?? b.start_page))
+    if (version === sessionVersion) {
+      // Migrate a complete legacy offline copy, but never overwrite a newer
+      // complete snapshot with potentially mixed-age cached pages.
+      if (!fromCache || !saved(s, `/api/v1/clippings/${doc}`)) {
+        keep(`${OFFLINE}${s.username}@${s.server}/api/v1/clippings/${doc}`, { items: live }, !fromCache)
+      }
+      syncShortcutsCache(s)
+    }
+    return live
   },
 }

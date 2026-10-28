@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { ChartColumn, CloudOff, Compass, Quote, Eye, EyeOff, LibraryBig, Loader2, Lock, Send as SendIcon, Server, Settings as SettingsIcon, User } from 'lucide-react'
 import { useTheme } from './theme.js'
-import { DEFAULT_SERVER, api, hostedServer, isApp, lastServer, loadSession, login, logout, offline, cached, register, saveSession } from './api.js'
+import { DEFAULT_SERVER, syncShortcutsCache, api, hostedServer, isApp, lastServer, loadSession, login, logout, offline, cached, register, saveSession } from './api.js'
 import { ErrorNote, LoadCacheProvider, PageSkeleton, RefreshPill, Toaster, useLoad } from './ui.jsx'
 import Library from './Library.jsx'
 import Book from './Book.jsx'
@@ -321,6 +321,7 @@ function Sidebar({ route, session }) {
 }
 
 function Home({ session, onSession, onLogout, theme }) {
+  useEffect(() => { syncShortcutsCache(session) }, [session])
   const [parts, from] = useHash()
   // Offline: api.js serves the last saved copy and says so; show a slim notice until the network is back.
   const [isOffline, setOffline] = useState(false)
@@ -437,7 +438,10 @@ export default function App() {
   const theme = useTheme()
   const [session, setSession] = useState(loadSession)
   useEffect(() => {
-    if (!session) clearWidget()
+    if (!session) {
+      clearWidget()
+      syncShortcutsCache(null)
+    }
   }, [session])
   if (!session) return <Login onLogin={(s) => (window.scrollTo(0, 0), setSession(s))} />
   return (

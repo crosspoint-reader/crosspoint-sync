@@ -39,3 +39,21 @@ fn group_dir() -> Option<std::path::PathBuf> {
   let path = unsafe { url.path() }?;
   Some(path.to_string().into())
 }
+
+/// Credential-free offline data in private Application Support storage, read by
+/// App Intents in the main app process (no App Group entitlement required). Writes are atomic so
+/// Shortcuts never sees a partially written library. `None` clears it on logout.
+#[tauri::command]
+pub fn update_shortcuts(app: tauri::AppHandle, json: Option<String>) -> Result<(), String> {
+  #[cfg(target_os = "ios")]
+  {
+    use tauri::Manager;
+    let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::shortcuts_cache::snapshot_dir(&app_data);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    crate::shortcuts_cache::publish(&dir, json.as_deref()).map_err(|e| e.to_string())?;
+  }
+  #[cfg(not(target_os = "ios"))]
+  let _ = (app, json);
+  Ok(())
+}

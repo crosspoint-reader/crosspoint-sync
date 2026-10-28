@@ -3,6 +3,8 @@ mod epub_name;
 mod mdns;
 mod opds;
 mod refresh;
+#[cfg(any(target_os = "ios", test))]
+mod shortcuts_cache;
 mod widget;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -39,6 +41,7 @@ pub fn run() {
       books::send_bytes,
       books::save_file,
       widget::update_widget,
+      widget::update_shortcuts,
       set_appearance,
       supports_native_chrome,
       set_page_scroll,

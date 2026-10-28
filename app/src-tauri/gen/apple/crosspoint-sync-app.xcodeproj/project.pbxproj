@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A65E756C12B6408AA9100005 /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A65E756C12B6408AA9100006 /* AppIntents.framework */; };
+		A65E756C12B6408AA9100003 /* ReadingIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65E756C12B6408AA9100004 /* ReadingIntents.swift */; };
+		A65E756C12B6408AA9100001 /* ShortcutsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65E756C12B6408AA9100002 /* ShortcutsStore.swift */; };
 		05558E78087CE893FD133EED /* WidgetReload.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0FDA312FF333FEE325F3784 /* WidgetReload.swift */; };
 		07E120DC37D4E3BA35660834 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1C1D61425D6C89B023A68699 /* WebKit.framework */; };
 		0D22C69FE6169D6661235690 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BECC0ABE484B2047607C4F0A /* SwiftUI.framework */; };
@@ -52,6 +55,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A65E756C12B6408AA9100006 /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
+		A65E756C12B6408AA9100004 /* ReadingIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingIntents.swift; sourceTree = "<group>"; };
+		A65E756C12B6408AA9100002 /* ShortcutsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutsStore.swift; sourceTree = "<group>"; };
 		06400398C81B2BCE0778BAED /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		0ADABAFF8038D69A13E988F1 /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
 		1602AFD916563BCBF295CAFA /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
@@ -111,6 +117,7 @@
 				CEA14FCBC23E088D806332E2 /* UIKit.framework in Frameworks */,
 				07E120DC37D4E3BA35660834 /* WebKit.framework in Frameworks */,
 				E952F1320553223057A59239 /* WidgetKit.framework in Frameworks */,
+				A65E756C12B6408AA9100005 /* AppIntents.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -154,6 +161,8 @@
 			children = (
 				917F15BCA5CFDD43F04EE308 /* main.mm */,
 				C0FDA312FF333FEE325F3784 /* WidgetReload.swift */,
+				A65E756C12B6408AA9100004 /* ReadingIntents.swift */,
+				A65E756C12B6408AA9100002 /* ShortcutsStore.swift */,
 				967C288423B4F5D0AD41A6A9 /* bindings */,
 			);
 			path = "crosspoint-sync-app";
@@ -182,6 +191,7 @@
 				BEF7345547BE54CBD0CAA946 /* UIKit.framework */,
 				1C1D61425D6C89B023A68699 /* WebKit.framework */,
 				FE54F751F09F6D338C764211 /* WidgetKit.framework */,
+				A65E756C12B6408AA9100006 /* AppIntents.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -381,6 +391,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				05558E78087CE893FD133EED /* WidgetReload.swift in Sources */,
+				A65E756C12B6408AA9100003 /* ReadingIntents.swift in Sources */,
+				A65E756C12B6408AA9100001 /* ShortcutsStore.swift in Sources */,
 				9CC5FA4D3B3EEAB970E0A4DE /* main.mm in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
