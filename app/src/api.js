@@ -360,7 +360,8 @@ export const api = {
       return data.items
     } catch (e) {
       if (version !== sessionVersion || e.status !== 404) throw e
-      const per = await Promise.all(books.map((b) => api.clippings(s, b.document).then((items) => items.map((c) => ({ ...c, document: b.document })))))
+      const per = await Promise.all(books.map((b) => api.clippings(s, b.document, { syncShortcuts: false }).then((items) => items.map((c) => ({ ...c, document: b.document })))))
+      if (version === sessionVersion) syncShortcutsCache(s)
       return per.flat().sort((a, b) => b.created_at - a.created_at)
     }
   },
@@ -368,7 +369,7 @@ export const api = {
     call(s, `/api/v1/clippings/${doc}`, { method: 'PUT', body: JSON.stringify({ items: [{ id, deleted: 1 }] }) }),
   setStatus: (s, doc, status) =>
     call(s, `/api/v1/documents/${doc}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
-  async clippings(s, doc) {
+  async clippings(s, doc, { syncShortcuts = true } = {}) {
     const version = sessionVersion
     const items = []
     let fromCache = false
@@ -387,7 +388,7 @@ export const api = {
       if (!fromCache || !saved(s, `/api/v1/clippings/${doc}`)) {
         keep(`${OFFLINE}${s.username}@${s.server}/api/v1/clippings/${doc}`, { items: live }, !fromCache)
       }
-      syncShortcutsCache(s)
+      if (syncShortcuts) syncShortcutsCache(s)
     }
     return live
   },
