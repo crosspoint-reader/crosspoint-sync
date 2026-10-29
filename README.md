@@ -196,8 +196,9 @@ Turning automatic sync off stops automatic additions while retaining published
 passages and manually selected clippings.
 
 Deleting a post on Micro.blog pauses publication for that book while preserving
-its clippings locally. After the missing post is detected on an update, the book's
-section on the Clippings page offers **Recreate clippings post**. This explicitly
+its clippings locally. After the missing post is detected on an update, the
+**Micro.blog publishing paused** section on the Clippings page offers **Recreate
+clippings post**, even if the book has no live local clippings. This explicitly
 republishes the collected clippings to either the previous blog (the default) or
 the current clippings blog selected in Settings. Future updates for this book
 follow the replacement post. If the previous blog is accessible, Sync rechecks

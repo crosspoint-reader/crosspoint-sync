@@ -52,6 +52,27 @@ it('shows failures and allows another attempt without claiming publication succe
 })
 
 const deletedPost = { document: 'book', missing: true, destination: 'https://first.micro.blog/', url: 'https://first.micro.blog/deleted.html' }
+it('recreates a missing post after its last live local clipping has been deleted', async () => {
+  api.allClippings.mockResolvedValue([])
+  api.microblogClippingPosts.mockResolvedValueOnce({ items: [deletedPost] }).mockResolvedValue({ items: [] })
+  render(<Clippings session={session} books={books} />)
+  await screen.findByText('No clippings yet')
+  fireEvent.click(await screen.findByRole('button', { name: 'Recreate clippings post' }))
+  expect(screen.getByRole('dialog').textContent).toContain('https://first.micro.blog/')
+  fireEvent.click(screen.getByRole('button', { name: 'Recreate post' }))
+  await waitFor(() => expect(api.recreateMicroblogPost).toHaveBeenCalledWith(session, 'book', 'original'))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(screen.getByRole('status').textContent).toContain('queued')
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Recreate clippings post' })).toBeNull())
+})
+it('keeps missing-post recovery available when search hides every live clipping group', async () => {
+  api.microblogClippingPosts.mockResolvedValue({ items: [deletedPost] })
+  render(<Clippings session={session} books={books} />)
+  await screen.findByRole('button', { name: 'Recreate clippings post' })
+  fireEvent.change(screen.getByRole('textbox', { name: 'Search clippings' }), { target: { value: 'unmatched search' } })
+  await screen.findByText('No clippings match')
+  expect(screen.getAllByRole('button', { name: 'Recreate clippings post' })).toHaveLength(1)
+})
 it('offers recreation once per missing book and cancels without sending a request', async () => {
   api.microblogClippingPosts.mockResolvedValue({ items: [deletedPost] })
   render(<Clippings session={session} books={books} />)

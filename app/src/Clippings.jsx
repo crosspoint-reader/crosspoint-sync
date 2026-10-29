@@ -62,7 +62,6 @@ export default function Clippings({ session, books }) {
   const [connectors] = useLoad(() => api.connectors(session).then((r) => r.connectors), [session], `clipping-connectors:${session.username}`)
   const microblog = connectors?.some((c) => c.id === 'microblog' && c.linked)
   const [postData, postError, reloadPosts] = useLoad(() => microblog ? api.microblogClippingPosts(session) : Promise.resolve({ items: [] }), [session, microblog])
-  const postByDocument = new Map((postData?.items || []).map((p) => [p.document, p]))
   const [recreating, setRecreating] = useState(null)
   const [query, setQuery] = useState('')
   const [only, setOnly] = useState(null) // document
@@ -73,6 +72,7 @@ export default function Clippings({ session, books }) {
   const pending = useRef(false)
   const [sendError, setSendError] = useState(null)
   const byDoc = useMemo(() => new Map(books.map((b) => [b.document, b])), [books])
+  const missingPosts = microblog ? (postData?.items || []).filter((post) => post.missing && byDoc.has(post.document)) : []
 
   // Only clippings of books the library shows (metadata-less ones are hidden everywhere).
   const all = (items ?? []).filter((c) => byDoc.has(c.document))
@@ -125,6 +125,19 @@ export default function Clippings({ session, books }) {
       <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">Clippings</h1>
       {sendError && <p role="alert" className="mt-3 text-sm text-red-600">{sendError}</p>}
       {postError && microblog && <p role="alert" className="mt-3 text-sm text-red-600">Could not load Micro.blog post status: {postError.message}</p>}
+      {note && <p role="status" className="mt-2 text-sm text-stone-600">{note}</p>}
+      {missingPosts.length > 0 && <section aria-label="Paused Micro.blog posts" className="mt-6 rounded-xl bg-surface p-4 ring-1 ring-stone-200">
+        <h2 className="font-medium text-stone-900">Micro.blog publishing paused</h2>
+        {missingPosts.map((post) => {
+          const book = byDoc.get(post.document)
+          return <div key={post.document} className="mt-3 text-sm">
+            <a href={`#/book/${post.document}`} className="font-medium text-stone-900">{book.title || book.filename}</a>
+            {book.author && <p className="text-stone-500">{book.author}</p>}
+            <p className="mt-1 text-stone-600">The Micro.blog post was deleted. Clippings are retained while publishing is paused.</p>
+            <button type="button" onClick={() => setRecreating(post)} className="min-h-11 font-medium text-brand-600">Recreate clippings post</button>
+          </div>
+        })}
+      </section>}
 
       {error && !items ? (
         <ErrorNote error={error} />
@@ -175,7 +188,6 @@ export default function Clippings({ session, books }) {
               </div>
             </details>
           </div>
-          {note && <p role="status" className="mt-2 text-sm text-stone-600">{note}</p>}
 
           <div className="-mx-4 mt-4 flex gap-5 overflow-x-auto px-4 pb-1 [scrollbar-width:none] md:mx-0 md:flex-wrap md:px-0">
             <button
@@ -211,10 +223,6 @@ export default function Clippings({ session, books }) {
                   <p className="truncate text-sm text-stone-500">{book.author}</p>
                 </div>
               </a>
-              {postByDocument.get(book.document)?.missing && <div className="mt-3 text-sm">
-                <p className="text-stone-600">The Micro.blog clippings post was deleted. Clippings are saved here while publishing is paused.</p>
-                <button type="button" onClick={() => setRecreating(postByDocument.get(book.document))} className="min-h-11 font-medium text-brand-600">Recreate clippings post</button>
-              </div>}
               <div className="mt-3 grid grid-cols-1 gap-x-8 md:grid-cols-2">
                 {clips.map((c) => (
                   <Clip key={c.id} session={session} clip={c} book={book} onShare={setSharing} onDelete={setDeleting} onMicroblog={microblog ? addToMicroblog : null} sending={sending} />
