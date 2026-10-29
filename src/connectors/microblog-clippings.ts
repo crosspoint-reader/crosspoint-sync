@@ -245,10 +245,13 @@ export async function publishMicroblogClippings(
   let identity: string | undefined;
   const assertCurrent = () => {
     const current = getAccount(db, userId, 'microblog');
-    const saved = db.prepare('SELECT identity FROM microblog_clipping_posts WHERE user_id=? AND document=?').get(userId, document) as { identity: string } | undefined;
+    const saved = db.prepare('SELECT identity,error FROM microblog_clipping_posts WHERE user_id=? AND document=?').get(userId, document) as { identity: string; error: string | null } | undefined;
     if (!account?.enabled || !current?.enabled || current.cred_enc !== account.cred_enc || (identity && saved?.identity !== identity)) {
       throw new ConnectorOperationError('Micro.blog account or book changed during publication', false);
     }
+    // A merge can pause this collection without changing its identity. An older
+    // in-flight attempt must not acknowledge the write or clear that new error.
+    if (identity && saved?.error) throw new ConnectorOperationError(saved.error, false);
     const currentMatch = getMatch(db, userId, 'microblog', document);
     // The ISBN may have been enriched from the shelf without changing the saved
     // match. Compare saved editions as well as the match passed by the caller.

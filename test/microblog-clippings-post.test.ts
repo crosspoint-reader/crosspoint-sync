@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import { makeTestApp, registerUser, DOC } from './helpers.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
 import { upsertAccount, saveMatch } from '../src/connectors/store.js';
-import { publishMicroblogClippings, selectMicroblogClipping, scheduleMicroblogClippings } from '../src/connectors/microblog-clippings.js';
+import { clippingsPost, publishMicroblogClippings, selectMicroblogClipping, scheduleMicroblogClippings } from '../src/connectors/microblog-clippings.js';
 import { drainQueue as runQueue } from '../src/connectors/runner.js';
 import type { HttpTransport } from '../src/connectors/types.js';
 import { mergeDocuments } from '../src/models/merge.js';
@@ -133,6 +133,45 @@ it.each([false, true])('publishes selected clippings after merging an unmatched 
   expect(JSON.stringify(writes[1])).toContain('First passage');
   expect(JSON.stringify(writes[1])).toContain('Merged passage');
   expect(writes.filter((w) => !w.action)).toHaveLength(1);
+  db.close();
+});
+
+it.each(['source lookup', 'create', 'update'])('preserves a merge conflict raised during an in-flight %s', async (stage) => {
+  const { db, uid } = await setup();
+  if (stage !== 'create') db.prepare('UPDATE microblog_clipping_posts SET url=?,attempted=1').run(remoteUrl);
+  const source = 'b'.repeat(32);
+  db.prepare('INSERT INTO documents(user_id,document,title,updated_at) VALUES(?,?,?,0)').run(uid, source, 'Duplicate');
+  db.prepare('INSERT INTO clippings(user_id,document,id,text,spine_index,created_at,updated_at) VALUES(?,?,?,?,1,2,2)')
+    .run(uid, source, 'merged', 'Merged passage');
+  selectMicroblogClipping(db, uid, source, 'merged');
+  clippingsPost(db, uid, source);
+  db.prepare('UPDATE microblog_clipping_posts SET attempted=1,url=? WHERE user_id=? AND document=?')
+    .run('https://example.micro.blog/duplicate.html', uid, source);
+  let merged = false;
+  const writes: any[] = [];
+  const http: HttpTransport = async (_url, init) => {
+    const body = init.method === 'POST' ? JSON.parse(init.body!) : null;
+    if (body) writes.push(body);
+    const operation = body ? body.action === 'update' ? 'update' : 'create' : 'source lookup';
+    if (!merged && operation === stage) {
+      merged = true;
+      mergeDocuments(db, uid, source, DOC, 10);
+    }
+    return response(body && !body.action ? 201 : 200, {}, remoteUrl);
+  };
+  await drainQueue(db, http);
+  expect(merged).toBe(true);
+  expect(db.prepare('SELECT error,fingerprint FROM microblog_clipping_posts WHERE user_id=? AND document=?').get(uid, DOC)).toEqual({
+    error: expect.stringContaining('Merged books both have Micro.blog publication history'), fingerprint: null,
+  });
+  expect(db.prepare("SELECT status,last_error FROM connector_queue WHERE document=? AND kind='microblog:clippings'").get(DOC)).toEqual({
+    status: 'dead', last_error: expect.stringContaining('Merged books both have Micro.blog publication history'),
+  });
+  expect(db.prepare('SELECT COUNT(*) AS n FROM microblog_clipping_selections WHERE published_snapshot IS NOT NULL').get()).toEqual({ n: 0 });
+  expect(writes).toHaveLength(stage === 'source lookup' ? 0 : 1);
+  expect(scheduleMicroblogClippings(db, uid, DOC)).toBe(0);
+  await drainQueue(db, http);
+  expect(writes).toHaveLength(stage === 'source lookup' ? 0 : 1);
   db.close();
 });
 
