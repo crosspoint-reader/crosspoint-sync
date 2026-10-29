@@ -23,7 +23,7 @@ beforeEach(async () => {
   vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('iPhone OS 26_0')
   Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 0 })
   window.__TAURI_INTERNALS__ = {}
-  logout()
+  await logout()
   await flush()
   localStorage.clear()
   invoke.mockClear()
@@ -77,7 +77,7 @@ it('clears shared data on logout and ignores delayed responses', async () => {
   let resolve
   http.mockReturnValueOnce(new Promise((r) => { resolve = r }))
   const pending = api.books(session)
-  logout()
+  await logout()
   resolve(response({ items: [book] }))
   await pending
   await flush()
@@ -96,7 +96,7 @@ it('does not republish old clippings after logout', async () => {
   let resolve
   http.mockReturnValueOnce(new Promise((r) => { resolve = r }))
   const pending = api.allClippings(session, [])
-  logout()
+  await logout()
   resolve(response({ items: [{ document: 'one', id: 'old' }] }))
   await pending
   await flush()
@@ -131,7 +131,7 @@ it('does not start legacy fallback requests for a signed-out account after a del
   let resolve
   http.mockReturnValueOnce(new Promise((r) => { resolve = r }))
   const pending = api.allClippings(session, [book])
-  logout()
+  await logout()
   resolve({ ok: false, status: 404, json: async () => ({}) })
   http.mockResolvedValue(response({ items: [{ id: 'old', text: 'Old account' }], more: false }))
   await pending.catch(() => {})
@@ -160,7 +160,7 @@ it('does not publish a legacy clipping batch that finishes after logout', async 
     .mockReturnValueOnce(new Promise((r) => { finishSecond = r }))
   const pending = api.allClippings(session, [book, { ...book, document: 'two' }])
   await flush()
-  logout()
+  await logout()
   finishSecond(response({ items: [{ id: 'b', text: 'Second' }], more: false }))
   await pending
   await flush()
@@ -232,7 +232,7 @@ it('does not clear a newly selected account after a delayed old-account clearDat
   let finishClear
   http.mockReturnValueOnce(new Promise((r) => { finishClear = r }))
   const pending = api.clearData(session)
-  logout()
+  await logout()
   const other = { ...session, username: 'other' }
   http.mockResolvedValueOnce(response({ items: [book] }))
   await api.books(other)
@@ -286,7 +286,7 @@ it('does not republish the old account when its clipping deletion completes afte
   let finishDelete
   http.mockReturnValueOnce(new Promise((r) => { finishDelete = r }))
   const pending = api.deleteClipping(session, 'one', 'old')
-  logout()
+  await logout()
   const other = { ...session, username: 'other' }
   http.mockResolvedValueOnce(response({ items: [book] }))
   await api.books(other)
@@ -548,7 +548,7 @@ it('does not prune a new session when an old book removal completes', async () =
   let resolve
   http.mockReturnValueOnce(new Promise((r) => { resolve = r }))
   const pending = api.removeBook(session, 'one')
-  logout()
+  await logout()
   http.mockResolvedValueOnce(response({ items: [book] }))
   await api.books(session)
   resolve(response({ ok: true }))
@@ -730,7 +730,7 @@ it('ignores an old session merge completion', async () => {
   let resolve
   http.mockReturnValueOnce(new Promise((r) => { resolve = r }))
   const pending = api.merge(session, 'one', 'two')
-  logout()
+  await logout()
   http.mockResolvedValueOnce(response({ items: [{ document: 'one', id: 'new-session' }] }))
   await api.allClippings(session, [])
   resolve(response({ ok: true }))
@@ -929,7 +929,7 @@ it.each(bookEdits)('ignores an old session %s edit completing during a new libra
   let resolveEdit, resolveBooks
   http.mockReturnValueOnce(new Promise((r) => { resolveEdit = r }))
   const editing = edit()
-  logout()
+  await logout()
   http.mockReturnValueOnce(new Promise((r) => { resolveBooks = r }))
   const reading = api.books(session)
   resolveEdit(response({ ok: true }))
@@ -1092,4 +1092,76 @@ it('requires fresh merge destination progress while retaining unrelated cached b
   await api.books(session)
   await flush()
   expect(snapshot().books.items[0]).toMatchObject({ document: 'two', percentage: 0.8, timestamp: 201 })
+})
+
+it('waits for queued snapshot writes and native removal before completing logout', async () => {
+  apiModule.saveSession(session)
+  const key = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/progress?limit=500'
+  localStorage.setItem(key, JSON.stringify({ items: [book], savedAt: 100 }))
+  let finishWrite, finishClear
+  invoke.mockImplementationOnce(() => new Promise((r) => { finishWrite = r }))
+    .mockImplementationOnce(() => new Promise((r) => { finishClear = r }))
+  const writing = apiModule.syncShortcutsCache(session)
+  await flush()
+  let completed = false
+  const signingOut = logout()
+  Promise.resolve(signingOut).then(() => { completed = true })
+  await flush()
+  expect(completed).toBe(false)
+  expect(apiModule.loadSession()).toEqual(session)
+  finishWrite()
+  await writing
+  await flush()
+  expect(invoke.mock.calls.at(-1)[1].json).toBeNull()
+  expect(completed).toBe(false)
+  finishClear()
+  await signingOut
+  expect(apiModule.loadSession()).toBeNull()
+})
+
+it('surfaces failed snapshot removal and allows logout to be retried', async () => {
+  apiModule.saveSession(session)
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  try {
+    invoke.mockRejectedValueOnce(new Error('disk unavailable'))
+    await expect(logout()).rejects.toThrow('disk unavailable')
+    expect(apiModule.loadSession()).toEqual(session)
+    await logout()
+    expect(apiModule.loadSession()).toBeNull()
+  } finally {
+    warn.mockRestore()
+  }
+})
+
+it('blocks snapshot publication and discards reads started while logout is pending', async () => {
+  apiModule.saveSession(session)
+  let finishClear, finishRead
+  invoke.mockImplementationOnce(() => new Promise((r) => { finishClear = r }))
+  const signingOut = logout()
+  await flush()
+  http.mockResolvedValueOnce(response({ items: [book] }))
+  await api.books(session)
+  await flush()
+  expect(invoke.mock.calls.every(([, args]) => args.json === null)).toBe(true)
+  http.mockReturnValueOnce(new Promise((r) => { finishRead = r }))
+  const reading = api.books(session)
+  finishClear()
+  await signingOut
+  finishRead(response({ items: [book] }))
+  await reading
+  await flush()
+  expect(apiModule.cached.books(session)).toBeNull()
+  expect(invoke.mock.calls.every(([, args]) => args.json === null)).toBe(true)
+})
+
+it('shares one native removal for overlapping logout attempts', async () => {
+  let finish
+  invoke.mockImplementationOnce(() => new Promise((r) => { finish = r }))
+  const first = logout()
+  const second = logout()
+  expect(first).toBe(second)
+  await flush()
+  expect(invoke).toHaveBeenCalledOnce()
+  finish()
+  await first
 })

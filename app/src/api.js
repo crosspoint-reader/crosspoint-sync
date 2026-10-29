@@ -50,10 +50,16 @@ export function saveSession(session) {
 }
 
 export function logout() {
+  if (logoutPending) return logoutPending
   sessionVersion++
-  localStorage.removeItem(KEY)
   clearOffline()
-  publishShortcuts(null)
+  logoutPending = Promise.resolve(publishShortcuts(null)).then(() => {
+    // Discard reads started while native removal was waiting in the write queue.
+    sessionVersion++
+    clearOffline()
+    localStorage.removeItem(KEY)
+  }).finally(() => { logoutPending = null })
+  return logoutPending
 }
 
 // Offline: every successful GET is kept on the device; when the network is down
@@ -65,6 +71,7 @@ const OFFLINE = `${OFFLINE_PREFIX}v2:`
 export const offline = new EventTarget()
 let sessionVersion = 0
 let readingVersion = 0
+let logoutPending = null
 let clippingReadSequence = 0
 let latestClippingRead = 0
 let latestHubRead = 0
@@ -430,6 +437,7 @@ const bookList = (r) =>
 // A credential-free mirror of the data already saved by this app. No requests.
 export function syncShortcutsCache(session) {
   if (!supportsShortcuts()) return
+  if (session && logoutPending) return
   if (!session) return publishShortcuts(null)
   const prefix = `${OFFLINE}${session.username}@${session.server}`
   const books = saved(session, PROGRESS)

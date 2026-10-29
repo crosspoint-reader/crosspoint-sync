@@ -437,26 +437,56 @@ function Home({ session, onSession, onLogout, theme }) {
 export default function App() {
   const theme = useTheme()
   const [session, setSession] = useState(loadSession)
+  const [signOut, setSignOut] = useState(null)
+  const sessionGeneration = useRef(0)
+  const generation = sessionGeneration.current
+  async function handleLogout() {
+    if (generation !== sessionGeneration.current) return
+    sessionGeneration.current++
+    setSignOut({ error: null })
+    try {
+      await logout()
+      setSession(null)
+      setSignOut(null)
+    } catch (error) {
+      setSignOut({ error: error.message || 'Please try again.' })
+    }
+  }
   useEffect(() => {
     if (!session) {
       clearWidget()
       syncShortcutsCache(null)
     }
   }, [session])
-  if (!session) return <Login onLogin={(s) => (window.scrollTo(0, 0), setSession(s))} />
+  if (signOut) return (
+    <main className="mx-auto flex min-h-dvh max-w-md items-center px-6">
+      <div className="w-full space-y-4 text-center">
+        {signOut.error ? <>
+          <p role="alert" className="text-sm text-red-600">Couldn’t finish signing out. {signOut.error}</p>
+          <p className="text-sm text-stone-500">Retry to clear saved Shortcuts data and finish signing out.</p>
+          <button type="button" onClick={handleLogout} className="h-12 w-full rounded-2xl bg-brand-600 text-sm font-semibold text-white">Retry sign out</button>
+        </> : <p role="status" className="flex items-center justify-center gap-2 text-sm text-stone-600"><Loader2 className="size-4 animate-spin" /> Signing out…</p>}
+      </div>
+    </main>
+  )
+  if (!session) return <Login onLogin={(s) => {
+    if (generation !== sessionGeneration.current) return
+    sessionGeneration.current++
+    window.scrollTo(0, 0)
+    setSession(s)
+  }} />
   return (
     <LoadCacheProvider key={JSON.stringify([session.server, session.username])}>
       <Home
         session={session}
         theme={theme}
         onSession={(s) => {
+          if (generation !== sessionGeneration.current) return
           saveSession(s)
+          sessionGeneration.current++
           setSession(s)
         }}
-        onLogout={() => {
-          logout()
-          setSession(null)
-        }}
+        onLogout={handleLogout}
       />
       {/* After sign-in, so the card never covers the sign-in button. */}
       <InstallPrompt />

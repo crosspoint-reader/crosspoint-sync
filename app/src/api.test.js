@@ -13,8 +13,8 @@ const prefix = (s) => `crosspoint-offline:v2:${s.username}@${s.server}`
 const progress = '/api/v1/progress?limit=500'
 const response = (data, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => data })
 
-beforeEach(() => {
-  logout()
+beforeEach(async () => {
+  await logout()
   localStorage.clear()
   fetchMock.mockReset()
 })
@@ -61,10 +61,10 @@ it('rejects a failed activity refresh while retaining its saved copy for display
 })
 
 describe('account data isolation', () => {
-  it('ignores legacy copies that may contain a different account after upgrading', () => {
+  it('ignores legacy copies that may contain a different account after upgrading', async () => {
     localStorage.setItem(`crosspoint-offline:uxj3@https://sync.test${progress}`, JSON.stringify({ items: [{ title: 'uxj4 book' }] }))
     expect(cached.books(session('uxj3'))).toBeNull()
-    logout()
+    await logout()
     expect(Object.keys(localStorage)).toHaveLength(0)
   })
 
@@ -91,7 +91,7 @@ describe('account data isolation', () => {
     saveSession(session('uxj4'))
     localStorage.setItem('crosspoint-theme', 'dark')
     localStorage.setItem(`${prefix(session('uxj4'))}${progress}`, JSON.stringify({ items: [] }))
-    logout()
+    await logout()
     expect(loadSession()).toBeNull()
     expect(cached.books(session('uxj4'))).toBeNull()
     expect(localStorage.getItem('crosspoint-theme')).toBe('dark')
@@ -122,7 +122,7 @@ describe('account data isolation', () => {
     let resolve
     fetchMock.mockReturnValueOnce(new Promise((r) => { resolve = r }))
     const pending = api.books(session('uxj4'))
-    logout()
+    await logout()
     fetchMock.mockResolvedValueOnce(response({ status: 'ok' })).mockResolvedValueOnce(response({ authorized: true }))
     await login('https://sync.test', 'uxj3', 'password')
     resolve(response({ items: [{ title: 'old account' }] }))
@@ -205,7 +205,7 @@ describe('book list paging', () => {
   it('does not save the list for an account that signed out meanwhile', async () => {
     const s = session('pager')
     fetchMock.mockResolvedValueOnce(page([1], '1:d1')).mockImplementationOnce(async () => {
-      logout()
+      await logout()
       return page([2], null)
     })
     await api.books(s)
