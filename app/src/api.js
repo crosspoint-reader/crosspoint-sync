@@ -590,6 +590,9 @@ export const api = {
       readingVersion++
       invalidateClippingCaches(s, [document, into])
       removeCachedBook(s, document)
+      // The server selects furthest progress and assigns a new Last Sync.
+      // Its merge response lacks those values; fetch before exposing the target.
+      removeCachedBook(s, into)
       await syncShortcutsCache(s)?.catch(() => {})
     }
     return result

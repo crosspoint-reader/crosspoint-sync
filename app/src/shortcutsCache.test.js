@@ -853,19 +853,19 @@ it.each([false, true])('preserves unrelated hub-only clippings during a merge (c
   expect(snapshot().clippings.items.some((c) => c.document === 'two' && c.id === 'merged')).toBe(true)
 })
 
-it('removes a merged source from cached books when the library reload is offline', async () => {
+it('invalidates both merged books when the library reload is offline', async () => {
   const key = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/progress?limit=500'
   const books = [book, { ...book, document: 'two', title: 'Target' }, { ...book, document: 'other', title: 'Unrelated' }]
   localStorage.setItem(key, JSON.stringify({ items: books, next: null, savedAt: 100 }))
   http.mockResolvedValueOnce(response({ ok: true }))
   await api.merge(session, 'one', 'two')
-  expect(apiModule.cached.books(session).map((b) => b.document)).toEqual(['two', 'other'])
-  expect(snapshot().books.items.map((b) => b.document)).toEqual(['two', 'other'])
+  expect(apiModule.cached.books(session).map((b) => b.document)).toEqual(['other'])
+  expect(snapshot().books.items.map((b) => b.document)).toEqual(['other'])
   expect(snapshot().books.savedAt).toBe(100)
   http.mockRejectedValueOnce(new Error('offline'))
-  expect((await api.books(session)).map((b) => b.document)).toEqual(['two', 'other'])
+  expect((await api.books(session)).map((b) => b.document)).toEqual(['other'])
   await flush()
-  expect(snapshot().books.items.map((b) => b.document)).toEqual(['two', 'other'])
+  expect(snapshot().books.items.map((b) => b.document)).toEqual(['other'])
   expect(snapshot().books.savedAt).toBe(100)
 })
 
@@ -1075,3 +1075,21 @@ it.each(['one', 'two'])('tracks only online books in a mixed legacy clipping bat
   if (pendingDoc === 'two') expect(snapshot().clippings.items.some((c) => c.id === 'fresh-two')).toBe(true)
 })
 
+it('requires fresh merge destination progress while retaining unrelated cached books', async () => {
+  const key = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/progress?limit=500'
+  const source = { ...book, status: 'reading', percentage: 0.8, timestamp: 20 }
+  const target = { ...book, document: 'two', status: 'reading', percentage: 0.2, timestamp: 10 }
+  const other = { ...book, document: 'other', status: 'reading', percentage: 0.1, timestamp: 5 }
+  localStorage.setItem(key, JSON.stringify({ items: [source, target, other], next: null, savedAt: 100 }))
+  http.mockResolvedValueOnce(response({ document: 'two', merged: 'one', stats: true }))
+  await api.merge(session, 'one', 'two')
+  expect(apiModule.cached.books(session)).toEqual([other])
+  expect(snapshot().books.items.map((b) => b.document)).toEqual(['other'])
+  http.mockRejectedValueOnce(new Error('offline'))
+  expect(await api.books(session)).toEqual([other])
+  const merged = { ...target, percentage: 0.8, timestamp: 201 }
+  http.mockResolvedValueOnce(response({ items: [merged, other] }))
+  await api.books(session)
+  await flush()
+  expect(snapshot().books.items[0]).toMatchObject({ document: 'two', percentage: 0.8, timestamp: 201 })
+})
