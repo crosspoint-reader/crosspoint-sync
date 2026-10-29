@@ -985,3 +985,93 @@ it('requires a new library copy when clearing a manual status needs server deriv
   expect(apiModule.cached.books(session)).toBeNull()
   expect(snapshot().books).toBeNull()
 })
+
+it.each(['book-after-hub', 'hub-after-book', 'same-book'])('rejects older overlapping clipping results (%s)', async (order) => {
+  let resolve
+  http.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+  const pending = order === 'hub-after-book' ? api.allClippings(session, []) : api.clippings(session, 'one')
+  const rejected = expect(pending).rejects.toThrow('Reading data changed')
+  http.mockResolvedValueOnce(response({ items: [], more: false }))
+  if (order === 'book-after-hub') await api.allClippings(session, [])
+  else await api.clippings(session, 'one')
+  await flush()
+  const fresh = snapshot()
+  resolve(response({ items: [{ document: 'one', id: 'deleted', text: 'Deleted elsewhere' }], more: false }))
+  await rejected
+  await flush()
+  expect(snapshot()).toEqual(fresh)
+  apiModule.syncShortcutsCache(session)
+  await flush()
+  expect(snapshot().clippings.items).toEqual([])
+})
+
+it('allows independent book clipping requests to finish in either order', async () => {
+  let resolve
+  http.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+  const first = api.clippings(session, 'one')
+  http.mockResolvedValueOnce(response({ items: [{ id: 'second' }], more: false }))
+  await api.clippings(session, 'two')
+  resolve(response({ items: [{ id: 'first' }], more: false }))
+  await first
+  await flush()
+  expect(snapshot().clippings.items.map((c) => c.id).sort()).toEqual(['first', 'second'])
+})
+
+it('does not invalidate an online clipping request when a newer request fails', async () => {
+  let resolve
+  http.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+  const pending = api.clippings(session, 'one')
+  http.mockRejectedValueOnce(new Error('offline'))
+  await expect(api.allClippings(session, [])).rejects.toThrow('offline')
+  resolve(response({ items: [{ id: 'valid' }], more: false }))
+  await expect(pending).resolves.toEqual([{ id: 'valid' }])
+})
+
+it('does not let an older legacy clipping batch overwrite a newer hub', async () => {
+  let resolve
+  http.mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({}) })
+    .mockReturnValueOnce(new Promise((r) => { resolve = r }))
+  const pending = api.allClippings(session, [book])
+  const rejected = expect(pending).rejects.toThrow('Reading data changed')
+  await flush()
+  http.mockResolvedValueOnce(response({ items: [] }))
+  await api.allClippings(session, [])
+  resolve(response({ items: [{ id: 'deleted' }], more: false }))
+  await rejected
+  await flush()
+  expect(snapshot().clippings.items).toEqual([])
+})
+
+it('does not let a newer offline fallback cancel a pending online clipping refresh', async () => {
+  localStorage.setItem('crosspoint-offline:v2:reader@https://sync.test/api/v1/clippings', JSON.stringify({ items: [], savedAt: 100 }))
+  let resolve
+  http.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+  const pending = api.clippings(session, 'one')
+  http.mockRejectedValueOnce(new Error('offline'))
+  await api.allClippings(session, [])
+  resolve(response({ items: [{ id: 'fresh' }], more: false }))
+  await expect(pending).resolves.toEqual([{ id: 'fresh' }])
+  await flush()
+  expect(snapshot().clippings.items).toMatchObject([{ id: 'fresh' }])
+})
+
+it.each(['one', 'two'])('tracks only online books in a mixed legacy clipping batch (pending: %s)', async (pendingDoc) => {
+  const prefix = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/clippings'
+  localStorage.setItem(`${prefix}/two`, JSON.stringify({ items: [{ id: 'cached-two' }], savedAt: 100 }))
+  let resolve
+  http.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+  const pending = api.clippings(session, pendingDoc)
+  const settled = pendingDoc === 'one'
+    ? expect(pending).rejects.toThrow('Reading data changed')
+    : expect(pending).resolves.toEqual([{ id: 'fresh-two' }])
+  http.mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({}) })
+    .mockResolvedValueOnce(response({ items: [], more: false }))
+    .mockRejectedValueOnce(new Error('offline'))
+  await api.allClippings(session, [book, { ...book, document: 'two' }])
+  resolve(response({ items: [{ id: pendingDoc === 'one' ? 'deleted' : 'fresh-two' }], more: false }))
+  await settled
+  await flush()
+  expect(snapshot().clippings.items.some((c) => c.id === 'deleted')).toBe(false)
+  if (pendingDoc === 'two') expect(snapshot().clippings.items.some((c) => c.id === 'fresh-two')).toBe(true)
+})
+

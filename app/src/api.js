@@ -65,6 +65,21 @@ const OFFLINE = `${OFFLINE_PREFIX}v2:`
 export const offline = new EventTarget()
 let sessionVersion = 0
 let readingVersion = 0
+let clippingReadSequence = 0
+let latestClippingRead = 0
+let latestHubRead = 0
+const latestBookReads = new Map()
+
+function finishClippingRead(version, sequence, document, fresh) {
+  if (version !== sessionVersion) return
+  const latest = document === undefined ? latestClippingRead : Math.max(latestHubRead, latestBookReads.get(document) ?? 0)
+  if (sequence < latest) throw Object.assign(new Error('Reading data changed while loading'), { stale: true })
+  // Cached fallbacks do not supersede a still-pending online refresh.
+  if (!fresh) return
+  latestClippingRead = Math.max(latestClippingRead, sequence)
+  if (document === undefined) latestHubRead = sequence
+  else latestBookReads.set(document, sequence)
+}
 
 function assertReadingVersion(session, reading) {
   if (session === sessionVersion && reading !== readingVersion) {
@@ -74,6 +89,8 @@ function assertReadingVersion(session, reading) {
 const offlineCopies = new WeakSet()
 
 function clearOffline(session) {
+  latestClippingRead = latestHubRead = 0
+  latestBookReads.clear()
   const prefix = session ? `${OFFLINE}${session.username}@${session.server}/` : OFFLINE_PREFIX
   for (const key of Object.keys(localStorage)) {
     if (key.startsWith(prefix)) localStorage.removeItem(key)
@@ -582,9 +599,11 @@ export const api = {
   async allClippings(s, books) {
     const version = sessionVersion
     const reading = readingVersion
+    const sequence = ++clippingReadSequence
     try {
       const data = await call(s, '/api/v1/clippings', {}, true, { store: false })
       assertReadingVersion(version, reading)
+      finishClippingRead(version, sequence, undefined, !offlineCopies.has(data))
       if (version === sessionVersion) {
         cacheClippingsHub(s, data)
         syncShortcutsCache(s)
@@ -595,6 +614,13 @@ export const api = {
       assertReadingVersion(version, reading)
       const per = await Promise.all(books.map(async (b) => ({ document: b.document, ...await readClippings(s, b.document) })))
       assertReadingVersion(version, reading)
+      const fresh = per.every((result) => !result.fromCache)
+      finishClippingRead(version, sequence, undefined, fresh)
+      if (!fresh) {
+        for (const result of per) {
+          if (!result.fromCache) finishClippingRead(version, sequence, result.document, true)
+        }
+      }
       if (version === sessionVersion) {
         if (!per.length) cacheClippingsHub(s, { items: [] })
         for (const result of per) cacheClippings(s, result.document, result)
@@ -619,8 +645,10 @@ export const api = {
   async clippings(s, doc, { syncShortcuts = true } = {}) {
     const version = sessionVersion
     const reading = readingVersion
+    const sequence = ++clippingReadSequence
     const result = await readClippings(s, doc)
     assertReadingVersion(version, reading)
+    finishClippingRead(version, sequence, doc, !result.fromCache)
     if (version === sessionVersion) {
       cacheClippings(s, doc, result)
       if (syncShortcuts) syncShortcutsCache(s)
