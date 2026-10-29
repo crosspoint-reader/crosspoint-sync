@@ -309,6 +309,11 @@ export async function publishMicroblogClippings(
         // Detect deleted posts before replacing generated content.
         await micropub(http, token, destination, `/micropub?q=source&url=${encodeURIComponent(url)}`, undefined, true);
         assertCurrent();
+        // Options and selections can change while the source request is in
+        // flight. Retry with fresh content before publishing or snapshotting it.
+        if (microblogClippingsContent(db, userId, document, `https://micro.blog/books/${encodeURIComponent(isbn)}`)?.fingerprint !== rendered.fingerprint) {
+          throw new ConnectorOperationError('Micro.blog clipping selections changed during publication; the next attempt will use the current selections.', true);
+        }
         await micropub(http, token, destination, '/micropub', { action: 'update', url,
           replace: { name: [rendered.title], content: [rendered.content] } });
         assertCurrent();

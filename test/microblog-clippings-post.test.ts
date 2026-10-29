@@ -345,6 +345,50 @@ it('retains published automatic passages when automatic sync is disabled and ano
   db.close();
 });
 
+it.each([false, true])('rechecks eligibility when automatic sync is disabled during source lookup (new manual clipping: %s)', async (manual) => {
+  const { db, uid } = await setup();
+  const writes: any[] = [];
+  let disableOnLookup = false;
+  const http: HttpTransport = async (_url, init) => {
+    if (init.method === 'GET') {
+      if (disableOnLookup) {
+        disableOnLookup = false;
+        db.prepare("UPDATE connector_accounts SET options='{}' WHERE user_id=? AND connector_id='microblog'").run(uid);
+      }
+      return response(200);
+    }
+    const body = JSON.parse(init.body!); writes.push(body);
+    return response(body.action ? 200 : 201, {}, remoteUrl);
+  };
+  await drainQueue(db, http);
+  db.prepare("UPDATE connector_accounts SET options=? WHERE user_id=? AND connector_id='microblog'").run('{"sync_highlights":true}', uid);
+  const insert = db.prepare('INSERT INTO clippings(user_id,document,id,text,spine_index,created_at,updated_at) VALUES(?,?,?,?,1,2,2)');
+  insert.run(uid, DOC, 'two', 'Unpublished automatic passage');
+  if (manual) {
+    insert.run(uid, DOC, 'three', 'New manually selected passage');
+    selectMicroblogClipping(db, uid, DOC, 'three');
+  }
+  scheduleMicroblogClippings(db, uid, DOC);
+  disableOnLookup = true;
+  await drainQueue(db, http);
+  expect(writes).toHaveLength(1);
+  expect(db.prepare('SELECT published_snapshot FROM microblog_clipping_selections WHERE clipping_id=?').get('two')).toEqual({ published_snapshot: null });
+  expect(db.prepare('SELECT error FROM microblog_clipping_posts').get()).toEqual({ error: null });
+  expect(db.prepare('SELECT status FROM connector_queue').get()).toEqual({ status: 'pending' });
+  db.prepare('UPDATE connector_queue SET next_try_at=0').run();
+  await drainQueue(db, http);
+  expect(writes).toHaveLength(manual ? 2 : 1);
+  expect(JSON.stringify(writes)).not.toContain('Unpublished automatic passage');
+  if (manual) {
+    expect(writes[1]).toMatchObject({ action: 'update', url: remoteUrl });
+    expect(JSON.stringify(writes[1])).toContain('New manually selected passage');
+    expect(JSON.stringify(writes[1])).toContain('First passage');
+  }
+  expect(db.prepare('SELECT status FROM connector_queue').get()).toEqual({ status: 'done' });
+  expect(db.prepare('SELECT published_snapshot FROM microblog_clipping_selections WHERE clipping_id=?').get('two')).toEqual({ published_snapshot: null });
+  db.close();
+});
+
 it('queues a follow-up when a clipping is selected while the first post is being published', async () => {
   const { db, uid } = await setup();
   let release!: () => void;
