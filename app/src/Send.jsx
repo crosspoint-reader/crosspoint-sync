@@ -20,16 +20,13 @@ import {
   X,
 } from 'lucide-react'
 import { isApp } from './api.js'
-import { DEFAULT_HOST, EXTENSIONS, connect, deleteFiles, folders, isBook, joinPath, listFiles, loadDevicePrefs, makeFolder, renameFile, saveDevicePrefs } from './device.js'
+import { DEFAULT_HOST, connect, deleteFiles, folders, isBook, joinPath, listFiles, loadDevicePrefs, makeFolder, renameFile, saveDevicePrefs } from './device.js'
 import { downloads as listDownloads, removeDownload, sendDownload, sendFile } from './catalogs.js'
 import { ActionSheet, Card, EmptyState, folderLabel, notify, Toggle } from './ui.jsx'
 import ConversionLog from './ConversionLog.jsx'
 import { transferProgress } from './epub/log.js'
 
 const size = (n) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`)
-// Android's picker filters by MIME type and has none for .md, so let it show everything there.
-const ACCEPT = /android/i.test(navigator.userAgent) ? undefined : EXTENSIONS.map((e) => `.${e}`).join(',')
-
 // Shared progress from the WebView optimizer and native transfers.
 export function progressLabel(p) {
   if (!p) return 'Sending…'
@@ -492,7 +489,8 @@ export default function Send() {
               ref={input}
               type="file"
               multiple
-              accept={ACCEPT}
+              // Native type filters can disable unknown extensions such as ACSM on iOS.
+              // Validate supported extensions in add() after selection instead.
               className="hidden"
               onChange={(e) => {
                 add(e.target.files)
