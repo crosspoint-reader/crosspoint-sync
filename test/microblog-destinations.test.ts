@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { makeTestApp, registerUser } from './helpers.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
-import { upsertAccount } from '../src/connectors/store.js';
+import { saveMatch, setConnectorOptions, upsertAccount } from '../src/connectors/store.js';
 import { destinationForPost } from '../src/connectors/microblog-destinations.js';
+import { enqueue } from '../src/connectors/queue.js';
 
 beforeEach(() => { process.env.TOKEN_ENC_KEY = 'a'.repeat(64); resetEncryptionKeyCache(); });
 afterEach(() => { delete process.env.TOKEN_ENC_KEY; resetEncryptionKeyCache(); });
@@ -68,5 +69,26 @@ it.each([b, 'https://third.micro.blog/'])('never discards original collections w
   s.db.prepare('INSERT INTO microblog_clipping_posts(user_id,document,identity,url,destination) VALUES(?,?,?,?,?)').run(s.uid, 'book', 'identity', `${b}post.html`, b);
   upsertAccount(s.db, s.uid, 'microblog', { token: 'new', microblogDestination: accessible, microblogDestinations: [{ uid: accessible }] }, null);
   expect(s.db.prepare('SELECT identity,url,destination FROM microblog_clipping_posts').get()).toEqual({ identity: 'identity', url: `${b}post.html`, destination: b });
+  s.db.close();
+});
+
+it.each([
+  ['https://shared.test/blog/post.html', true],
+  ['https://shared.test/blog/reading/post.html', true],
+  ['https://shared.test/blogging/post.html', false],
+  ['https://shared.test.evil/blog/post.html', false],
+] as const)('preserves legacy settings on rotation only when %s belongs to the available path-based blog', async (url, sameBlog) => {
+  const blog = 'https://shared.test/blog/';
+  const s = await setup([{ uid: blog }]);
+  s.db.prepare('INSERT INTO microblog_clipping_posts(user_id,document,identity,url) VALUES(?,?,?,?)').run(s.uid, 'book', 'identity', url);
+  setConnectorOptions(s.db, s.uid, 'microblog', { sync_highlights: true, highlight_blog: blog });
+  saveMatch(s.db, s.uid, 'microblog', 'book', { externalId: '123', confidence: 1 }, 'manual');
+  enqueue(s.db, s.uid, 'microblog', { kind: 'progress', document: 'book', percentage: 0.4, timestamp: 1 });
+  upsertAccount(s.db, s.uid, 'microblog', { token: 'rotated', microblogDestination: blog, microblogDestinations: [{ uid: blog }] }, null);
+  const account = s.db.prepare("SELECT options FROM connector_accounts WHERE user_id=? AND connector_id='microblog'").get(s.uid) as { options: string };
+  expect(JSON.parse(account.options)).toEqual(sameBlog ? { sync_highlights: true, highlight_blog: blog } : {});
+  expect(s.db.prepare("SELECT COUNT(*) n FROM connector_matches WHERE user_id=? AND connector_id='microblog'").get(s.uid)).toEqual({ n: sameBlog ? 1 : 0 });
+  expect(s.db.prepare("SELECT COUNT(*) n FROM connector_queue WHERE user_id=? AND connector_id='microblog'").get(s.uid)).toEqual({ n: sameBlog ? 1 : 0 });
+  expect(s.db.prepare('SELECT identity,url FROM microblog_clipping_posts WHERE user_id=?').get(s.uid)).toEqual({ identity: 'identity', url });
   s.db.close();
 });
