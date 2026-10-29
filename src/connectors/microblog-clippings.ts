@@ -164,6 +164,13 @@ class MissingMicroblogPost extends ConnectorOperationError {
   constructor() { super('The Micro.blog clippings post was deleted. Use Recreate clippings post to resume publishing.', false); }
 }
 
+class MicropubResponseError extends ConnectorOperationError {
+  constructor(readonly status: number, operation: string) {
+    super(`Micro.blog Micropub ${operation} failed (${status})`, status === 429 || status >= 500,
+      status === 401 || status === 403);
+  }
+}
+
 async function micropub(http: HttpTransport, token: string, destination: string, path: string, body?: unknown, sourceLookup = false) {
   const operation = body ? (body as { action?: string }).action === 'update' ? 'update' : 'create'
     : sourceLookup ? 'source lookup' : 'post recovery';
@@ -184,8 +191,7 @@ async function micropub(http: HttpTransport, token: string, destination: string,
     if (failure?.error === 'invalid_request' && /no post|not found|does not exist|could not find|unknown.*url/i.test(failure.error_description || '')) throw new MissingMicroblogPost();
   }
   if (res.status >= 300) {
-    throw new ConnectorOperationError(`Micro.blog Micropub ${operation} failed (${res.status})`, res.status === 429 || res.status >= 500,
-      res.status === 401 || res.status === 403);
+    throw new MicropubResponseError(res.status, operation);
   }
   return res;
 }
@@ -303,8 +309,12 @@ export async function publishMicroblogClippings(
         } });
       } catch (err) {
         assertCurrent();
-        if (err instanceof ConnectorOperationError && (err.needsReauth || err.message.includes('(429)'))) {
+        // Only known request rejections prove that no post was created.
+        if (err instanceof MicropubResponseError && [400, 401, 403, 413, 415, 422, 429].includes(err.status)) {
           db.prepare('UPDATE microblog_clipping_posts SET attempted=0 WHERE user_id=? AND document=?').run(userId, document);
+          if (!err.retryable && !err.needsReauth) return {
+            ok: false, retryable: false, error: `${err.message}. Correct the clippings and sync this book again.`,
+          };
         } else if (err instanceof ConnectorOperationError && !err.retryable) return permanent(err.message);
         throw err;
       }

@@ -150,6 +150,32 @@ it.each([401, 403, 429, 500])('handles HTTP %s without marking an upload success
   db.close();
 });
 
+it.each([400, 413, 422])('allows a corrected initial post after a definite validation rejection (%s)', async (status) => {
+  const { db, uid } = await setup();
+  const creates: any[] = [];
+  let rejected = true;
+  const http: HttpTransport = async (_url, init) => {
+    if (init.method === 'GET') throw new Error('A rejected create must not need uncertain-creation recovery');
+    const body = JSON.parse(init.body!);
+    expect(body.action).toBeUndefined();
+    creates.push(body);
+    return rejected ? response(status, { error: 'invalid_request', error_description: 'Content is too large' })
+      : response(201, {}, remoteUrl);
+  };
+  await drainQueue(db, http);
+  expect(db.prepare('SELECT attempted,error,url FROM microblog_clipping_posts').get()).toEqual({ attempted: 0, error: null, url: null });
+  expect(db.prepare('SELECT status FROM connector_queue').get()).toEqual({ status: 'dead' });
+  db.prepare('UPDATE clippings SET text=? WHERE user_id=?').run('Short corrected passage', uid);
+  rejected = false;
+  expect(scheduleMicroblogClippings(db, uid, DOC)).toBe(1);
+  await drainQueue(db, http);
+  expect(creates).toHaveLength(2);
+  expect(JSON.stringify(creates[1])).toContain('Short corrected passage');
+  expect(db.prepare('SELECT url,error FROM microblog_clipping_posts').get()).toEqual({ url: remoteUrl, error: null });
+  expect(db.prepare('SELECT status FROM connector_queue').get()).toEqual({ status: 'done' });
+  db.close();
+});
+
 it('does not recreate a missing published post', async () => {
   const { db } = await setup();
   db.prepare('UPDATE microblog_clipping_posts SET url=?,attempted=1').run(remoteUrl);
