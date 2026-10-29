@@ -9,6 +9,8 @@ import { deleteKosyncUserData } from '../src/routes/account.js';
 import { fanOutProgress } from '../src/connectors/fanout.js';
 import { createProgressRefresh } from '../src/connectors/refresh.js';
 import { makeMicroblogTransport } from './microblog-helpers.js';
+import { mergeDocuments } from '../src/models/merge.js';
+import { clippingsPost, scheduleMicroblogClippings } from '../src/connectors/microblog-clippings.js';
 
 beforeEach(() => { process.env.TOKEN_ENC_KEY = 'a'.repeat(64); resetEncryptionKeyCache(); });
 afterEach(() => { delete process.env.TOKEN_ENC_KEY; resetEncryptionKeyCache(); });
@@ -44,6 +46,36 @@ async function schedulingFailure() {
     BEGIN SELECT RAISE(FAIL, 'simulated scheduling database failure'); END`);
   return s;
 }
+
+it.each(['attempted', 'published'].flatMap((history) => [false, true].map((matched) => ({ history, matched }))))('surfaces merged $history post conflicts in Settings (matched: $matched)', async ({ history, matched }) => {
+  const s = await setup();
+  const duplicate = 'b'.repeat(32);
+  s.db.prepare('UPDATE connector_accounts SET options=? WHERE user_id=? AND connector_id=?')
+    .run(JSON.stringify({ sync_highlights: true }), s.uid, 'microblog');
+  s.db.prepare('INSERT INTO documents(user_id,document,title,updated_at) VALUES(?,?,?,0)').run(s.uid, duplicate, 'Duplicate book');
+  s.db.prepare('INSERT INTO clippings(user_id,document,id,text,spine_index,created_at,updated_at) VALUES(?,?,?,?,0,1,1)')
+    .run(s.uid, duplicate, 'two', 'Another passage');
+  for (const document of [DOC, duplicate]) {
+    clippingsPost(s.db, s.uid, document);
+    s.db.prepare('UPDATE microblog_clipping_posts SET attempted=1,url=? WHERE user_id=? AND document=?')
+      .run(history === 'published' ? `https://example.micro.blog/${document}.html` : null, s.uid, document);
+  }
+  if (matched) {
+    await s.match();
+    s.db.prepare("UPDATE connector_queue SET status='done',last_error=NULL").run();
+  }
+  mergeDocuments(s.db, s.uid, duplicate, DOC, 10);
+  const list = await (await s.app.request('/api/v1/connectors', { headers: s.headers })).json();
+  expect(list.connectors.find((c: { id: string }) => c.id === 'microblog')).toMatchObject({
+    queue: { dead: 1 },
+    queue_errors: [{ count: 1, titles: ['Test book'], message: expect.stringContaining('Merged books both have Micro.blog publication history') }],
+  });
+  expect(scheduleMicroblogClippings(s.db, s.uid, DOC)).toBe(0);
+  await drainQueue(s.db, s.http);
+  expect(s.posts).toEqual([]);
+  expect(s.db.prepare('SELECT COUNT(*) AS n FROM clippings').get()).toEqual({ n: 2 });
+  s.db.close();
+});
 
 it('still fans out progress to other connectors when Micro.blog scheduling fails', async () => {
   const s = await schedulingFailure();

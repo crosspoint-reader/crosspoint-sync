@@ -114,6 +114,18 @@ export function scheduleMicroblogClippings(db: DB, userId: number, document?: st
       const insert = db.prepare('INSERT OR IGNORE INTO microblog_clipping_selections(user_id,document,clipping_id) VALUES(?,?,?)');
       for (const c of liveClippings(db, userId, doc)) insert.run(userId, doc, c.id);
     }
+    const blocked = db.prepare('SELECT error FROM microblog_clipping_posts WHERE user_id=? AND document=?')
+      .get(userId, doc) as { error: string | null } | undefined;
+    if (blocked?.error) {
+      // A merge can pause publication without making a delivery attempt.
+      // Surface durable errors in Settings even if this book is now unmatched.
+      withTransaction(db, () => {
+        enqueue(db, userId, 'microblog', { kind: 'highlight', document: doc, timestamp: nowSeconds() }, 'microblog:clippings');
+        db.prepare("UPDATE connector_queue SET status='dead',last_error=? WHERE user_id=? AND connector_id='microblog' AND document=? AND kind='microblog:clippings'")
+          .run(blocked.error, userId, doc);
+      });
+      continue;
+    }
     const match = getMatch(db, userId, 'microblog', doc);
     if (!match?.external_id || !passages(db, userId, doc).length) continue;
     const state = clippingsPost(db, userId, doc);

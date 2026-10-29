@@ -207,6 +207,10 @@ blog instead. A previously confirmed deletion can also be recreated on the curre
 blog after access to the previous blog is lost. Network or permission errors do
 not trigger automatic recreation.
 
+Merging books that both have Micro.blog publication history pauses their combined
+collection. Settings shows the conflict as a sync error so you can review the
+existing posts before publishing further clippings.
+
 For local testing, use Node 22.13 or newer, build the frontend with
 `npm run build:frontend`, and copy `.env.example` to `.env`. Set a separate
 `DATABASE_PATH` (such as `./data/microblog-test.db`), `PORT=8081`, and a persistent
