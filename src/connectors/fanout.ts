@@ -199,7 +199,7 @@ export function backfillConnector(db: DB, userId: number, connectorId: string, d
     }
   }
 
-  if (connectorId === 'microblog') queued += scheduleMicroblogClippings(db, userId);
+  if (connectorId === 'microblog') queued += scheduleMicroblogClippings(db, userId, document);
   if (connectorId !== 'microblog' && carriesFor(db, userId, conn, 'highlight')) {
     const rows = db
       .prepare(

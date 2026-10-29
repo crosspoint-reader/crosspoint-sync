@@ -215,3 +215,28 @@ it('coalesces repeated selections and clears local publication state on unlink',
   expect(s.posts).toHaveLength(1);
   s.db.close();
 });
+
+it('limits per-book sync to that book while account-wide sync still queues other selected books', async () => {
+  const s = await setup();
+  const other = 'b'.repeat(32);
+  await s.put('/api/v1/documents', { items: [{ document: other, title: 'Other book', author: 'Author' }] });
+  await s.put(`/api/v1/clippings/${other}`, { items: [{ id: 'other', spine: 1, text: 'Other passage', created_at: 1 }] });
+  await s.match();
+  await s.put(`/api/v1/connectors/microblog/matches/${other}`, { external_id: '456', external_edition: '9780547951973' });
+  await s.select();
+  await s.app.request(`/api/v1/connectors/microblog/clippings/${other}/other`, { method: 'POST', headers: s.headers });
+  s.db.prepare('DELETE FROM connector_queue').run();
+  const res = await s.app.request(`/api/v1/connectors/microblog/sync/${DOC}`, { method: 'POST', headers: s.headers });
+  expect(res.status).toBe(200);
+  expect(await res.json()).toMatchObject({ queued: 1 });
+  expect(s.db.prepare("SELECT document FROM connector_queue WHERE kind='microblog:clippings'").all()).toEqual([{ document: DOC }]);
+  await drainQueue(s.db, s.http);
+  expect(s.posts).toHaveLength(1);
+  expect(JSON.stringify(s.posts[0])).not.toContain('Other passage');
+  const all = await s.app.request('/api/v1/connectors/microblog/sync', { method: 'POST', headers: s.headers });
+  expect(await all.json()).toMatchObject({ queued: 1 });
+  await drainQueue(s.db, s.http);
+  expect(s.posts).toHaveLength(2);
+  expect(JSON.stringify(s.posts[1])).toContain('Other passage');
+  s.db.close();
+});
