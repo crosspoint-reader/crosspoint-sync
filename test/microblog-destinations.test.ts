@@ -72,6 +72,21 @@ it.each([b, 'https://third.micro.blog/'])('never discards original collections w
   s.db.close();
 });
 
+it.each([b, 'https://third.micro.blog/'])('preserves an unpublished selected blog on rotation only when it remains available (%s)', async (accessible) => {
+  const s = await setup([{ uid: a }, { uid: b }]);
+  upsertAccount(s.db, s.uid, 'microblog', { token: 'old', microblogDestination: a }, null);
+  setConnectorOptions(s.db, s.uid, 'microblog', { sync_highlights: true, highlight_blog: b });
+  saveMatch(s.db, s.uid, 'microblog', 'book', { externalId: '123', confidence: 1 }, 'manual');
+  enqueue(s.db, s.uid, 'microblog', { kind: 'progress', document: 'book', percentage: 0.4, timestamp: 1 });
+  upsertAccount(s.db, s.uid, 'microblog', { token: 'rotated', microblogDestination: accessible, microblogDestinations: [{ uid: accessible }] }, null);
+  const account = s.db.prepare("SELECT options FROM connector_accounts WHERE user_id=? AND connector_id='microblog'").get(s.uid) as { options: string };
+  expect(JSON.parse(account.options)).toEqual(accessible === b ? { sync_highlights: true, highlight_blog: b } : {});
+  expect(s.db.prepare("SELECT COUNT(*) n FROM connector_matches WHERE user_id=? AND connector_id='microblog'").get(s.uid)).toEqual({ n: accessible === b ? 1 : 0 });
+  expect(s.db.prepare("SELECT COUNT(*) n FROM connector_queue WHERE user_id=? AND connector_id='microblog'").get(s.uid)).toEqual({ n: accessible === b ? 1 : 0 });
+  expect(s.db.prepare('SELECT COUNT(*) n FROM microblog_clipping_posts WHERE user_id=?').get(s.uid)).toEqual({ n: 0 });
+  s.db.close();
+});
+
 it.each([
   ['https://shared.test/blog/post.html', true],
   ['https://shared.test/blog/reading/post.html', true],
@@ -81,12 +96,13 @@ it.each([
   const blog = 'https://shared.test/blog/';
   const s = await setup([{ uid: blog }]);
   s.db.prepare('INSERT INTO microblog_clipping_posts(user_id,document,identity,url) VALUES(?,?,?,?)').run(s.uid, 'book', 'identity', url);
-  setConnectorOptions(s.db, s.uid, 'microblog', { sync_highlights: true, highlight_blog: blog });
+  // Isolate legacy URL evidence from an independently saved blog selection.
+  setConnectorOptions(s.db, s.uid, 'microblog', { sync_highlights: true });
   saveMatch(s.db, s.uid, 'microblog', 'book', { externalId: '123', confidence: 1 }, 'manual');
   enqueue(s.db, s.uid, 'microblog', { kind: 'progress', document: 'book', percentage: 0.4, timestamp: 1 });
   upsertAccount(s.db, s.uid, 'microblog', { token: 'rotated', microblogDestination: blog, microblogDestinations: [{ uid: blog }] }, null);
   const account = s.db.prepare("SELECT options FROM connector_accounts WHERE user_id=? AND connector_id='microblog'").get(s.uid) as { options: string };
-  expect(JSON.parse(account.options)).toEqual(sameBlog ? { sync_highlights: true, highlight_blog: blog } : {});
+  expect(JSON.parse(account.options)).toEqual(sameBlog ? { sync_highlights: true } : {});
   expect(s.db.prepare("SELECT COUNT(*) n FROM connector_matches WHERE user_id=? AND connector_id='microblog'").get(s.uid)).toEqual({ n: sameBlog ? 1 : 0 });
   expect(s.db.prepare("SELECT COUNT(*) n FROM connector_queue WHERE user_id=? AND connector_id='microblog'").get(s.uid)).toEqual({ n: sameBlog ? 1 : 0 });
   expect(s.db.prepare('SELECT identity,url FROM microblog_clipping_posts WHERE user_id=?').get(s.uid)).toEqual({ identity: 'identity', url });

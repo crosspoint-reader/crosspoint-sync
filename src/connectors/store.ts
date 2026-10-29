@@ -3,7 +3,7 @@ import { withTransaction, type DB } from '../db/db.js';
 import { nowSeconds } from '../models/sync.js';
 import { decryptSecret, encryptSecret } from '../crypto/secrets.js';
 import { SAVE_CREDENTIAL, type Connector, type Credential, type DataKind, type DocumentMeta, type Match, type SavableCredential } from './types.js';
-import { destinationForPost } from './microblog-destinations.js';
+import { destinationForPost, selectedMicroblogDestination } from './microblog-destinations.js';
 
 export interface AccountRow {
   user_id: number;
@@ -43,7 +43,8 @@ export function upsertAccount(
         const availableBlogs = available.flatMap((d) => typeof d?.uid === 'string'
           ? [{ uid: d.uid, name: d.uid, isDefault: false }] : []);
         const accessibleLegacyPost = posts.some((p) => !p.destination && p.url && destinationForPost(p.url, availableBlogs));
-        if (accessibleLegacyPost || available.some((d) => d.uid === oldDestination || posts.some((p) => p.destination === d.uid))) changedMicroblogAccount = false;
+        const selectedBlog = selectedMicroblogDestination(db, userId);
+        if (accessibleLegacyPost || available.some((d) => d.uid === oldDestination || d.uid === selectedBlog || posts.some((p) => p.destination === d.uid))) changedMicroblogAccount = false;
         else if (oldDestination && cred.microblogDestination) changedMicroblogAccount = oldDestination !== cred.microblogDestination;
         else verifyMicroblogPosts = true;
       }
