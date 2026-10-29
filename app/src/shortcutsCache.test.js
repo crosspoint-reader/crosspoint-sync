@@ -889,3 +889,53 @@ it('retains cached books when the merge request fails', async () => {
   await expect(api.merge(session, 'one', 'two')).rejects.toThrow('offline')
   expect(JSON.parse(localStorage.getItem(key))).toEqual(previous)
 })
+
+const bookEdits = [
+  ['status', () => api.setStatus(session, 'one', 'finished'), { ...book, status: 'finished' }],
+  ['metadata', () => api.setInfo(session, 'one', { title: 'Edited title', author: 'Edited author' }), { ...book, title: 'Edited title', author: 'Edited author' }],
+  ['dates', () => api.setDates(session, 'one', { finished_date: '2026-10-28' }), { ...book, status: 'finished' }],
+]
+
+it.each(bookEdits)('rejects pre-%s library reads that finish after the edited library loads', async (_, edit, updated) => {
+  let resolve
+  http.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+  const pending = api.books(session)
+  const rejected = expect(pending).rejects.toThrow('Reading data changed')
+  http.mockResolvedValueOnce(response({ ok: true }))
+  await edit()
+  http.mockResolvedValueOnce(response({ items: [updated] }))
+  await api.books(session)
+  await flush()
+  const fresh = snapshot()
+  resolve(response({ items: [{ ...book, status: 'reading', title: 'Old title', author: 'Old author' }] }))
+  await rejected
+  await flush()
+  expect(snapshot()).toEqual(fresh)
+  expect(apiModule.cached.books(session)[0]).toMatchObject({ ...updated, percentage: updated.status === 'finished' ? 1 : updated.percentage })
+})
+
+it.each(bookEdits)('does not invalidate library reads when a %s edit fails', async (_, edit) => {
+  let resolve
+  http.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+  const pending = api.books(session)
+  http.mockRejectedValueOnce(new Error('offline'))
+  await expect(edit()).rejects.toThrow('offline')
+  resolve(response({ items: [book] }))
+  await expect(pending).resolves.toHaveLength(1)
+  expect(apiModule.cached.books(session)).toHaveLength(1)
+})
+
+it.each(bookEdits)('ignores an old session %s edit completing during a new library read', async (_, edit) => {
+  let resolveEdit, resolveBooks
+  http.mockReturnValueOnce(new Promise((r) => { resolveEdit = r }))
+  const editing = edit()
+  logout()
+  http.mockReturnValueOnce(new Promise((r) => { resolveBooks = r }))
+  const reading = api.books(session)
+  resolveEdit(response({ ok: true }))
+  await editing
+  resolveBooks(response({ items: [book] }))
+  await expect(reading).resolves.toHaveLength(1)
+  await flush()
+  expect(snapshot().books.items).toHaveLength(1)
+})

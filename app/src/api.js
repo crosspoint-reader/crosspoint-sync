@@ -123,6 +123,14 @@ async function call(session, path, init = {}, keepOffline = true, { offlineFallb
   return data
 }
 
+async function editBook(session, document, field, patch) {
+  const version = sessionVersion
+  const result = await call(session, `/api/v1/documents/${document}/${field}`, { method: 'PUT', body: JSON.stringify(patch) })
+  // A later library refresh must not be overwritten by a pre-edit response.
+  if (version === sessionVersion) readingVersion++
+  return result
+}
+
 function keep(key, data, timestampSaved = false) {
   try {
     localStorage.setItem(key, JSON.stringify(data))
@@ -519,8 +527,8 @@ export const api = {
     return result
   },
   // Manual reading dates: { start_date, finished_date } as 'YYYY-MM-DD', null clears, omitted = unchanged.
-  setDates: (s, doc, dates) => call(s, `/api/v1/documents/${doc}/dates`, { method: 'PUT', body: JSON.stringify(dates) }),
-  setInfo: (s, doc, patch) => call(s, `/api/v1/documents/${doc}/info`, { method: 'PUT', body: JSON.stringify(patch) }),
+  setDates: (s, doc, dates) => editBook(s, doc, 'dates', dates),
+  setInfo: (s, doc, patch) => editBook(s, doc, 'info', patch),
   coverCandidates: (s, doc, q) => call(s, `/api/v1/documents/${doc}/cover/candidates${q ? `?q=${encodeURIComponent(q)}` : ''}`).then((r) => r.items),
   // `document` becomes an alias of `into`: its progress, clippings and stats move there.
   async merge(s, document, into, stats = true) {
@@ -572,8 +580,7 @@ export const api = {
     }
     return result
   },
-  setStatus: (s, doc, status) =>
-    call(s, `/api/v1/documents/${doc}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
+  setStatus: (s, doc, status) => editBook(s, doc, 'status', { status }),
   async clippings(s, doc, { syncShortcuts = true } = {}) {
     const version = sessionVersion
     const reading = readingVersion
