@@ -46,6 +46,39 @@ it('automatic mode includes existing clippings in reading order and isolates use
   db.close();
 });
 
+it.each([
+  ['text offsets', { start_offset: 10 }, { start_offset: 30 }],
+  ['paragraphs', { paragraph_index: 1 }, { paragraph_index: 2 }],
+  ['zero-based paragraphs', { paragraph_index: 0 }, { paragraph_index: 1 }],
+  ['pages', { start_page: 2 }, { start_page: 4 }],
+  ['words within a page', { start_page: 2, start_word: 3 }, { start_page: 2, start_word: 10 }],
+  ['mixed offset availability', { start_offset: 100, paragraph_index: 1 }, { paragraph_index: 2 }],
+] as const)('uses %s before creation time when ordering clippings in the same spine', async (_label, first, second) => {
+  const { db, uid } = await setup();
+  const update = db.prepare('UPDATE clippings SET spine_index=0,start_offset=?,paragraph_index=?,start_page=?,start_word=?,created_at=? WHERE user_id=? AND id=?');
+  for (const [id, position, createdAt] of [['one', first, 2], ['two', second, 1]] as const) {
+    const p = { start_offset: null, paragraph_index: null, start_page: 0, start_word: 0, ...position };
+    update.run(p.start_offset, p.paragraph_index, p.start_page, p.start_word, createdAt, uid, id);
+    selectMicroblogClipping(db, uid, DOC, id);
+  }
+  const content = microblogClippingsContent(db, uid, DOC, 'https://micro.blog/books/9781786487849')!.content;
+  expect(content.indexOf('First passage')).toBeLessThan(content.indexOf('Second passage'));
+  db.close();
+});
+
+it('keeps legacy published snapshots without fallback positions readable', async () => {
+  const { db, uid } = await setup();
+  for (const [id, text, created_at] of [['one', 'First passage', 1], ['two', 'Second passage', 2]] as const) {
+    selectMicroblogClipping(db, uid, DOC, id);
+    const snapshot = { id, text, note: null, chapter_title: '', spine_index: 0, start_offset: null, created_at };
+    db.prepare('UPDATE microblog_clipping_selections SET manual=0,published_snapshot=? WHERE user_id=? AND clipping_id=?')
+      .run(JSON.stringify(snapshot), uid, id);
+  }
+  const content = microblogClippingsContent(db, uid, DOC, 'https://micro.blog/books/9781786487849')!.content;
+  expect(content.indexOf('First passage')).toBeLessThan(content.indexOf('Second passage'));
+  db.close();
+});
+
 it('automatic-off excludes unpublished automatic selections but preserves manual intent', async () => {
   const { db, uid } = await setup();
   db.prepare("UPDATE connector_accounts SET options=? WHERE user_id=?").run('{"sync_highlights":true}', uid);

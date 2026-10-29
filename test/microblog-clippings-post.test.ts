@@ -76,6 +76,32 @@ it('publishes one escaped collected post, skips unchanged content, then updates 
   db.close();
 });
 
+it('retains fallback positions in published snapshots and preserves reading order after local deletion', async () => {
+  const { db, uid } = await setup();
+  db.prepare('UPDATE clippings SET paragraph_index=1,start_page=2,start_word=3,created_at=2 WHERE user_id=?').run(uid);
+  db.prepare('INSERT INTO clippings(user_id,document,id,text,spine_index,paragraph_index,start_page,start_word,created_at,updated_at) VALUES(?,?,?,?,0,2,4,10,1,1)')
+    .run(uid, DOC, 'two', 'Second passage');
+  selectMicroblogClipping(db, uid, DOC, 'two');
+  const writes: unknown[] = [];
+  const http: HttpTransport = async (_url, init) => {
+    if (init.method === 'GET') return response(200);
+    writes.push(JSON.parse(init.body!));
+    return response(201, {}, remoteUrl);
+  };
+  await drainQueue(db, http);
+  const snapshot = db.prepare('SELECT published_snapshot FROM microblog_clipping_selections WHERE user_id=? AND clipping_id=?').get(uid, 'one') as { published_snapshot: string };
+  expect(JSON.parse(snapshot.published_snapshot)).toMatchObject({ paragraph_index: 1, start_page: 2, start_word: 3 });
+  db.prepare('UPDATE clippings SET deleted=1 WHERE user_id=? AND id=?').run(uid, 'one');
+  db.prepare('UPDATE clippings SET note=? WHERE user_id=? AND id=?').run('New note', uid, 'two');
+  scheduleMicroblogClippings(db, uid, DOC); await drainQueue(db, http);
+  expect(writes).toHaveLength(2);
+  for (const write of writes) {
+    const content = JSON.stringify(write);
+    expect(content.indexOf('First passage')).toBeLessThan(content.indexOf('Second passage'));
+  }
+  db.close();
+});
+
 it.each(['source lookup', 'update'])('identifies a failed %s and preserves the existing post for retry', async (operation) => {
   const { db, uid } = await setup();
   const http: HttpTransport = async (_url, init) => {

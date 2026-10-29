@@ -21,6 +21,8 @@ export interface ClippingsPost {
 interface Passage {
   id: string; text: string; note: string | null; chapter_title: string;
   spine_index: number; start_offset: number | null; created_at: number;
+  // Older published snapshots predate these fallback coordinates.
+  paragraph_index?: number | null; start_page?: number; start_word?: number;
 }
 
 function automatic(db: DB, userId: number): boolean {
@@ -31,7 +33,7 @@ function automatic(db: DB, userId: number): boolean {
 
 function liveClippings(db: DB, userId: number, document: string): Passage[] {
   const docs = clippingDocuments(db, userId, document);
-  return db.prepare(`${mergedClippingsCte(docs.length)} SELECT id,text,note,chapter_title,spine_index,start_offset,created_at
+  return db.prepare(`${mergedClippingsCte(docs.length)} SELECT id,text,note,chapter_title,spine_index,start_offset,paragraph_index,start_page,start_word,created_at
     FROM merged WHERE document=? AND deleted=0`).all(userId, ...docs, document) as unknown as Passage[];
 }
 
@@ -55,12 +57,26 @@ function passages(db: DB, userId: number, document: string): Passage[] {
   const enabled = automatic(db, userId);
   const selections = db.prepare('SELECT clipping_id,manual,published_snapshot FROM microblog_clipping_selections WHERE user_id=? AND document=?')
     .all(userId, document) as { clipping_id: string; manual: number; published_snapshot: string | null }[];
-  return selections.flatMap((s) => {
+  const selected = selections.flatMap((s) => {
     const current = live.find((c) => c.id === s.clipping_id);
     if ((enabled || s.manual) && current) return [current];
     return s.published_snapshot ? [JSON.parse(s.published_snapshot) as Passage] : [];
-  }).sort((a, b) => a.spine_index - b.spine_index || (a.start_offset ?? 0) - (b.start_offset ?? 0)
-    || a.created_at - b.created_at || a.id.localeCompare(b.id));
+  });
+  const coordinates = ['start_offset', 'paragraph_index', 'start_page', 'start_word'] as const;
+  const common = new Map<number, readonly (typeof coordinates[number])[]>();
+  // Use the same coordinate system throughout a spine. Mixed client versions
+  // must not compare a character offset to a paragraph or page number.
+  for (const c of selected) {
+    common.set(c.spine_index, (common.get(c.spine_index) ?? coordinates).filter((key) => c[key] != null));
+  }
+  return selected.sort((a, b) => {
+    if (a.spine_index !== b.spine_index) return a.spine_index - b.spine_index;
+    for (const key of common.get(a.spine_index)!) {
+      const difference = a[key]! - b[key]!;
+      if (difference) return difference;
+    }
+    return a.created_at - b.created_at || a.id.localeCompare(b.id);
+  });
 }
 
 function escapeHtml(s: string): string {
