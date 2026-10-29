@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { StrictMode } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 
@@ -98,4 +99,39 @@ it('continues accepting password updates for the active session', async () => {
   await act(async () => { settingsCallbacks.onSession(updated) })
   expect(saveSession).toHaveBeenCalledWith(updated)
   expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy()
+})
+
+it('waits for startup cleanup before showing sign-in when no session is saved', async () => {
+  loadSession.mockReturnValue(null)
+  let finish
+  logout.mockReturnValueOnce(new Promise((r) => { finish = r }))
+  render(<App />)
+  expect(screen.queryByRole('heading', { name: 'Sign in' })).toBeNull()
+  expect(screen.getByText('Signing out…')).toBeTruthy()
+  await act(async () => { finish() })
+  expect(screen.getByRole('heading', { name: 'Sign in' })).toBeTruthy()
+  expect(logout).toHaveBeenCalledOnce()
+})
+
+it('offers startup cleanup retry rather than sign-in when native removal fails', async () => {
+  loadSession.mockReturnValue(null)
+  logout.mockRejectedValueOnce(new Error('disk unavailable')).mockResolvedValueOnce()
+  render(<App />)
+  const retry = await screen.findByRole('button', { name: 'Retry sign out' })
+  expect(screen.queryByRole('heading', { name: 'Sign in' })).toBeNull()
+  expect(screen.getByRole('alert').textContent).toContain('disk unavailable')
+  fireEvent.click(retry)
+  await waitFor(() => expect(screen.getByRole('heading', { name: 'Sign in' })).toBeTruthy())
+  expect(logout).toHaveBeenCalledTimes(2)
+})
+
+it('shares startup cleanup across StrictMode effect replays', async () => {
+  loadSession.mockReturnValue(null)
+  let finish
+  logout.mockReturnValueOnce(new Promise((r) => { finish = r }))
+  render(<StrictMode><App /></StrictMode>)
+  expect(logout).toHaveBeenCalledOnce()
+  expect(screen.queryByRole('heading', { name: 'Sign in' })).toBeNull()
+  await act(async () => { finish() })
+  expect(screen.getByRole('heading', { name: 'Sign in' })).toBeTruthy()
 })

@@ -437,7 +437,7 @@ function Home({ session, onSession, onLogout, theme }) {
 export default function App() {
   const theme = useTheme()
   const [session, setSession] = useState(loadSession)
-  const [signOut, setSignOut] = useState(null)
+  const [signOut, setSignOut] = useState(() => session ? null : { error: null })
   const sessionGeneration = useRef(0)
   const generation = sessionGeneration.current
   async function handleLogout() {
@@ -453,10 +453,12 @@ export default function App() {
     }
   }
   useEffect(() => {
-    if (!session) {
-      clearWidget()
-      syncShortcutsCache(null)
-    }
+    if (!session) handleLogout()
+    // Later sign-outs already await removal in handleLogout.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  useEffect(() => {
+    if (!session) clearWidget()
   }, [session])
   if (signOut) return (
     <main className="mx-auto flex min-h-dvh max-w-md items-center px-6">
