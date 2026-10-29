@@ -58,7 +58,7 @@ function Clip({ session, clip, book, onShare, onDelete, showBook, onMicroblog, s
 }
 
 export default function Clippings({ session, books }) {
-  const [items, error, reload] = useLoad(() => api.allClippings(session, books), [session], `clippings:${session.username}`, () => cached.clippings(session))
+  const [items, error, reload] = useLoad(() => api.allClippings(session, books), [session, books], `clippings:${session.username}`, () => cached.clippings(session))
   const [connectors] = useLoad(() => api.connectors(session).then((r) => r.connectors), [session], `clipping-connectors:${session.username}`)
   const microblog = connectors?.some((c) => c.id === 'microblog' && c.linked)
   const [postData, postError, reloadPosts] = useLoad(() => microblog ? api.microblogClippingPosts(session) : Promise.resolve({ items: [] }), [session, microblog])

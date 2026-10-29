@@ -924,7 +924,7 @@ function Account({ session, onSession, onLogout }) {
                 location.reload()
               } else {
                 await api.deleteAccount(session)
-                onLogout()
+                await onLogout()
               }
             } finally {
               setBusy(null)
