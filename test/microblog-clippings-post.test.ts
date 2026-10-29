@@ -136,16 +136,16 @@ it.each([false, true])('publishes selected clippings after merging an unmatched 
   db.close();
 });
 
-it.each(['source lookup', 'update'])('identifies a failed %s and preserves the existing post for retry', async (operation) => {
+it.each([500, 408].flatMap((status) => ['source lookup', 'update'].map((operation) => ({ status, operation }))))('identifies a failed $operation ($status) and preserves the existing post for retry', async ({ operation, status }) => {
   const { db, uid } = await setup();
   const http: HttpTransport = async (_url, init) => {
-    if (init.method === 'GET') return response(operation === 'source lookup' ? 500 : 200);
-    return response(500);
+    if (init.method === 'GET') return response(operation === 'source lookup' ? status : 200);
+    return response(status);
   };
   db.prepare('UPDATE microblog_clipping_posts SET url=?,attempted=1').run(remoteUrl);
   await drainQueue(db, http);
   expect(db.prepare('SELECT status,last_error FROM connector_queue').get()).toMatchObject({
-    status: 'pending', last_error: expect.stringContaining(`Micropub ${operation} failed (500)`),
+    status: 'pending', last_error: expect.stringContaining(`Micropub ${operation} failed (${status})`),
   });
   expect(db.prepare('SELECT url,missing,error,fingerprint FROM microblog_clipping_posts WHERE user_id=?').get(uid)).toEqual({
     url: remoteUrl, missing: 0, error: null, fingerprint: null,
@@ -153,20 +153,35 @@ it.each(['source lookup', 'update'])('identifies a failed %s and preserves the e
   db.close();
 });
 
-it('recovers an uncertain creation by source identity without creating a second post', async () => {
+it.each(['connection loss', 'create timeout', 'recovery timeout'])('recovers an uncertain creation after %s without creating a second post', async (failure) => {
   const { db } = await setup();
   let creates = 0;
   let saved: unknown;
+  let timedOut = false;
   const http: HttpTransport = async (url, init) => {
     expect(url).toContain('/micropub');
-    if (init.method === 'GET') return response(200, { items: [{ properties: { ...(saved as any), url: [remoteUrl] } }] });
+    if (init.method === 'GET') {
+      if (failure === 'recovery timeout' && !timedOut) { timedOut = true; return response(408); }
+      return response(200, { items: [{ properties: { ...(saved as any), url: [remoteUrl] } }] });
+    }
     const body = JSON.parse(init.body!);
-    if (!body.action) { creates++; saved = body.properties; throw new Error('connection lost after acceptance'); }
+    if (!body.action) {
+      creates++; saved = body.properties;
+      if (failure === 'create timeout') return response(408);
+      throw new Error('connection lost after acceptance');
+    }
     return response(200);
   };
   await drainQueue(db, http);
+  expect(db.prepare('SELECT attempted,error FROM microblog_clipping_posts').get()).toEqual({ attempted: 1, error: null });
+  expect(db.prepare('SELECT status FROM connector_queue').get()).toEqual({ status: 'pending' });
   db.prepare("UPDATE connector_queue SET next_try_at=0 WHERE connector_id='microblog'").run();
   await drainQueue(db, http);
+  if (failure === 'recovery timeout') {
+    expect(db.prepare('SELECT status FROM connector_queue').get()).toEqual({ status: 'pending' });
+    db.prepare("UPDATE connector_queue SET next_try_at=0 WHERE connector_id='microblog'").run();
+    await drainQueue(db, http);
+  }
   expect(creates).toBe(1);
   expect(db.prepare('SELECT url FROM microblog_clipping_posts').get()).toEqual({ url: remoteUrl });
   expect(db.prepare('SELECT status FROM connector_queue').get()).toEqual({ status: 'done' });

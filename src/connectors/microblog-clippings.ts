@@ -166,7 +166,7 @@ class MissingMicroblogPost extends ConnectorOperationError {
 
 class MicropubResponseError extends ConnectorOperationError {
   constructor(readonly status: number, operation: string) {
-    super(`Micro.blog Micropub ${operation} failed (${status})`, status === 429 || status >= 500,
+    super(`Micro.blog Micropub ${operation} failed (${status})`, status === 408 || status === 429 || status >= 500,
       status === 401 || status === 403);
   }
 }
