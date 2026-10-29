@@ -72,6 +72,8 @@ export const offline = new EventTarget()
 let sessionVersion = 0
 let readingVersion = 0
 let logoutPending = null
+let libraryReadSequence = 0
+let latestLibraryRead = 0
 let clippingReadSequence = 0
 let latestClippingRead = 0
 let latestHubRead = 0
@@ -96,6 +98,7 @@ function assertReadingVersion(session, reading) {
 const offlineCopies = new WeakSet()
 
 function clearOffline(session) {
+  latestLibraryRead = 0
   latestClippingRead = latestHubRead = 0
   latestBookReads.clear()
   const prefix = session ? `${OFFLINE}${session.username}@${session.server}/` : OFFLINE_PREFIX
@@ -343,6 +346,7 @@ function removeCachedBook(session, document) {
 async function allProgress(session) {
   const version = sessionVersion
   const reading = readingVersion
+  const sequence = ++libraryReadSequence
   const first = await call(session, PROGRESS, {}, true, { store: false })
   const items = [...first.items]
   for (let next = first.next, seen = new Set(); next; ) {
@@ -356,6 +360,8 @@ async function allProgress(session) {
   assertReadingVersion(version, reading)
   const all = { items, next: null }
   if (version === sessionVersion) {
+    if (sequence < latestLibraryRead) throw Object.assign(new Error('Reading data changed while loading'), { stale: true })
+    if (!offlineCopies.has(first)) latestLibraryRead = sequence
     const key = `${OFFLINE}${session.username}@${session.server}${PROGRESS}`
     const savedAt = offlineCopies.has(first)
       ? Object.hasOwn(first, 'savedAt') ? first.savedAt : read(`${key}:saved-at`)

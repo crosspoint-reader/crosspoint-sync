@@ -1165,3 +1165,37 @@ it('shares one native removal for overlapping logout attempts', async () => {
   finish()
   await first
 })
+
+it.each(['single-page', 'later-page'])('rejects an older library refresh after a newer one completes (%s)', async (paging) => {
+  let finish
+  if (paging === 'later-page') http.mockResolvedValueOnce(response({ items: [{ ...book, status: 'reading', percentage: 0.2 }], next: 'next' }))
+  http.mockReturnValueOnce(new Promise((r) => { finish = r }))
+  const pending = api.books(session)
+  const rejected = expect(pending).rejects.toThrow('Reading data changed')
+  await flush()
+  const updated = { ...book, status: 'reading', percentage: 0.7, timestamp: 200 }
+  http.mockResolvedValueOnce(response({ items: [updated] }))
+  await api.books(session)
+  await flush()
+  const fresh = snapshot()
+  finish(response({ items: [{ ...book, status: 'reading', percentage: 0.2, timestamp: 100 }] }))
+  await rejected
+  await flush()
+  expect(apiModule.cached.books(session)).toEqual([updated])
+  expect(snapshot()).toEqual(fresh)
+})
+
+it('does not let a later offline library fallback supersede a pending online refresh', async () => {
+  const key = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/progress?limit=500'
+  localStorage.setItem(key, JSON.stringify({ items: [book], next: null, savedAt: 100 }))
+  let finish
+  http.mockReturnValueOnce(new Promise((r) => { finish = r }))
+  const pending = api.books(session)
+  http.mockRejectedValueOnce(new Error('offline'))
+  await api.books(session)
+  const fresh = { ...book, status: 'reading', percentage: 0.5, timestamp: 200 }
+  finish(response({ items: [fresh] }))
+  await expect(pending).resolves.toEqual([fresh])
+  await flush()
+  expect(snapshot().books.items[0]).toMatchObject({ percentage: 0.5, timestamp: 200 })
+})
