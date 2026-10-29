@@ -8,6 +8,8 @@ import { withTransaction, type DB } from '../db/db.js';
  * intent obvious next to the account-level delete in routes/account.ts.
  */
 const DOCUMENT_TABLES = [
+  'microblog_clipping_selections',
+  'microblog_clipping_posts',
   'connector_queue',
   'connector_matches',
   'stats_device_book',

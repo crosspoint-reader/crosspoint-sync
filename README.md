@@ -47,6 +47,20 @@ For local image builds from the checkout, use:
 docker compose -f docker-compose.dev.yml up -d --build
 ```
 
+For localhost testing with connector credentials, Docker can forward requests
+from a bridge address instead of a loopback address. Put your persistent
+`TOKEN_ENC_KEY` in `.env`, then run:
+
+```sh
+HOST_BIND=127.0.0.1 HOST_PORT=8081 ALLOW_HTTP_LOCALHOST=true \
+  docker compose -f docker-compose.dev.yml up -d --build
+```
+
+Open `http://localhost:8081/app/`. This opt-in allows credential entry over HTTP
+only for localhost URLs; keep the host port bound to `127.0.0.1`. For `docker run`,
+use `-p 127.0.0.1:8081:8080 -e ALLOW_HTTP_LOCALHOST=true` and your existing encryption
+key and data volume. Public/self-hosted network deployments should use HTTPS.
+
 To serve under a subpath, pass `-e BASE_PATH=/crosspoint-sync` to `docker run`,
 or run `BASE_PATH=/crosspoint-sync docker compose up -d`. The same image works
 at any prefix; no frontend rebuild is needed.
@@ -145,6 +159,7 @@ DATABASE_PATH=./data/crosspoint.db PORT=8080 node dist/index.js
 | `REGISTRATION_DISABLED` | `false` | Set `true` to lock down a private instance |
 | `AUTH_RATE_LIMIT_PER_MINUTE` | `30` | Per-IP limit on registration (0 disables) |
 | `TOKEN_ENC_KEY` | _(unset)_ | Enables external-service connectors. 64 hex chars, a base64 32-byte key, or a ≥32-char passphrase. Encrypts stored connector credentials at rest; unset = connectors disabled. |
+| `ALLOW_HTTP_LOCALHOST` | `false` | Local Docker testing only: allow connector credentials over HTTP at `localhost`, `127.0.0.1`, or `[::1]` when Docker forwards from a bridge peer. Bind the published port to `127.0.0.1`; leave disabled on network-facing deployments. |
 | `TRUST_PROXY` | `false` (`true` on Railway) | Set `true` only when direct access is blocked and a trusted reverse proxy overwrites any client-supplied `X-Forwarded-Proto`; permits connector linking through an HTTPS-terminating proxy. Defaults to `true` when `RAILWAY_ENVIRONMENT` is present, since Railway always fronts the service with its TLS-terminating edge; set `TRUST_PROXY=false` to override. |
 | `GOOGLE_BOOKS_API_KEY` | _(unset)_ | Optional. Fallback source for print page counts when Open Library has none (keyless Google Books has no quota). |
 | `HARDCOVER_API_KEY` | _(unset)_ | Optional. A Hardcover API key (`read:catalog` is enough) for book details from Hardcover's catalog: moods, genres, content warnings, rating, series, release year, and page counts/covers where other sources miss. One lookup per distinct book, cached for all users, throttled under Hardcover's free-plan limits. |
@@ -168,6 +183,49 @@ Native app association files, when enabled, remain at domain-root `/.well-known/
 
 Treat the token like a password: Micro.blog app tokens have full account access. CrossPoint Sync
 encrypts the token at rest using `TOKEN_ENC_KEY`.
+
+With Micro.blog linked, each clipping on the **Clippings** page has an
+**Add clipping to Micro.blog** action. Selected clippings are collected into
+one post per book, titled **📚 Clippings from {book title}**, with a link to the
+matched Micro.blog book page. Later clippings update the same post. CrossPoint
+Sync manages its generated content, so later updates replace edits made directly
+to that content on Micro.blog.
+
+Choose **Post clippings to** in Micro.blog settings when the token accesses
+multiple blogs. A sole available blog is selected automatically. The choice
+applies to new collections: existing posts and new clippings for those books stay
+on the book's original blog. Revoked access pauses posting to that blog; selecting
+a different one never moves existing collections automatically.
+
+**Automatically sync clippings** is off by default. Enabling it includes existing
+and future clippings. Unmatched books wait without interrupting reader sync;
+after matching, eligible clippings are sent on the next reader sync or **Sync now**.
+Turning automatic sync off stops automatic additions while retaining published
+passages and manually selected clippings.
+
+Deleting a post on Micro.blog pauses publication for that book while preserving
+its clippings locally. After the missing post is detected on an update, the
+**Micro.blog publishing paused** section on the Clippings page offers **Recreate
+clippings post**, even if the book has no live local clippings. This explicitly
+republishes the collected clippings to either the previous blog (the default) or
+the current clippings blog selected in Settings. Future updates for this book
+follow the replacement post. If the previous blog is accessible, Sync rechecks
+that the old post is still missing; a restored post can be resumed on the previous
+blog instead. A previously confirmed deletion can also be recreated on the current
+blog after access to the previous blog is lost. Network or permission errors do
+not trigger automatic recreation.
+
+Merging books that both have Micro.blog publication history pauses their combined
+collection. Settings shows the conflict as a sync error so you can review the
+existing posts before publishing further clippings.
+
+For local testing, use Node 22.13 or newer, build the frontend with
+`npm run build:frontend`, and copy `.env.example` to `.env`. Set a separate
+`DATABASE_PATH` (such as `./data/microblog-test.db`), `PORT=8081`, and a persistent
+`TOKEN_ENC_KEY` generated with `openssl rand -hex 32`. Run `npm run dev` and open
+[the local app](http://localhost:8081/app/). Create a local account, sync a book
+and its clippings from a reader, link Micro.blog, and match the book before trying
+the clipping action or automatic sync. These actions publish to the linked blog.
 
 ## Point your reader at it
 

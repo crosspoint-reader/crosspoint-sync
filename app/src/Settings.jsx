@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import MicroblogPosting from './MicroblogPosting.jsx'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { onOpenUrl } from '@tauri-apps/plugin-deep-link'
 import { ArrowLeft, ChevronRight, Copy, KeyRound, ListChecks, Loader2, LogOut, Monitor, Moon, RefreshCw, Search, Server, Sun, Trash2, UserX } from 'lucide-react'
@@ -39,7 +40,7 @@ function Appearance({ theme: [pref, setPref] }) {
 // What each service does, as on the web dashboard.
 const HINTS = {
   hardcover: 'Syncs your reading progress and shelf status to Hardcover, and your highlights if you turn them on.',
-  microblog: 'Keeps your Currently reading and Finished reading bookshelves in sync.',
+  microblog: 'Keeps your Currently reading and Finished reading bookshelves in sync. Optional clipping sync publishes one post per book and updates its generated content on later syncs, replacing edits made on Micro.blog.',
   readwise: 'Syncs your highlights to Readwise.',
   'readwise-reader': 'Archives books in Reader when you finish them, and brings your Reader progress back.',
   kosync: 'Mirrors your reading progress to another KOReader-compatible (KOSync) server. For Calibre-Web, use your library URL ending in /kosync.',
@@ -579,6 +580,7 @@ function Service({ session, conn, onChange }) {
       {conn.linked && !needsRelink && conn.options && (
         <Options conn={conn} save={(v) => act('options', () => api.setConnectorOptions(session, conn.id, v))} />
       )}
+      {conn.id === 'microblog' && conn.linked && !needsRelink && <MicroblogPosting session={session} onChange={onChange} />}
       {openForm && (!conn.linked || needsRelink) && (
         <LinkForm
           session={session}

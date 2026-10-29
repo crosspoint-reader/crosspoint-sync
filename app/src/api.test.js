@@ -19,6 +19,14 @@ beforeEach(() => {
   fetchMock.mockReset()
 })
 
+it('serializes the explicit clippings recreation destination choice', async () => {
+  fetchMock.mockResolvedValue(response({ queued: true }))
+  await api.recreateMicroblogPost(session('reader'), 'book', 'current')
+  expect(fetchMock).toHaveBeenCalledWith('https://sync.test/api/v1/connectors/microblog/clipping-posts/book/recreate', expect.objectContaining({
+    method: 'POST', body: '{"target":"current"}',
+  }))
+})
+
 describe('prefixed server URLs', () => {
   it.each(['', '/reading', '/services/reading'])('detects the hosted server at %j', (basePath) => {
     expect(hostedServerUrl(new URL(`https://sync.test${basePath}/app/`))).toBe(`https://sync.test${basePath}`)

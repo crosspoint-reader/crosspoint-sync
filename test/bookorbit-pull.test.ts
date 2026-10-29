@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { pollConnector } from '../src/connectors/fanin.js';
 import { bookorbitConnector } from '../src/connectors/bookorbit.js';
-import { deleteAccount, saveMatch, upsertAccount } from '../src/connectors/store.js';
+import { deleteAccount, saveMatch, setConnectorOptions, upsertAccount } from '../src/connectors/store.js';
+import { scheduleMicroblogClippings } from '../src/connectors/microblog-clippings.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
 import { upsertProgress } from '../src/routes/kosync.js';
 import type { HttpTransport, InboundHighlight } from '../src/connectors/types.js';
@@ -50,6 +51,54 @@ it('imports progress and clippings on demand, exposing progress to bulk sync', a
   expect(f.db.prepare("SELECT COUNT(*) AS n FROM connector_queue WHERE connector_id='bookorbit'").get()).toEqual({ n: 0 });
   const next = await (await f.app.request(`/api/v1/progress/changes?since=${feed.cursor}`, { headers: f.headers })).json();
   expect(next.changes).toEqual([]);
+});
+
+it.each([
+  { automatic: true, matched: true },
+  { automatic: false, matched: true },
+  { automatic: true, matched: false },
+])('schedules imported clippings without a progress change (automatic: $automatic, matched: $matched)', async ({ automatic, matched }) => {
+  const f = await fixture();
+  vi.spyOn(bookorbitConnector, 'pullProgress').mockResolvedValue(null);
+  vi.spyOn(bookorbitConnector, 'pullHighlights').mockResolvedValue([highlight]);
+  upsertAccount(f.db, f.id, 'microblog', { token: 'token' }, null);
+  setConnectorOptions(f.db, f.id, 'microblog', { sync_highlights: automatic });
+  const match = () => saveMatch(f.db, f.id, 'microblog', DOC,
+    { externalId: '123', externalEdition: '9781786487849', confidence: 1 }, 'manual');
+  if (matched) match();
+  expect(await pollConnector(f.db, f.id, 'bookorbit', f.http, { document: DOC })).toBe(0);
+  expect(f.db.prepare('SELECT text FROM clippings').get()).toEqual({ text: highlight.text });
+  expect(f.db.prepare('SELECT COUNT(*) AS n FROM microblog_clipping_selections').get()).toEqual({ n: automatic ? 1 : 0 });
+  const jobs = () => f.db.prepare("SELECT document,status FROM connector_queue WHERE kind='microblog:clippings'").all();
+  expect(jobs()).toEqual(automatic && matched ? [{ document: DOC, status: 'pending' }] : []);
+  if (automatic && !matched) {
+    match();
+    expect(scheduleMicroblogClippings(f.db, f.id, DOC)).toBe(1);
+  }
+  await pollConnector(f.db, f.id, 'bookorbit', f.http, { document: DOC });
+  expect(jobs()).toHaveLength(automatic ? 1 : 0);
+  expect(f.db.prepare('SELECT COUNT(*) AS n FROM clippings').get()).toEqual({ n: 1 });
+  expect(f.db.prepare("SELECT COUNT(*) AS n FROM connector_queue WHERE connector_id='bookorbit'").get()).toEqual({ n: 0 });
+  f.db.close();
+});
+
+it('keeps imported clippings and other fanout when Micro.blog scheduling fails', async () => {
+  const f = await fixture();
+  vi.spyOn(bookorbitConnector, 'pullProgress').mockResolvedValue(null);
+  vi.spyOn(bookorbitConnector, 'pullHighlights').mockResolvedValue([highlight]);
+  upsertAccount(f.db, f.id, 'microblog', { token: 'token' }, null);
+  setConnectorOptions(f.db, f.id, 'microblog', { sync_highlights: true });
+  saveMatch(f.db, f.id, 'microblog', DOC, { externalId: '123', externalEdition: '9781786487849', confidence: 1 }, 'manual');
+  upsertAccount(f.db, f.id, 'seekquel', { token: 'token' }, null);
+  saveMatch(f.db, f.id, 'seekquel', DOC, { externalId: '456', confidence: 1 }, 'manual');
+  f.db.exec(`CREATE TEMP TRIGGER fail_import_schedule BEFORE INSERT ON microblog_clipping_selections
+    BEGIN SELECT RAISE(FAIL, 'simulated import scheduling failure'); END`);
+  await expect(pollConnector(f.db, f.id, 'bookorbit', f.http, { document: DOC, throwOnError: true })).resolves.toBe(0);
+  expect(f.db.prepare('SELECT text FROM clippings').get()).toEqual({ text: highlight.text });
+  expect(f.db.prepare("SELECT kind FROM connector_queue WHERE connector_id='seekquel'").get()).toEqual({ kind: expect.stringMatching(/^highlight:/) });
+  f.db.exec('DROP TRIGGER fail_import_schedule');
+  expect(scheduleMicroblogClippings(f.db, f.id, DOC)).toBe(1);
+  f.db.close();
 });
 
 it('manually syncs only the requested book and queues the pulled position, not the old local one', async () => {

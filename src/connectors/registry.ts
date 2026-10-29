@@ -12,31 +12,37 @@ import { bookorbitConnector } from './bookorbit.js';
 import { spotifyConnector } from './spotify.js';
 import { seekquelConnector } from './seekquel.js';
 
-/** All connectors known to this build. */
-const CONNECTORS: Connector[] = [
-  kosyncConnector,
-  hardcoverConnector,
-  readwiseConnector,
-  readwiseReaderConnector,
-  bookfusionConnector,
-  audiobookshelfConnector,
-  jellyfinConnector,
-  bookorbitConnector,
-  spotifyConnector,
-  seekquelConnector,
-  microblogConnector,
-  kindleConnector,
-];
+let byId: Map<string, Connector> | undefined;
 
-const byId = new Map(CONNECTORS.map((c) => [c.id, c]));
+/** Storage and connectors can import each other; resolve exports on first use. */
+function connectorRegistry(): Map<string, Connector> {
+  if (!byId) {
+    const connectors: Connector[] = [
+      kosyncConnector,
+      hardcoverConnector,
+      readwiseConnector,
+      readwiseReaderConnector,
+      bookfusionConnector,
+      audiobookshelfConnector,
+      jellyfinConnector,
+      bookorbitConnector,
+      spotifyConnector,
+      seekquelConnector,
+      microblogConnector,
+      kindleConnector,
+    ];
+    byId = new Map(connectors.map((c) => [c.id, c]));
+  }
+  return byId;
+}
 
 /** Connectors shown in the UI/API (excludes hidden ones). */
 export function listConnectors(): Connector[] {
-  return CONNECTORS.filter((c) => !c.hidden);
+  return [...connectorRegistry().values()].filter((c) => !c.hidden);
 }
 
 export function getConnector(id: string): Connector | undefined {
-  return byId.get(id);
+  return connectorRegistry().get(id);
 }
 
 /** Default transport: the platform fetch, adapted to HttpTransport. */
@@ -44,6 +50,7 @@ export const fetchTransport: HttpTransport = async (url, init) => {
   const res = await fetch(url, init);
   return {
     status: res.status,
+    headers: res.headers,
     body: res.body,
     text: () => res.text(),
     json: () => res.json(),

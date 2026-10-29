@@ -4,6 +4,7 @@ import { nowSeconds } from '../models/sync.js';
 import { decryptSecret, encryptSecret } from '../crypto/secrets.js';
 import { getConnector } from './registry.js';
 import { SAVE_CREDENTIAL, type Connector, type Credential, type DataKind, type DocumentMeta, type Match, type SavableCredential } from './types.js';
+import { destinationForPost, selectedMicroblogDestination } from './microblog-destinations.js';
 
 export interface AccountRow {
   user_id: number;
@@ -26,7 +27,30 @@ export function upsertAccount(
   now = nowSeconds()
 ): void {
   const enc = encryptSecret(JSON.stringify(cred));
-  const previous = connectorId === 'bookorbit' ? getAccount(db, userId, connectorId) : null;
+  const previous = connectorId === 'bookorbit' || connectorId === 'microblog' ? getAccount(db, userId, connectorId) : null;
+  let changedMicroblogAccount = false;
+  let verifyMicroblogPosts = false;
+  if (connectorId === 'microblog' && previous) {
+    try {
+      const old = decryptCredential(previous);
+      if (old.token !== cred.token) {
+        // Existing installs may have published before destination discovery was
+        // added. Location URLs provide a conservative same-blog identity hint.
+        const posts = db.prepare('SELECT url,destination FROM microblog_clipping_posts WHERE user_id=?')
+          .all(userId) as { url: string | null; destination: string | null }[];
+        const origins = new Set(posts.flatMap((r) => { try { return r.url ? [new URL(r.url).origin + '/'] : []; } catch { return []; } }));
+        const oldDestination = old.microblogDestination ?? (origins.size === 1 ? [...origins][0] : null);
+        const available = Array.isArray(cred.microblogDestinations) ? cred.microblogDestinations as { uid?: string }[] : [];
+        const availableBlogs = available.flatMap((d) => typeof d?.uid === 'string'
+          ? [{ uid: d.uid, name: d.uid, isDefault: false }] : []);
+        const accessibleLegacyPost = posts.some((p) => !p.destination && p.url && destinationForPost(p.url, availableBlogs));
+        const selectedBlog = selectedMicroblogDestination(db, userId);
+        if (accessibleLegacyPost || available.some((d) => d.uid === oldDestination || d.uid === selectedBlog || posts.some((p) => p.destination === d.uid))) changedMicroblogAccount = false;
+        else if (oldDestination && cred.microblogDestination) changedMicroblogAccount = oldDestination !== cred.microblogDestination;
+        else verifyMicroblogPosts = true;
+      }
+    } catch { verifyMicroblogPosts = true; }
+  }
   let sameOrbitAccount = false;
   if (previous) {
     try {
@@ -35,6 +59,17 @@ export function upsertAccount(
     } catch { /* Reconnecting also recovers an unreadable old credential. */ }
   }
   withTransaction(db, () => {
+    if (verifyMicroblogPosts) {
+      // Retain URL/destination/history. Publication validates access to each
+      // original blog and its source URL before any further update.
+      db.prepare("DELETE FROM connector_queue WHERE user_id=? AND connector_id='microblog'").run(userId);
+    }
+    if (changedMicroblogAccount) {
+      // A new token's default blog cannot prove that older collections should
+      // be forgotten. Only explicit unlink erases their publication history.
+      for (const table of ['connector_matches', 'connector_queue']) db.prepare(`DELETE FROM ${table} WHERE user_id=? AND connector_id='microblog'`).run(userId);
+      db.prepare("UPDATE connector_accounts SET options='{}' WHERE user_id=? AND connector_id='microblog'").run(userId);
+    }
     db.prepare(
       `INSERT INTO connector_accounts
          (user_id, connector_id, cred_enc, account_label, status, enabled, created_at, updated_at)
@@ -91,6 +126,9 @@ export function decryptCredential(row: AccountRow, db?: DB): Credential {
 }
 
 export function deleteAccount(db: DB, userId: number, connectorId: string): void {
+  if (connectorId === 'microblog') {
+    for (const table of ['microblog_clipping_selections', 'microblog_clipping_posts']) db.prepare(`DELETE FROM ${table} WHERE user_id=?`).run(userId);
+  }
   db.prepare('DELETE FROM connector_accounts WHERE user_id = ? AND connector_id = ?').run(
     userId,
     connectorId

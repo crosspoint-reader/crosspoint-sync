@@ -11,6 +11,21 @@ const DOC = {
 const EV = { kind: 'progress' as const, document: 'd', percentage: 0.4, timestamp: 1 };
 
 describe('Micro.blog shelf lookup', () => {
+  it('records a server-verified default blog so rotating a token preserves publication identity', async () => {
+    const cred: Record<string, unknown> = { token: 'mb-token', microblogDestination: 'https://untrusted.example/' };
+    const fake = makeMicroblogTransport();
+    const http: HttpTransport = async (url, init) => {
+      if (url === 'https://micro.blog/micropub?q=config') return {
+        status: 200, text: async () => '', json: async () => ({ destination: [
+          { uid: 'https://other.micro.blog/', 'microblog-default': false },
+          { uid: 'https://example.micro.blog/', 'microblog-default': true },
+        ] }),
+      };
+      return fake.transport(url, init);
+    };
+    expect((await _microblog.validateCredential(cred, http)).ok).toBe(true);
+    expect(cred.microblogDestination).toBe('https://example.micro.blog/');
+  });
   it('validates an app token against the bookshelves endpoint', async () => {
     const fake = makeMicroblogTransport();
     expect(await _microblog.validateCredential(CRED, fake.transport)).toEqual({ ok: true });

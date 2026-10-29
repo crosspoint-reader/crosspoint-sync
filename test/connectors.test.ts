@@ -260,6 +260,25 @@ describe('connector management API', () => {
     expect(fake.calls).toHaveLength(0);
   });
 
+  it.each([
+    ['localhost', '172.17.0.1', true, 200],
+    ['127.0.0.1', '192.168.65.1', true, 200],
+    ['[::1]', '::ffff:172.17.0.1', true, 200],
+    ['localhost', '172.17.0.1', false, 400],
+    ['sync.example.com', '172.17.0.1', true, 400],
+  ])('links through a Docker bridge at %s with local HTTP opt-in %s', async (hostname, peer, enabled, expected) => {
+    const fake = fakeTransport();
+    fake.on('graphql', 200, { data: { me: [{ username: 'julia' }] } });
+    const { app } = makeTestApp(fromEnv({ ALLOW_HTTP_LOCALHOST: String(enabled) }), { connectorTransport: fake.transport });
+    const { headers } = await registerUser(app);
+    const res = await app.request(`http://${hostname}:8081/api/v1/connectors/hardcover`, {
+      method: 'PUT', headers,
+      body: JSON.stringify({ credential: { token: 'hc-token' } }),
+    }, { incoming: { socket: { remoteAddress: peer } } });
+    expect(res.status).toBe(expected);
+    expect(fake.calls.length > 0).toBe(expected === 200);
+  });
+
   it('fails closed when a Node request has no peer address', async () => {
     const fake = fakeTransport();
     fake.on('graphql', 200, { data: { me: [{ username: 'julia' }] } });
