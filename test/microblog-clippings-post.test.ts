@@ -385,3 +385,39 @@ it('updates the book link on the existing post after correcting a manual match',
   expect(JSON.stringify(writes[1])).toContain('https://micro.blog/books/9780143127796');
   db.close();
 });
+
+it.each(['config', 'source lookup', 'post recovery'].flatMap((stage) =>
+  ['disabled', 'book', 'edition'].map((change) => ({ stage, change }))))('stops publication when the match changes during $stage ($change)', async ({ stage, change }) => {
+  const { db, uid } = await setup();
+  if (stage === 'source lookup') db.prepare('UPDATE microblog_clipping_posts SET url=?,attempted=1').run(remoteUrl);
+  if (stage === 'post recovery') db.prepare('UPDATE microblog_clipping_posts SET attempted=1,destination=?').run('https://example.micro.blog/');
+  const before = db.prepare('SELECT * FROM microblog_clipping_posts').get();
+  let changed = false;
+  const writes: unknown[] = [];
+  const http: HttpTransport = async (url, init) => {
+    const parsed = new URL(url);
+    if (init.method === 'POST') { writes.push(JSON.parse(init.body!)); return response(201, {}, remoteUrl); }
+    const requestStage = parsed.searchParams.get('q') === 'config' ? 'config'
+      : parsed.searchParams.has('url') ? 'source lookup' : 'post recovery';
+    if (requestStage === stage && !changed) {
+      changed = true;
+      saveMatch(db, uid, 'microblog', DOC, change === 'disabled' ? null : {
+        externalId: change === 'book' ? '456' : '123', externalEdition: '9780143127796', confidence: 1,
+      }, 'manual');
+    }
+    if (requestStage === 'config') return response(200, { destination: [{ uid: 'https://example.micro.blog/' }] });
+    if (requestStage === 'post recovery') return response(200, { items: [{ properties: {
+      content: [`<!-- crosspoint-sync:${(before as any).identity} -->`], url: [remoteUrl],
+    } }] });
+    return response(200);
+  };
+  // Use the real transport directly so the discovery request can change the match.
+  await runQueue(db, http);
+  expect(changed).toBe(true);
+  expect(writes).toEqual([]);
+  expect(db.prepare('SELECT url,fingerprint,error,missing FROM microblog_clipping_posts').get()).toMatchObject({
+    url: stage === 'source lookup' ? remoteUrl : null, fingerprint: null, error: null, missing: 0,
+  });
+  expect(db.prepare('SELECT last_error FROM connector_queue').get()).toMatchObject({ last_error: expect.stringContaining('match changed') });
+  db.close();
+});

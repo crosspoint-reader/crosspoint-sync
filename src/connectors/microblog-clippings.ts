@@ -229,12 +229,21 @@ export async function publishMicroblogClippings(
   if (!locks) { locks = new Set(); publishing.set(db, locks); }
   if (locks.has(key)) return { ok: false, retryable: true, error: 'Micro.blog book publication is already in progress' };
   const account = getAccount(db, userId, 'microblog');
+  const initialMatch = getMatch(db, userId, 'microblog', document);
   let identity: string | undefined;
   const assertCurrent = () => {
     const current = getAccount(db, userId, 'microblog');
     const saved = db.prepare('SELECT identity FROM microblog_clipping_posts WHERE user_id=? AND document=?').get(userId, document) as { identity: string } | undefined;
     if (!account?.enabled || !current?.enabled || current.cred_enc !== account.cred_enc || (identity && saved?.identity !== identity)) {
       throw new ConnectorOperationError('Micro.blog account or book changed during publication', false);
+    }
+    const currentMatch = getMatch(db, userId, 'microblog', document);
+    // The ISBN may have been enriched from the shelf without changing the saved
+    // match. Compare saved editions as well as the match passed by the caller.
+    if (!initialMatch?.external_id || initialMatch.external_id !== match.externalId ||
+        (initialMatch.external_edition && initialMatch.external_edition !== match.externalEdition) ||
+        currentMatch?.external_id !== initialMatch.external_id || currentMatch?.external_edition !== initialMatch.external_edition) {
+      throw new ConnectorOperationError('Micro.blog book match changed during publication; sync again with the current match.', false);
     }
   };
   const permanent = (error: string): PushResult => {
