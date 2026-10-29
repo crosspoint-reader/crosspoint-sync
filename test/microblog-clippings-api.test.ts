@@ -132,6 +132,28 @@ it.each([
   s.db.close();
 });
 
+it.each([0.4, 0.99])('keeps a successful shelf push done when follow-up clipping scheduling fails (%s)', async (percentage) => {
+  const shelves = makeMicroblogTransport({ shelves: { 'to-read': [{
+    id: '123', title: 'Test book', author: 'Author', isbn: '9781786487849',
+  }] } });
+  const s = await setup(shelves.transport);
+  expect((await s.put('/syncs/progress', { document: DOC, device_id: 'reader', progress: '/body/p', percentage })).status).toBe(200);
+  s.db.prepare('UPDATE connector_accounts SET options=? WHERE user_id=? AND connector_id=?')
+    .run(JSON.stringify({ sync_highlights: true }), s.uid, 'microblog');
+  s.db.exec(`CREATE TEMP TRIGGER fail_post_push_schedule BEFORE INSERT ON microblog_clipping_selections
+    BEGIN SELECT RAISE(FAIL, 'simulated post-push scheduling failure'); END`);
+  await drainQueue(s.db, s.http);
+  expect(shelves.shelves.get(percentage < 0.98 ? 'reading' : 'finished')?.map((book) => book.id)).toEqual(['123']);
+  expect(s.db.prepare("SELECT status,attempts,last_error FROM connector_queue WHERE kind=?").get(percentage < 0.98 ? 'progress' : 'finished'))
+    .toEqual({ status: 'done', attempts: 0, last_error: null });
+  s.db.exec('DROP TRIGGER fail_post_push_schedule');
+  expect((await s.app.request(`/api/v1/clippings/${DOC}`, { headers: s.headers })).status).toBe(200);
+  await drainQueue(s.db, s.http);
+  expect(s.posts).toHaveLength(1);
+  expect(shelves.calls.filter((c) => c.method === 'POST' && c.url.endsWith('/assign'))).toHaveLength(1);
+  s.db.close();
+});
+
 it('enabling automatic publication backfills existing highlights and waits for matching', async () => {
   const s = await setup();
   const changed = await s.put('/api/v1/connectors/microblog/options', { sync_highlights: true });

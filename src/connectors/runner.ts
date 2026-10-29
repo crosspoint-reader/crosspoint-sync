@@ -174,7 +174,14 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
       markDone(db, row.id);
       // A progress push may have established the first match, or a clipping
       // may have arrived while publication was in flight.
-      if (row.connector_id === 'microblog') scheduleMicroblogClippings(db, row.user_id, row.document);
+      if (row.connector_id === 'microblog') {
+        try {
+          scheduleMicroblogClippings(db, row.user_id, row.document);
+        } catch (err) {
+          console.error(JSON.stringify({ msg: 'microblog schedule failed', user_id: row.user_id, document: row.document,
+            error: err instanceof Error ? err.message : String(err) }));
+        }
+      }
       return;
     }
     if (result.needsReauth) {
