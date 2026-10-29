@@ -172,8 +172,9 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
       // Persist (or clear) the per-book condition so the review UI can show it.
       setMatchNote(db, row.user_id, row.connector_id, row.document, result.note ?? null);
       markDone(db, row.id);
-      // A clipping may have arrived while the network request was in flight.
-      if (publication) scheduleMicroblogClippings(db, row.user_id, row.document);
+      // A progress push may have established the first match, or a clipping
+      // may have arrived while publication was in flight.
+      if (row.connector_id === 'microblog') scheduleMicroblogClippings(db, row.user_id, row.document);
       return;
     }
     if (result.needsReauth) {

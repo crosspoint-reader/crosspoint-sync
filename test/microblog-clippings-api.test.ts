@@ -8,15 +8,19 @@ import { deleteDocumentData } from '../src/models/document.js';
 import { deleteKosyncUserData } from '../src/routes/account.js';
 import { fanOutProgress } from '../src/connectors/fanout.js';
 import { createProgressRefresh } from '../src/connectors/refresh.js';
+import { makeMicroblogTransport } from './microblog-helpers.js';
 
 beforeEach(() => { process.env.TOKEN_ENC_KEY = 'a'.repeat(64); resetEncryptionKeyCache(); });
 afterEach(() => { delete process.env.TOKEN_ENC_KEY; resetEncryptionKeyCache(); });
-async function setup() {
+async function setup(shelfTransport?: HttpTransport) {
   const posts: unknown[] = [];
   const http: HttpTransport = async (url, init) => {
     if (new URL(url).searchParams.get('q') === 'config') return { status: 200, json: async () => ({ destination: [{ uid: 'https://example.micro.blog/' }] }), text: async () => '' };
     if (new URL(url).pathname === '/micropub' && init.method === 'POST') posts.push(JSON.parse(init.body!));
-    else if (!url.includes('/micropub?')) throw new Error(`Unexpected network request: ${url}`);
+    else if (!url.includes('/micropub?')) {
+      if (shelfTransport) return shelfTransport(url, init);
+      throw new Error(`Unexpected network request: ${url}`);
+    }
     return { status: 201, headers: { get: () => 'https://example.micro.blog/highlights.html' }, json: async () => ({}), text: async () => '' };
   };
   const { app, db } = makeTestApp({}, { connectorTransport: http });
@@ -97,6 +101,31 @@ it.each(['legacy', 'v1', 'clippings', 'sync-now'])('catches up selected clipping
   if (trigger === 'v1') await s.app.request(`/api/v1/progress/${DOC}`, { headers: s.headers });
   if (trigger === 'clippings') await s.clipping();
   if (trigger === 'sync-now') await s.app.request('/api/v1/connectors/microblog/sync', { method: 'POST', headers: s.headers });
+  await drainQueue(s.db, s.http);
+  expect(s.posts).toHaveLength(1);
+  expect(JSON.stringify(s.posts[0])).toContain('A passage');
+  s.db.close();
+});
+
+it.each([
+  ['reader progress', 0.4, false], ['reader finished', 0.99, false],
+  ['Sync now progress', 0.4, true], ['Sync now finished', 0.99, true],
+] as const)('queues saved clippings when %s first establishes the match', async (_label, percentage, syncNow) => {
+  const shelves = makeMicroblogTransport({ shelves: { 'to-read': [{
+    id: '123', title: 'Test book', author: 'Author', isbn: '9781786487849',
+  }] } });
+  const s = await setup(shelves.transport);
+  expect(await (await s.select()).json()).toMatchObject({ waiting_for_match: true });
+  const progress = await s.put('/syncs/progress', { document: DOC, device_id: 'reader', progress: '/body/p', percentage });
+  expect(progress.status).toBe(200);
+  if (syncNow) {
+    s.db.prepare('DELETE FROM connector_queue').run();
+    expect((await s.app.request('/api/v1/connectors/microblog/sync', { method: 'POST', headers: s.headers })).status).toBe(200);
+  }
+  expect(s.db.prepare("SELECT COUNT(*) n FROM connector_queue WHERE kind='microblog:clippings'").get()).toEqual({ n: 0 });
+  await drainQueue(s.db, s.http);
+  expect(s.db.prepare("SELECT external_id FROM connector_matches WHERE connector_id='microblog'").get()).toEqual({ external_id: '123' });
+  expect(s.db.prepare("SELECT status FROM connector_queue WHERE kind='microblog:clippings'").get()).toEqual({ status: 'pending' });
   await drainQueue(s.db, s.http);
   expect(s.posts).toHaveLength(1);
   expect(JSON.stringify(s.posts[0])).toContain('A passage');
