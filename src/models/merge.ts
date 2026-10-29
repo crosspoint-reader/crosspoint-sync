@@ -2,7 +2,7 @@ import { withTransaction, type DB } from '../db/db.js';
 import { nextChangeSeq } from './changes.js';
 import { md5Hex } from '../auth/password.js';
 import { autoUnpause } from './pause.js';
-import { mergeMicroblogClippings } from '../connectors/microblog-clippings.js';
+import { mergeMicroblogClippings, scheduleMicroblogClippings } from '../connectors/microblog-clippings.js';
 import { MANUAL_COLUMNS, mergeManualSql } from './manual-details.js';
 
 /**
@@ -195,6 +195,14 @@ export function mergeDocuments(
       'INSERT OR REPLACE INTO document_aliases (user_id, alias, document, created_at, merge_stats) VALUES (?, ?, ?, ?, ?)'
     ).run(userId, from, into, now, mergeStats ? 1 : 0);
   });
+  // Selections from an unmatched duplicate may now belong to a matched book.
+  // Schedule only after all clippings, matches, and aliases have been settled.
+  try {
+    scheduleMicroblogClippings(db, userId, into);
+  } catch (err) {
+    console.error(JSON.stringify({ msg: 'microblog schedule failed', user_id: userId, document: into,
+      error: err instanceof Error ? err.message : String(err) }));
+  }
 }
 
 /**

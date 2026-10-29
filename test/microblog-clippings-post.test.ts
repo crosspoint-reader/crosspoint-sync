@@ -5,6 +5,7 @@ import { upsertAccount, saveMatch } from '../src/connectors/store.js';
 import { publishMicroblogClippings, selectMicroblogClipping, scheduleMicroblogClippings } from '../src/connectors/microblog-clippings.js';
 import { drainQueue as runQueue } from '../src/connectors/runner.js';
 import type { HttpTransport } from '../src/connectors/types.js';
+import { mergeDocuments } from '../src/models/merge.js';
 
 beforeEach(() => { process.env.TOKEN_ENC_KEY = 'a'.repeat(64); resetEncryptionKeyCache(); });
 afterEach(() => { delete process.env.TOKEN_ENC_KEY; resetEncryptionKeyCache(); });
@@ -99,6 +100,39 @@ it('retains fallback positions in published snapshots and preserves reading orde
     const content = JSON.stringify(write);
     expect(content.indexOf('First passage')).toBeLessThan(content.indexOf('Second passage'));
   }
+  db.close();
+});
+
+it.each([false, true])('publishes selected clippings after merging an unmatched duplicate (scheduling failure: %s)', async (failScheduling) => {
+  const { db, uid } = await setup();
+  const writes: any[] = [];
+  const http: HttpTransport = async (_url, init) => {
+    if (init.method === 'GET') return response(200);
+    const body = JSON.parse(init.body!); writes.push(body);
+    return response(body.action ? 200 : 201, {}, remoteUrl);
+  };
+  await drainQueue(db, http);
+  const source = 'b'.repeat(32);
+  db.prepare('INSERT INTO documents(user_id,document,title,updated_at) VALUES(?,?,?,0)').run(uid, source, 'Duplicate');
+  db.prepare('INSERT INTO clippings(user_id,document,id,text,spine_index,created_at,updated_at) VALUES(?,?,?,?,1,2,2)').run(uid, source, 'merged', 'Merged passage');
+  selectMicroblogClipping(db, uid, source, 'merged');
+  expect(scheduleMicroblogClippings(db, uid, source)).toBe(0);
+  if (failScheduling) db.exec(`CREATE TEMP TRIGGER fail_merge_schedule BEFORE INSERT ON connector_queue
+    WHEN NEW.connector_id='microblog' BEGIN SELECT RAISE(FAIL, 'simulated merge scheduling failure'); END`);
+  expect(() => mergeDocuments(db, uid, source, DOC, 10)).not.toThrow();
+  expect(db.prepare('SELECT document FROM document_aliases WHERE user_id=? AND alias=?').get(uid, source)).toEqual({ document: DOC });
+  expect(db.prepare('SELECT document FROM microblog_clipping_selections WHERE user_id=? AND clipping_id=?').get(uid, 'merged')).toEqual({ document: DOC });
+  if (failScheduling) {
+    db.exec('DROP TRIGGER fail_merge_schedule');
+    expect(scheduleMicroblogClippings(db, uid, DOC)).toBe(1);
+  }
+  expect(db.prepare("SELECT status FROM connector_queue WHERE kind='microblog:clippings'").get()).toEqual({ status: 'pending' });
+  await drainQueue(db, http);
+  expect(writes).toHaveLength(2);
+  expect(writes[1]).toMatchObject({ action: 'update', url: remoteUrl });
+  expect(JSON.stringify(writes[1])).toContain('First passage');
+  expect(JSON.stringify(writes[1])).toContain('Merged passage');
+  expect(writes.filter((w) => !w.action)).toHaveLength(1);
   db.close();
 });
 
