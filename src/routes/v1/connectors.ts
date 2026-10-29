@@ -35,6 +35,9 @@ import { ConnectorOperationError, type HttpTransport } from '../../connectors/ty
 import { importBookorbitStats } from '../../connectors/bookorbit-stats.js';
 import { resolveDocument } from '../../models/merge.js';
 import { hasDocumentData } from '../../models/document.js';
+import { selectMicroblogClipping, scheduleMicroblogClippings, recreateMicroblogClippings } from '../../connectors/microblog-clippings.js';
+import { isItemId } from '../../models/sync.js';
+import { listMicroblogDestinations, selectedMicroblogDestination } from '../../connectors/microblog-destinations.js';
 
 /** Where a provider sends the browser back: one https URL for web and native (an app link there). */
 export const oauthCallbackPath = (id: string) => `/connectors/${id}/callback`;
@@ -135,12 +138,15 @@ export const CREDENTIAL_HTTPS_REQUIRED = 'Connector credentials require HTTPS to
   + 'If HTTPS ends at a reverse proxy, configure TRUST_PROXY=true on the Sync server '
   + 'and have the proxy send X-Forwarded-Proto: https. Only enable proxy trust when direct access to Sync is blocked.';
 
-export function credentialRequestIsSecure(c: Context<AppEnv>, trustProxy: boolean): boolean {
+export function credentialRequestIsSecure(c: Context<AppEnv>, trustProxy: boolean, allowHttpLocalhost = false): boolean {
   const url = new URL(c.req.url);
   if (url.protocol === 'https:') return true;
   const incoming = c.env?.incoming;
   const peerAddress = incoming?.socket?.remoteAddress;
-  if (loopbackHostname(url.hostname) && (!incoming || (peerAddress && loopbackAddress(peerAddress)))) {
+  // Docker NAT can give a host-local request a bridge peer address. Only an
+  // explicit localhost-testing opt-in bypasses the peer check; the host port
+  // must be bound to 127.0.0.1. Host alone is not trusted on ordinary installs.
+  if (loopbackHostname(url.hostname) && (!incoming || (peerAddress && (loopbackAddress(peerAddress) || allowHttpLocalhost)))) {
     return true;
   }
   return trustProxy
@@ -159,7 +165,8 @@ export function connectorRoutes(
   db: DB,
   transport: HttpTransport = fetchTransport,
   trustProxy = false,
-  basePath = ''
+  basePath = '',
+  allowHttpLocalhost = false
 ): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
@@ -225,7 +232,7 @@ export function connectorRoutes(
     if (conn.oauth) {
       return c.json({ code: 2003, message: `Update the CrossPoint Sync app to sign in with ${conn.displayName}.` }, 400);
     }
-    if (!credentialRequestIsSecure(c, trustProxy)) {
+    if (!credentialRequestIsSecure(c, trustProxy, allowHttpLocalhost)) {
       return c.json({ code: 2003, message: CREDENTIAL_HTTPS_REQUIRED }, 400);
     }
     if (!secretsEnabled()) {
@@ -269,7 +276,7 @@ export function connectorRoutes(
     const conn = getConnector(c.req.param('id'));
     if (!conn) return c.json({ code: 2003, message: 'Unknown connector' }, 404);
     if (!conn.beginLink) return c.json({ code: 2003, message: 'Connector has no device link' }, 400);
-    if (!credentialRequestIsSecure(c, trustProxy)) {
+    if (!credentialRequestIsSecure(c, trustProxy, allowHttpLocalhost)) {
       return c.json({ code: 2003, message: CREDENTIAL_HTTPS_REQUIRED }, 400);
     }
     if (!secretsEnabled()) {
@@ -295,7 +302,7 @@ export function connectorRoutes(
     const conn = getConnector(c.req.param('id'));
     if (!conn) return c.json({ code: 2003, message: 'Unknown connector' }, 404);
     if (!conn.pollLink) return c.json({ code: 2003, message: 'Connector has no device link' }, 400);
-    if (!credentialRequestIsSecure(c, trustProxy)) {
+    if (!credentialRequestIsSecure(c, trustProxy, allowHttpLocalhost)) {
       return c.json({ code: 2003, message: CREDENTIAL_HTTPS_REQUIRED }, 400);
     }
     let deviceCode: unknown;
@@ -363,7 +370,7 @@ export function connectorRoutes(
     const config = conn.oauth!();
     const clientId = getClientId(db, user.id, conn.id) ?? config.clientId;
     if (!clientId) return c.json({ code: 2003, message: `Add your ${conn.displayName} app's Client ID first.` }, 400);
-    if (!credentialRequestIsSecure(c, trustProxy)) {
+    if (!credentialRequestIsSecure(c, trustProxy, allowHttpLocalhost)) {
       return c.json({ code: 2003, message: CREDENTIAL_HTTPS_REQUIRED }, 400);
     }
     if (!secretsEnabled()) {
@@ -458,6 +465,69 @@ export function connectorRoutes(
     }
   });
 
+  app.get('/connectors/microblog/destinations', async (c) => {
+    const userId = c.get('user').id;
+    const account = getAccount(db, userId, 'microblog');
+    if (!account?.enabled) return c.json({ message: 'Micro.blog is not linked or enabled' }, 400);
+    try {
+      const items = await listMicroblogDestinations(decryptCredential(account, db), transport);
+      return c.json({ items, selected: selectedMicroblogDestination(db, userId) ?? (items.length === 1 ? items[0].uid : null) });
+    } catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Could not load blogs' }, 502); }
+  });
+
+  app.get('/connectors/microblog/clipping-posts', (c) => {
+    const userId = c.get('user').id;
+    if (!getAccount(db, userId, 'microblog')?.enabled) return c.json({ items: [] });
+    const rows = db.prepare('SELECT document,url,destination,missing,error FROM microblog_clipping_posts WHERE user_id=?').all(userId);
+    return c.json({ items: rows.map((row) => ({ ...row, missing: !!row.missing })) });
+  });
+
+  app.post('/connectors/microblog/clipping-posts/:document/recreate', async (c) => {
+    if (!credentialRequestIsSecure(c, trustProxy, allowHttpLocalhost)) return c.json({ message: CREDENTIAL_HTTPS_REQUIRED }, 400);
+    const document = c.req.param('document');
+    if (!isValidDocument(document)) return c.json({ message: 'Invalid book' }, 400);
+    const body = await c.req.json().catch(() => null) as { target?: unknown } | null;
+    const target = body?.target ?? 'original';
+    if (target !== 'original' && target !== 'current') return c.json({ message: 'Choose the previous or current clippings blog' }, 400);
+    try { return c.json(await recreateMicroblogClippings(db, c.get('user').id, document, transport, target)); }
+    catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Could not recreate post' }, error instanceof ConnectorOperationError && !error.retryable ? 409 : 502); }
+  });
+
+  app.put('/connectors/microblog/destination', async (c) => {
+    if (!credentialRequestIsSecure(c, trustProxy, allowHttpLocalhost)) return c.json({ message: CREDENTIAL_HTTPS_REQUIRED }, 400);
+    const userId = c.get('user').id;
+    const account = getAccount(db, userId, 'microblog');
+    if (!account?.enabled) return c.json({ message: 'Micro.blog is not linked or enabled' }, 400);
+    const body = await c.req.json().catch(() => null) as { destination?: unknown } | null;
+    try {
+      const items = await listMicroblogDestinations(decryptCredential(account, db), transport);
+      if (!items.some((d) => d.uid === body?.destination)) return c.json({ message: 'Choose an available Micro.blog blog' }, 400);
+      if (getAccount(db, userId, 'microblog')?.cred_enc !== account.cred_enc) return c.json({ message: 'Micro.blog account changed; reload its blogs' }, 409);
+      const row = db.prepare("SELECT options FROM connector_accounts WHERE user_id=? AND connector_id='microblog'").get(userId) as { options: string | null };
+      let values: OptionValues = {};
+      try { values = JSON.parse(row.options || '{}'); } catch { /* Recover malformed settings. */ }
+      setConnectorOptions(db, userId, 'microblog', { ...values, highlight_blog: body!.destination as string });
+      scheduleMicroblogClippings(db, userId);
+      return c.json({ destination: body!.destination });
+    } catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Could not select blog' }, 502); }
+  });
+
+  app.post('/connectors/microblog/clippings/:document/:clippingId', (c) => {
+    const user = c.get('user');
+    const account = getAccount(db, user.id, 'microblog');
+    if (!account?.enabled) return c.json({ message: 'Micro.blog is not linked or enabled' }, 400);
+    const document = c.req.param('document');
+    const clippingId = c.req.param('clippingId');
+    if (!isValidDocument(document) || !isItemId(clippingId)) return c.json({ message: 'Invalid clipping' }, 400);
+    const canonical = resolveDocument(db, user.id, document);
+    try { selectMicroblogClipping(db, user.id, canonical, clippingId); }
+    catch { return c.json({ message: 'Clipping not found' }, 404); }
+    const state = db.prepare('SELECT error FROM microblog_clipping_posts WHERE user_id=? AND document=?').get(user.id, canonical) as { error: string | null } | undefined;
+    if (state?.error) return c.json({ message: state.error }, 409);
+    const queued = scheduleMicroblogClippings(db, user.id, canonical) > 0;
+    return c.json({ queued, waiting_for_match: !getMatch(db, user.id, 'microblog', canonical)?.external_id });
+  });
+
   // Change a linked connector's options. Unknown keys and bad values are ignored.
   app.put('/connectors/:id/options', async (c) => {
     const conn = getConnector(c.req.param('id'));
@@ -468,6 +538,10 @@ export function connectorRoutes(
     }
     const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
     const next: OptionValues = connectorOptions(db, user.id, conn);
+    if (conn.id === 'microblog') {
+      const destination = selectedMicroblogDestination(db, user.id);
+      if (destination) next.highlight_blog = destination;
+    }
     for (const o of conn.options) {
       const v = body?.[o.key];
       if (o.choices ? o.choices.some((ch) => ch.value === v) : typeof v === 'boolean') next[o.key] = v as boolean | string;
@@ -483,6 +557,7 @@ export function connectorRoutes(
         }
       }
     });
+    if (conn.id === 'microblog') scheduleMicroblogClippings(db, user.id);
     return c.json({ id: conn.id, option_values: next });
   });
 

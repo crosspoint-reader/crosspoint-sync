@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
+import MicroblogPosting from './MicroblogPosting.jsx'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { onOpenUrl } from '@tauri-apps/plugin-deep-link'
 import { ArrowLeft, ChevronRight, Copy, KeyRound, ListChecks, Loader2, LogOut, Monitor, Moon, RefreshCw, Search, Server, Sun, Trash2, UserX } from 'lucide-react'
 import SparkMD5 from 'spark-md5'
 import { api, isApp } from './api.js'
 import { ActionSheet, Bone, Card, EmptyState, notify, Toggle, useLoad } from './ui.jsx'
+import { saveFile } from './shareCard.js'
 import { useNativeBack } from './tabbar.js'
 
 // Appearance: follow the system, or force light or dark.
@@ -38,7 +40,7 @@ function Appearance({ theme: [pref, setPref] }) {
 // What each service does, as on the web dashboard.
 const HINTS = {
   hardcover: 'Syncs your reading progress and shelf status to Hardcover, and your highlights if you turn them on.',
-  microblog: 'Keeps your Currently reading and Finished reading bookshelves in sync.',
+  microblog: 'Keeps your Currently reading and Finished reading bookshelves in sync. Optional clipping sync publishes one post per book and updates its generated content on later syncs, replacing edits made on Micro.blog.',
   readwise: 'Syncs your highlights to Readwise.',
   'readwise-reader': 'Archives books in Reader when you finish them, and brings your Reader progress back.',
   kosync: 'Mirrors your reading progress to another KOReader-compatible (KOSync) server. For Calibre-Web, use your library URL ending in /kosync.',
@@ -46,7 +48,7 @@ const HINTS = {
   audiobookshelf: 'Keeps your place between the ebook and the audiobook. Create an API key in Audiobookshelf under Settings, Users, API Keys.',
   jellyfin: 'Syncs reading progress with your Jellyfin book library (Jellyfin 12.0 or newer). Sign in with your Jellyfin username and password.',
   bookorbit: 'Syncs progress both ways, adds clippings as highlights, and exchanges reading sessions for matched books. Imports BookOrbit history and exports sessions recorded by newer CrossInk firmware. Includes other BookOrbit reader history alongside your device stats. Repeated sessions are counted once.',
-  seekquel: 'Logs your reading in your Seekquel library: where you are in each book, the books you finish, and your highlights. You approve the request in the Seekquel app.',
+  seekquel: 'Logs your reading in your Seekquel library: where you are in each book, the books you finish, and your highlights. If you read further in Seekquel, that place comes back to your reader. You approve the request in the Seekquel app.',
   spotify: 'Moves your progress forward when you listen ahead in the Spotify audiobook, and resumes it there. Audiobooks are in the US, UK, Canada, Ireland, Australia and New Zealand.',
   kindle: 'Linking needs the CrossPoint Kindle Link browser extension.',
 }
@@ -578,6 +580,7 @@ function Service({ session, conn, onChange }) {
       {conn.linked && !needsRelink && conn.options && (
         <Options conn={conn} save={(v) => act('options', () => api.setConnectorOptions(session, conn.id, v))} />
       )}
+      {conn.id === 'microblog' && conn.linked && !needsRelink && <MicroblogPosting session={session} onChange={onChange} />}
       {openForm && (!conn.linked || needsRelink) && (
         <LinkForm
           session={session}
@@ -757,6 +760,75 @@ function Profile({ session }) {
   )
 }
 
+export function AccountTransfer({ session }) {
+  const [busy, setBusy] = useState(false)
+  const [archive, setArchive] = useState(null)
+  const [replace, setReplace] = useState(false)
+  const [error, setError] = useState(null)
+  const [saved, setSaved] = useState(null)
+  const input = useRef(null)
+  const button = 'min-h-11 rounded-xl bg-stone-100 px-4 text-sm font-semibold text-stone-800 disabled:opacity-50'
+  async function download() {
+    setBusy(true)
+    setError(null)
+    setSaved(null)
+    try {
+      const data = await api.exportAccount(session)
+      const result = await saveFile(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), 'crosspoint-sync-account.json')
+      const filename = result.where.split('/').pop()
+      const ios = isApp && (/iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
+      setSaved(ios
+        ? `Saved ${filename} in the Files app: Browse → On My iPhone/iPad → CrossPoint Sync.`
+        : isApp ? `Saved ${filename} to ${result.where.startsWith('Download/CrossPoint Sync/') ? 'Downloads → CrossPoint Sync' : 'your Downloads folder'}.` : `Downloaded ${filename}. Check your browser’s downloads.`)
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+  async function select(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setError(null)
+    setReplace(false)
+    setBusy(true)
+    try {
+      if (file.size > 50 * 1024 * 1024) throw new Error('Choose an archive smaller than 50 MB.')
+      const data = JSON.parse(await file.text())
+      if (data?.format !== 'crosspoint-sync-account' || data.version !== 1 || !data.data) throw new Error('Choose a CrossPoint Sync account export (version 1).')
+      setArchive(data)
+    } catch (e) { setError(e.message) }
+    finally { setBusy(false) }
+  }
+  return (
+    <Card className="mt-3 space-y-3 p-4">
+      <p className="text-sm text-stone-500">Move your library, progress, bookmarks, clippings, device reading history and account preferences between servers. Sign in to the destination account before importing.</p>
+      <p className="text-sm text-stone-500">Passwords, linked services and their imported history, and device-only settings are excluded. Keep the export private: it contains your reading data.</p>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={button} disabled={busy || !!archive} onClick={download}>{busy ? 'Working…' : 'Export account data'}</button>
+        <button type="button" className={button} disabled={busy || !!archive} onClick={() => input.current.click()}>Import data</button>
+        <input ref={input} type="file" accept=".json,application/json" aria-label="Account archive" className="hidden" onChange={select} />
+      </div>
+      {saved && <p role="status" className="text-sm text-stone-600">{saved}</p>}
+      {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+      {archive && (
+        <ActionSheet title="Import account data?" actionLabel="Import data" pendingLabel="Importing…" danger={replace}
+          onClose={() => setArchive(null)}
+          onConfirm={async () => {
+            await api.importAccount(session, archive, replace ? 'replace' : 'empty')
+            notify({ title: 'Account data imported' })
+            location.hash = '#/'
+            location.reload()
+          }}>
+          <span>Import into {session.username} on {session.server}. Your destination login and connected service credentials stay the same. Public profiles get a link on this server.</span>
+          <label className="mt-3 flex items-start gap-2">
+            <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} />
+            <span>Replace existing reading data and book matches. Export a backup first. Without this, importing requires an empty library.</span>
+          </label>
+        </ActionSheet>
+      )}
+    </Card>
+  )
+}
+
 // Password, clear data, delete: what the website's account page did.
 function Account({ session, onSession, onLogout }) {
   const [action, setAction] = useState(null)
@@ -916,6 +988,9 @@ export default function Settings({ session, theme, onSession, onLogout }) {
       <h2 className={section}>Connected services</h2>
       <p className="mt-1 text-sm text-stone-500">Your reading syncs out to these as you go.</p>
       <Services session={session} />
+
+      <h2 className={section}>Account migration</h2>
+      <AccountTransfer session={session} />
 
       <h2 className={section}>Public profile</h2>
       <p className="mt-1 text-sm text-stone-500">A page with your reading stats and shelves to link to or embed on a website. Turning it off and on makes a new link.</p>

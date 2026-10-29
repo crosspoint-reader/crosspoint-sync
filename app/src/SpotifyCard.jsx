@@ -80,10 +80,10 @@ function Calibrate({ session, book, data, onDone }) {
 
 // The audiobook's place on Spotify next to the reader's. Shown only when Spotify
 // is linked and has this book; playback starts only from the button.
-export default function SpotifyCard({ session, book, onChange }) {
-  const [services] = useLoad(() => api.bookMatches(session, book.document), [book.document], `matches ${book.document}`)
+export default function SpotifyCard({ session, book, onChange, revision = 0 }) {
+  const [services] = useLoad(() => api.bookMatches(session, book.document), [book.document, revision], `matches ${book.document}`)
   const linked = !!services?.some((s) => s.id === 'spotify')
-  const [data, , reload] = useLoad(() => (linked ? api.spotifyPosition(session, book.document) : Promise.resolve(null)), [book.document, linked])
+  const [data, , reload] = useLoad(() => (linked ? api.spotifyPosition(session, book.document) : Promise.resolve(null)), [book.document, linked, revision])
   const [busy, setBusy] = useState(false)
   const [calibrating, setCalibrating] = useState(false)
   const [syncing, setSyncing] = useState(false)

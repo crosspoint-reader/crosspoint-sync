@@ -11,6 +11,9 @@ services:
       REGISTRATION_DISABLED: "false"
       # Set Listen Address so the service is accessible from outside the container
       LISTEN_ADDRESS: "::"
+      # Enables linking services (Hardcover, Micro.blog, etc.). Generate once with
+      # `openssl rand -hex 32` and never change it, or saved logins become unreadable.
+      # TOKEN_ENC_KEY: ""
       # Behind an HTTPS reverse proxy: block direct access to port 8080,
       # then uncomment this. See README.md for Caddy setup.
       # TRUST_PROXY: "true"

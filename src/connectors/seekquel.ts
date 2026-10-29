@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
-import { documentMeta, getMatchSnapshot, setMatchSnapshot } from './store.js';
+import { documentMeta, getMatchSnapshot, hasPathOnlyReader, setMatchSnapshot } from './store.js';
+import { ConnectorOperationError } from './types.js';
 import type {
   Connector,
   ConnectorContext,
@@ -8,6 +9,7 @@ import type {
   DeviceLinkStart,
   DocumentMeta,
   HttpTransport,
+  InboundChange,
   Match,
   OutboundEvent,
   PushResult,
@@ -34,6 +36,15 @@ import type {
  * queue's backoff; a file nobody links dead-letters with a message saying so,
  * and "Sync now" sends it again once the reader picks the book in Seekquel.
  *
+ * The reader's place comes back too, but only when Seekquel says it is ahead of
+ * what the device last sent (reading on in the app, in Readest, on another
+ * device), and never for a book a stock KOReader has synced: it can only open a
+ * path into the file, and would be sent to the first page by a bare percentage.
+ * Seekquel answers that as a bare percentage under a fixed progress marker and
+ * its own device id; anything else it returns is our own push read back, and is
+ * ignored. The framework applies it forward-only, so a stale answer can never
+ * pull a device back.
+ *
  * A finished book is marked Read once, then not again until the device has gone
  * back below the end. Every sync of a book at 100% fans out as 'finished', and
  * re-sending Read each time would undo a re-read the reader started in Seekquel
@@ -47,6 +58,8 @@ const ACCEPT = 'application/vnd.koreader.v1+json';
 const MAX_TEXT = 500;
 const MAX_XPATH = 120;
 const NOT_LINKED = 409;
+const BOOK_PLACE_PROGRESS = 'seekquel-linked-copy';
+const MS_PER_SECOND = 1000;
 const CONNECTOR_ID = 'seekquel';
 const NOT_LINKED_ERROR = 'not linked to a book in Seekquel yet; choose the book in Seekquel, then Sync now';
 
@@ -253,6 +266,28 @@ async function push(
   }
 }
 
+async function pullProgress(
+  cred: Credential, m: Match, http: HttpTransport, _sinceMs: number, ctx?: ConnectorContext
+): Promise<InboundChange | null> {
+  const c = parseCred(cred);
+  if (!c) return null;
+  const stockReaderSynced = () => ctx !== undefined && hasPathOnlyReader(ctx.db, ctx.userId, ctx.document ?? m.externalId);
+  if (stockReaderSynced()) return null;
+  const res = await http(`${c.server}/syncs/progress/${encodeURIComponent(m.externalId)}`, {
+    method: 'GET',
+    headers: headers(c),
+  });
+  if (res.status === 401) throw new ConnectorOperationError('unauthorized', false, true);
+  if (res.status >= 500 || res.status === 429) throw new ConnectorOperationError(`server ${res.status}`, true);
+  if (res.status < 200 || res.status >= 300) return null;
+  const body = await readJson(res);
+  if (body.progress !== BOOK_PLACE_PROGRESS || typeof body.percentage !== 'number') return null;
+  if (stockReaderSynced()) return null;
+  const percentage = Math.max(0, Math.min(1, body.percentage));
+  const stamp = typeof body.timestamp === 'number' ? body.timestamp * MS_PER_SECOND : Date.now();
+  return { externalId: m.externalId, percentage, finished: false, updatedAtMs: stamp, furthestReadOnly: true };
+}
+
 // --- Device-code linking flow -------------------------------------------------
 
 async function beginLink(http: HttpTransport): Promise<DeviceLinkStart> {
@@ -308,7 +343,7 @@ export const seekquelConnector: Connector = {
   id: CONNECTOR_ID,
   displayName: 'Seekquel',
   tier: 1,
-  capabilities: { read: false, write: true },
+  capabilities: { read: true, write: true },
   carries: ['progress', 'finished', 'highlight'],
   credentialKind: 'device_code',
   beta: true,
@@ -317,6 +352,7 @@ export const seekquelConnector: Connector = {
   validate,
   match,
   push,
+  pullProgress,
   beginLink,
   pollLink,
 };

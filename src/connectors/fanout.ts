@@ -6,6 +6,7 @@ import { activeConnectorIds, carriesFor, documentMeta, getMatch } from './store.
 import { extractTitleAuthor } from './matching.js';
 import { nowSeconds } from '../models/sync.js';
 import type { Connector, OutboundEvent } from './types.js';
+import { scheduleMicroblogClippings } from './microblog-clippings.js';
 
 /**
  * Whether it's worth attempting a document on this connector. Metadata-matched
@@ -40,6 +41,7 @@ function fanOut(
   if (!secretsEnabled()) return;
   try {
     for (const connectorId of activeConnectorIds(db, userId)) {
+      if (connectorId === 'microblog' && ev.kind === 'highlight') continue;
       if (connectorId === exceptConnectorId) continue; // loop suppression: don't echo to the source
       const conn = getConnector(connectorId);
       if (!conn || !conn.capabilities.write || !carriesFor(db, userId, conn, ev.kind)) continue;
@@ -63,6 +65,12 @@ export function fanOutProgress(
   positionJson?: string | null,
   exceptConnectorId?: string
 ): void {
+  try {
+    scheduleMicroblogClippings(db, userId, document);
+  } catch (err) {
+    console.error(JSON.stringify({ msg: 'microblog schedule failed', user_id: userId, document,
+      error: err instanceof Error ? err.message : String(err) }));
+  }
   const finished = percentage >= 0.98;
   let position: Record<string, unknown> | null = null;
   if (positionJson) {
@@ -191,7 +199,8 @@ export function backfillConnector(db: DB, userId: number, connectorId: string, d
     }
   }
 
-  if (carriesFor(db, userId, conn, 'highlight')) {
+  if (connectorId === 'microblog') queued += scheduleMicroblogClippings(db, userId, document);
+  if (connectorId !== 'microblog' && carriesFor(db, userId, conn, 'highlight')) {
     const rows = db
       .prepare(
         `SELECT c.id, c.document, c.text, c.note, c.created_at, c.spine_index, c.start_offset, c.end_offset,

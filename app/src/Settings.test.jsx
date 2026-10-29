@@ -5,15 +5,16 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 const env = vi.hoisted(() => ({ isApp: false }))
 vi.mock('./api.js', () => ({
   get isApp() { return env.isApp },
-  api: { oauthBegin: vi.fn(), oauthComplete: vi.fn(), connectors: vi.fn(), linkConnector: vi.fn(), setClientId: vi.fn(), removeClientId: vi.fn(), syncConnector: vi.fn(), unlinkConnector: vi.fn(), clearData: vi.fn(), deleteAccount: vi.fn(), autoPause: vi.fn(), setAutoPause: vi.fn() },
+  api: { exportAccount: vi.fn(), importAccount: vi.fn(), oauthBegin: vi.fn(), oauthComplete: vi.fn(), connectors: vi.fn(), linkConnector: vi.fn(), setClientId: vi.fn(), removeClientId: vi.fn(), syncConnector: vi.fn(), unlinkConnector: vi.fn(), clearData: vi.fn(), deleteAccount: vi.fn(), autoPause: vi.fn(), setAutoPause: vi.fn() },
 }))
+vi.mock('./shareCard.js', () => ({ saveFile: vi.fn() }))
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }))
 let deliver = null
 vi.mock('@tauri-apps/plugin-deep-link', () => ({ onOpenUrl: vi.fn(async (fn) => { deliver = fn; return () => (deliver = null) }) }))
 
 const { api } = await import('./api.js')
 const { openUrl } = await import('@tauri-apps/plugin-opener')
-const { default: Settings, LinkForm } = await import('./Settings.jsx')
+const { default: Settings, LinkForm, AccountTransfer } = await import('./Settings.jsx')
 vi.mock('./tabbar.js', async (orig) => ({ ...(await orig()), useNativeBack: vi.fn() }))
 const { useNativeBack } = await import('./tabbar.js')
 vi.mock('./ui.jsx', async (orig) => ({ ...(await orig()), notify: vi.fn() }))
@@ -353,5 +354,74 @@ describe('auto-pause setting', () => {
     api.autoPause.mockResolvedValue({ days: 3 })
     fireEvent.click(await screen.findByRole('switch', { name: 'Auto-pause idle books' }))
     await waitFor(() => expect(api.setAutoPause).toHaveBeenLastCalledWith(expect.anything(), 0))
+  })
+})
+
+
+describe('account migration controls', () => {
+  const archive = { format: 'crosspoint-sync-account', version: 1, data: { documents: [] } }
+  const reader = { ...session, username: 'reader' }
+  async function choose() {
+    const input = screen.getByLabelText('Account archive')
+    fireEvent.change(input, { target: { files: [{ size: 100, text: async () => JSON.stringify(archive) }] } })
+    return screen.findByRole('dialog')
+  }
+  it('exports using the shared native/browser file saver', async () => {
+    const { saveFile } = await import('./shareCard.js')
+    api.exportAccount.mockResolvedValue(archive)
+    saveFile.mockResolvedValue({ where: 'crosspoint-sync-account.json', photos: false })
+    render(<AccountTransfer session={reader} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Export account data' }))
+    await waitFor(() => expect(saveFile).toHaveBeenCalledWith(expect.any(Blob), 'crosspoint-sync-account.json'))
+    expect(api.exportAccount).toHaveBeenCalledWith(reader)
+    expect((await screen.findByRole('status')).textContent).toContain('Downloaded crosspoint-sync-account.json')
+  })
+  it.each(['iPhone', 'iPad'])('shows the Files location and actual filename on %s', async (device) => {
+    env.isApp = true
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(device)
+    const { saveFile } = await import('./shareCard.js')
+    api.exportAccount.mockResolvedValue(archive)
+    saveFile.mockResolvedValue({ where: '/var/mobile/Containers/Data/Application/app/Documents/crosspoint-sync-account (1).json', photos: false })
+    render(<AccountTransfer session={reader} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Export account data' }))
+    expect((await screen.findByRole('status')).textContent).toBe('Saved crosspoint-sync-account (1).json in the Files app: Browse → On My iPhone/iPad → CrossPoint Sync.')
+    expect(screen.getByRole('button', { name: 'Export account data' }).disabled).toBe(false)
+    saveFile.mockRejectedValueOnce('No space left on device')
+    fireEvent.click(screen.getByRole('button', { name: 'Export account data' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('No space left on device')
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Export account data' }).disabled).toBe(false)
+  })
+  it('shows the Android export folder', async () => {
+    env.isApp = true
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Android')
+    const { saveFile } = await import('./shareCard.js')
+    api.exportAccount.mockResolvedValue(archive)
+    saveFile.mockResolvedValue({ where: 'Download/CrossPoint Sync/crosspoint-sync-account.json', photos: false })
+    render(<AccountTransfer session={reader} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Export account data' }))
+    expect((await screen.findByRole('status')).textContent).toBe('Saved crosspoint-sync-account.json to Downloads → CrossPoint Sync.')
+  })
+  it('requires confirmation, preserves the conflict error and supports explicit replacement', async () => {
+    const reload = vi.fn()
+    vi.stubGlobal('location', { hash: '#/settings', reload })
+    api.importAccount.mockReset().mockRejectedValueOnce(new Error('This account already has reading data.')).mockResolvedValue({ imported: 1 })
+    render(<AccountTransfer session={reader} />)
+    const dialog = await choose()
+    expect(api.importAccount).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Import data' }))
+    expect(await within(dialog).findByRole('alert')).toBeTruthy()
+    expect(api.importAccount).toHaveBeenLastCalledWith(reader, archive, 'empty')
+    expect(reload).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('checkbox'))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Import data' }))
+    await waitFor(() => expect(reload).toHaveBeenCalledOnce())
+    expect(api.importAccount).toHaveBeenLastCalledWith(reader, archive, 'replace')
+  })
+  it('cancels without sending an import request', async () => {
+    render(<AccountTransfer session={reader} />)
+    const dialog = await choose()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    expect(api.importAccount).not.toHaveBeenCalled()
   })
 })

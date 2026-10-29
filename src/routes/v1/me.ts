@@ -1,4 +1,6 @@
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
+import { AccountImportError, exportAccountData, importAccountData } from '../../models/account-data.js';
 import type { DB } from '../../db/db.js';
 import { invalidateAuthCache, type AppEnv } from '../../auth/middleware.js';
 import { hashKey } from '../../auth/password.js';
@@ -12,6 +14,27 @@ import { autoPauseDays, setAutoPauseDays } from '../../models/pause.js';
  */
 export function meRoutes(db: DB): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
+
+  app.get('/account/export', (c) => {
+    c.header('Cache-Control', 'no-store');
+    c.header('Content-Disposition', 'attachment; filename="crosspoint-sync-account.json"');
+    return c.json(exportAccountData(db, c.get('user').id));
+  });
+
+  app.post('/account/import', bodyLimit({ maxSize: 50 * 1024 * 1024 }), async (c) => {
+    let body;
+    try { body = await c.req.json(); }
+    catch { return c.json({ message: 'Invalid JSON archive.' }, 400); }
+    if (!body || typeof body !== 'object' || !['empty', 'replace'].includes(body.mode)) {
+      return c.json({ message: 'Choose import mode: empty or replace.' }, 400);
+    }
+    try {
+      return c.json(importAccountData(db, c.get('user').id, body.archive, body.mode === 'replace'));
+    } catch (error) {
+      if (error instanceof AccountImportError) return c.json({ message: error.message }, error.status);
+      throw error;
+    }
+  });
 
   // New password, as the reader would send it: MD5 of the plain password.
   app.post('/account/password', async (c) => {

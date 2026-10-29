@@ -24,6 +24,7 @@
 		ACF9F68415059FC751B85E40 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 72ED45BA68D8C2F5A99C542D /* Assets.xcassets */; };
 		C5448F553016109426054C67 /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = D14F66F0D47B664F9709AE4F /* libapp.a */; };
 		CEA14FCBC23E088D806332E2 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BEF7345547BE54CBD0CAA946 /* UIKit.framework */; };
+		D56C36B404A08FF3DD12A020 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = E4672BC0025EFAC99DE67520 /* AppIcon.icon */; };
 		E5C50AE36BA05B191B1F4EB0 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7CC754790240CD99815BE1B6 /* Security.framework */; };
 		E952F1320553223057A59239 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FE54F751F09F6D338C764211 /* WidgetKit.framework */; };
 		F507E6B34A0632CF9017FFF2 /* CrossPointWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = BB2A4F2B0B619285749721A7 /* CrossPointWidget.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -87,6 +88,7 @@
 		D14F66F0D47B664F9709AE4F /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		DB9EA204EB38B3A7B57FFDE6 /* books.rs */ = {isa = PBXFileReference; path = books.rs; sourceTree = "<group>"; };
 		DEB175945B16E108EDD85D78 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
+		E4672BC0025EFAC99DE67520 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		EE38B36BD152DF32937EF8A3 /* crosspoint-sync-app_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "crosspoint-sync-app_iOS.entitlements"; sourceTree = "<group>"; };
 		EFAC7081BE0965C9641C74F2 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
 		F77ADE8FD7A24CA12EFD9819 /* parse_v2.rs */ = {isa = PBXFileReference; path = parse_v2.rs; sourceTree = "<group>"; };
@@ -226,6 +228,7 @@
 		C6909A934DEDCD389C924B62 = {
 			isa = PBXGroup;
 			children = (
+				E4672BC0025EFAC99DE67520 /* AppIcon.icon */,
 				EFAC7081BE0965C9641C74F2 /* assets */,
 				72ED45BA68D8C2F5A99C542D /* Assets.xcassets */,
 				FEFB9FFA8A213DFAD642AEFC /* LaunchScreen.storyboard */,
@@ -248,14 +251,14 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		"TEMP_52A0CCBE-B6E2-4445-91D4-CA569B8AB604" /* arm64 */ = {
+		"TEMP_2222BFBE-41E3-4373-A496-C47BE6161615" /* arm64 */ = {
 			isa = PBXGroup;
 			children = (
 			);
 			path = arm64;
 			sourceTree = "<group>";
 		};
-		"TEMP_D8C77744-9B88-4A54-885A-3E0C23CDE7C7" /* x86_64 */ = {
+		"TEMP_BF418384-1464-4A0A-BAF2-93ED4D8CCC41" /* x86_64 */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -345,6 +348,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D56C36B404A08FF3DD12A020 /* AppIcon.icon in Resources */,
 				ACF9F68415059FC751B85E40 /* Assets.xcassets in Resources */,
 				184305EE28170BE91A0DA0D7 /* LaunchScreen.storyboard in Resources */,
 				F5379C59BD1403E2BDA6098F /* assets in Resources */,

@@ -154,7 +154,7 @@ struct CoverView: View {
   let image: UIImage?
   var body: some View {
     if let image {
-      Image(uiImage: image).resizable().aspectRatio(2 / 3, contentMode: .fill)
+      Image(uiImage: image).resizable().fullColorInTint().aspectRatio(2 / 3, contentMode: .fill)
         .frame(width: 56, height: 84).clipShape(RoundedRectangle(cornerRadius: 6))
         .shadow(color: .black.opacity(0.15), radius: 3, y: 2)
     }
@@ -206,6 +206,17 @@ struct ReadingWidgetView: View {
       }
     }
     .widgetBackground(paper)
+  }
+}
+
+extension Image {
+  // Clear/tinted home screens otherwise flatten the cover into a white silhouette.
+  @ViewBuilder func fullColorInTint() -> some View {
+    if #available(iOSApplicationExtension 18.0, *) {
+      widgetAccentedRenderingMode(.fullColor)
+    } else {
+      self
+    }
   }
 }
 

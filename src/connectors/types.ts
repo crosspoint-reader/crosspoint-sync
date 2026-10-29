@@ -8,7 +8,12 @@ import type { DB } from '../db/db.js';
 export type Capability = { read: boolean; write: boolean };
 
 /** Per-user storage a connector may use for derived book data (e.g. EPUB position maps). */
-export interface ConnectorContext { db: DB; userId: number; }
+export interface ConnectorContext {
+  db: DB;
+  userId: number;
+  /** Our own id for the book being pulled; a provider's id can differ after a merge or a manual match. */
+  document?: string;
+}
 
 /** What data types a connector carries (progress/shelves vs highlights). */
 export type DataKind = 'progress' | 'finished' | 'highlight';

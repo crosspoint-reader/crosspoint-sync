@@ -2,11 +2,14 @@ services:
   crosspoint-sync:
     build: .
     ports:
-      - "8080:8080"
+      - "${HOST_BIND:-0.0.0.0}:${HOST_PORT:-8080}:8080"
     volumes:
       - crosspoint-data:/data
     environment:
       BASE_PATH: "${BASE_PATH:-}"
+      TOKEN_ENC_KEY: "${TOKEN_ENC_KEY:-}"
+      # Local Docker testing only; set HOST_BIND=127.0.0.1 alongside this.
+      ALLOW_HTTP_LOCALHOST: "${ALLOW_HTTP_LOCALHOST:-false}"
       # Set to "true" on private instances once your accounts exist.
       REGISTRATION_DISABLED: "false"
       # Set Listen Address so the service is accessible from outside the container

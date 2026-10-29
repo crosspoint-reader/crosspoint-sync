@@ -851,6 +851,7 @@ function Services({ session, book, onSync }) {
                   onDone={() => {
                     setPicking(null)
                     reload()
+                    onSync() // the Spotify card follows a changed match
                   }}
                 />
               )}
@@ -975,11 +976,11 @@ export default function Book({ session, book, books, activity, back = { href: '#
             </div>
           </div>
           <About session={session} book={book} revision={revision} />
-          {/* Cards flow two-up; spacing moves to the bottom so a column break can't eat a top margin. */}
-          <div className="md:mt-4 md:columns-2 md:gap-4 md:[&>*]:mt-0 md:[&>*]:mb-4 [&>*]:break-inside-avoid">
+          {/* Cards two-up in a grid, so the rest reflow when one (Spotify) drops out. */}
+          <div className="md:mt-4 md:grid md:grid-cols-2 md:items-start md:gap-4 md:[&>*]:mt-0">
             <Details book={book} />
             {!wide && <Stats session={session} doc={book.document} aliases={book.aliases} activity={activity} revision={revision} />}
-            <SpotifyCard session={session} book={book} onChange={onChange} />
+            <SpotifyCard session={session} book={book} onChange={onChange} revision={revision} />
             <Services key={book.document} session={session} book={book} onSync={synced} />
           </div>
         </div>

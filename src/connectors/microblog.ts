@@ -1,4 +1,6 @@
 import { decideMatch, type Candidate } from './matching.js';
+import { publishMicroblogClippings } from './microblog-clippings.js';
+import { listMicroblogDestinations } from './microblog-destinations.js';
 import {
   ConnectorOperationError,
   type Credential,
@@ -198,6 +200,16 @@ async function loadInventory(cred: Credential, http: HttpTransport): Promise<She
 async function validateCredential(cred: Credential, http: HttpTransport): Promise<ValidateResult> {
   try {
     await loadShelves(cred, http);
+    // Never trust a destination supplied alongside a pasted token. Shelf-only
+    // accounts still link when Micropub configuration is unavailable.
+    delete cred.microblogDestination;
+    delete cred.microblogDestinations;
+    try {
+      const destinations = await listMicroblogDestinations(cred, http);
+      cred.microblogDestinations = destinations;
+      const chosen = destinations.find((d) => d.isDefault) ?? (destinations.length === 1 ? destinations[0] : null);
+      if (chosen) cred.microblogDestination = chosen.uid;
+    } catch { /* Older servers/tokens can continue syncing bookshelves. */ }
     return { ok: true };
   } catch (error) {
     if (error instanceof ConnectorOperationError && error.needsReauth) {
@@ -361,6 +373,7 @@ async function reconcileBook(
 }
 
 function shouldPush(ev: OutboundEvent, canonicalPercentage?: number | null): boolean {
+  if (ev.kind === 'highlight') return true;
   if (ev.kind === 'progress' && (ev.percentage ?? 0) <= 0) return false;
   if (canonicalPercentage == null) return true;
   if (canonicalPercentage <= 0) return false;
@@ -373,7 +386,8 @@ export const microblogConnector: Connector = {
   displayName: 'Micro.blog',
   tier: 1,
   capabilities: { read: false, write: true },
-  carries: ['progress', 'finished'],
+  carries: ['progress', 'finished', 'highlight'],
+  options: [{ key: 'sync_highlights', label: 'Automatically sync clippings', default: false }],
   credentialKind: 'token',
   beta: false,
   matchBy: 'metadata',
@@ -382,7 +396,16 @@ export const microblogConnector: Connector = {
   search: searchBooks,
   match: matchBook,
   createBook,
-  push: reconcileBook,
+  async push(cred, match, ev, http, ctx) {
+    if (ev.kind !== 'highlight') return reconcileBook(cred, match, ev, http);
+    if (!ctx) return { ok: false, retryable: false, error: 'Micro.blog publication requires local storage' };
+    let isbn = match.externalEdition;
+    if (!isbn) {
+      if (/^(?:\d{13}|\d{9}[\dXx])$/.test(match.externalId)) isbn = match.externalId;
+      else isbn = (await loadInventory(cred, http)).find((b) => b.externalId === match.externalId)?.isbn;
+    }
+    return publishMicroblogClippings(cred, { ...match, externalEdition: isbn }, ev, http, ctx);
+  },
 };
 
 export const _microblog = {

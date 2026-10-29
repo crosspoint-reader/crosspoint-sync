@@ -116,6 +116,12 @@ describe('kosync mirror fan-out (end to end)', () => {
     // A mirror PUT to the target server happened, carrying the book's metadata (#50).
     const put = fake.calls.find((c) => c.url.includes('mirror.test') && c.url.includes('/syncs/progress') && c.method === 'PUT');
     expect(JSON.parse(put!.body!).metadata).toEqual({ title: 'Piranesi', authors: 'Susanna Clarke', filename: 'piranesi.epub' });
+    const target = makeTestApp();
+    const targetUser = await registerUser(target.app);
+    const received = await target.app.request('/syncs/progress', { method: 'PUT', headers: targetUser.headers, body: put!.body! });
+    expect(received.status).toBe(200);
+    const library = await (await target.app.request('/api/v1/progress', { headers: targetUser.headers })).json() as { items: Record<string, unknown>[] };
+    expect(library.items).toEqual([expect.objectContaining({ title: 'Piranesi', author: 'Susanna Clarke', filename: 'piranesi.epub' })]);
     expect(claimReady(db, 10)).toHaveLength(0);
   });
 });

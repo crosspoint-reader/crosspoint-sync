@@ -37,12 +37,12 @@
       "icons/icon.ico"
     ],
     "android": {
-      "versionCode": 1007
+      "versionCode": 1008
     },
     "iOS": {
       "minimumSystemVersion": "16.0",
       "developmentTeam": "96247QW4R8",
-      "bundleVersion": "8"
+      "bundleVersion": "12"
     }
   },
   "plugins": {

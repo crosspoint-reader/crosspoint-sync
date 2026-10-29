@@ -20,16 +20,13 @@ import {
   X,
 } from 'lucide-react'
 import { isApp } from './api.js'
-import { DEFAULT_HOST, EXTENSIONS, connect, deleteFiles, folders, isBook, joinPath, listFiles, loadDevicePrefs, makeFolder, renameFile, saveDevicePrefs } from './device.js'
+import { DEFAULT_HOST, connect, deleteFiles, folders, isBook, joinPath, listFiles, loadDevicePrefs, makeFolder, renameFile, saveDevicePrefs } from './device.js'
 import { downloads as listDownloads, removeDownload, sendDownload, sendFile } from './catalogs.js'
 import { ActionSheet, Card, EmptyState, folderLabel, notify, Toggle } from './ui.jsx'
 import ConversionLog from './ConversionLog.jsx'
 import { transferProgress } from './epub/log.js'
 
 const size = (n) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`)
-// Android's picker filters by MIME type and has none for .md, so let it show everything there.
-const ACCEPT = /android/i.test(navigator.userAgent) ? undefined : EXTENSIONS.map((e) => `.${e}`).join(',')
-
 // Shared progress from the WebView optimizer and native transfers.
 export function progressLabel(p) {
   if (!p) return 'Sending…'
@@ -476,7 +473,7 @@ export default function Send() {
     <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
       <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">Send books</h1>
       <p className="mt-2 max-w-xl text-sm/6 text-stone-500">
-        Send EPUB, Markdown or text files over Wi-Fi.
+        Send EPUB, Markdown, text or ACSM files over Wi-Fi.
       </p>
 
       {!isApp ? (
@@ -492,7 +489,8 @@ export default function Send() {
               ref={input}
               type="file"
               multiple
-              accept={ACCEPT}
+              // Native type filters can disable unknown extensions such as ACSM on iOS.
+              // Validate supported extensions in add() after selection instead.
               className="hidden"
               onChange={(e) => {
                 add(e.target.files)
@@ -518,12 +516,12 @@ export default function Send() {
               <BookUp className="size-8 text-brand-500" strokeWidth={1.5} />
               <span className="font-semibold text-stone-900">Choose books from this device</span>
               <span className="text-xs text-stone-500">
-                .epub, .md or .txt <span className="hidden md:inline">· or drop them here</span>
+                .epub, .md, .txt or .acsm <span className="hidden md:inline">· or drop them here</span>
               </span>
             </button>
             {skipped > 0 && (
               <p className="mt-2 text-xs text-stone-500">
-                Skipped {skipped} file{skipped === 1 ? '' : 's'}: your reader only takes EPUB, Markdown and text.
+                Skipped {skipped} file{skipped === 1 ? '' : 's'}: choose EPUB, Markdown, text or ACSM files.
               </p>
             )}
 
