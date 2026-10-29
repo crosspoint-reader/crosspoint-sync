@@ -476,7 +476,7 @@ export default function Send() {
     <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
       <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">Send books</h1>
       <p className="mt-2 max-w-xl text-sm/6 text-stone-500">
-        Send EPUB, Markdown or text files over Wi-Fi.
+        Send EPUB, Markdown, text or ACSM files over Wi-Fi.
       </p>
 
       {!isApp ? (
@@ -518,12 +518,12 @@ export default function Send() {
               <BookUp className="size-8 text-brand-500" strokeWidth={1.5} />
               <span className="font-semibold text-stone-900">Choose books from this device</span>
               <span className="text-xs text-stone-500">
-                .epub, .md or .txt <span className="hidden md:inline">· or drop them here</span>
+                .epub, .md, .txt or .acsm <span className="hidden md:inline">· or drop them here</span>
               </span>
             </button>
             {skipped > 0 && (
               <p className="mt-2 text-xs text-stone-500">
-                Skipped {skipped} file{skipped === 1 ? '' : 's'}: your reader only takes EPUB, Markdown and text.
+                Skipped {skipped} file{skipped === 1 ? '' : 's'}: choose EPUB, Markdown, text or ACSM files.
               </p>
             )}
 

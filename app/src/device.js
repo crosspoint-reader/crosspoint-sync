@@ -5,7 +5,7 @@ import { DEFAULT_QUALITY } from './epub/optimize.js'
 // CrossPoint's on-device file server (File Transfer screen). Same protocol
 // common-stacks uses: GET /api/status, GET /api/files?path=, POST /upload?path=.
 export const DEFAULT_HOST = 'crosspoint.local'
-export const EXTENSIONS = ['epub', 'md', 'txt']
+export const EXTENSIONS = ['epub', 'md', 'txt', 'acsm']
 
 const ext = (name) => name.split('.').pop().toLowerCase()
 export const isBook = (file) => EXTENSIONS.includes(ext(file.name))
