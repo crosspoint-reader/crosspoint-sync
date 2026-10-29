@@ -53,7 +53,7 @@ function Clip({ session, clip, book, onShare, onDelete, showBook }) {
 }
 
 export default function Clippings({ session, books }) {
-  const [items, error, reload] = useLoad(() => api.allClippings(session, books), [session], `clippings:${session.username}`, () => cached.clippings(session))
+  const [items, error, reload] = useLoad(() => api.allClippings(session, books), [session, books], `clippings:${session.username}`, () => cached.clippings(session))
   const [query, setQuery] = useState('')
   const [only, setOnly] = useState(null) // document
   const [sharing, setSharing] = useState(null)

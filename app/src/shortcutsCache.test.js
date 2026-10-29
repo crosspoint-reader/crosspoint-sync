@@ -1199,3 +1199,16 @@ it('does not let a later offline library fallback supersede a pending online ref
   await flush()
   expect(snapshot().books.items[0]).toMatchObject({ percentage: 0.5, timestamp: 200 })
 })
+
+it('publishes newly discovered book clippings after an initially empty legacy batch', async () => {
+  http.mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({}) })
+  await api.allClippings(session, [])
+  http.mockResolvedValueOnce(response({ items: [book] }))
+  await api.books(session)
+  http.mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({}) })
+    .mockResolvedValueOnce(response({ items: [{ id: 'new', text: 'Newly discovered passage' }], more: false }))
+  await api.allClippings(session, [book])
+  await flush()
+  expect(snapshot().books.items.map((b) => b.document)).toEqual(['one'])
+  expect(snapshot().clippings.items).toMatchObject([{ document: 'one', id: 'new', text: 'Newly discovered passage' }])
+})
