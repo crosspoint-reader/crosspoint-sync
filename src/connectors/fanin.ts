@@ -3,6 +3,7 @@ import { withTransaction, type DB } from '../db/db.js';
 import { nowSeconds } from '../models/sync.js';
 import { getConnector, fetchTransport } from './registry.js';
 import { fanOutHighlight, fanOutProgress } from './fanout.js';
+import { scheduleMicroblogClippings } from './microblog-clippings.js';
 import { clippingDocuments } from '../models/merge.js';
 import { nearestProgressSample, recordProgressSample, upsertProgress } from '../routes/kosync.js';
 import {
@@ -197,6 +198,14 @@ function importHighlights(db: DB, userId: number, document: string, items: Inbou
       highlightedAt: h.createdAt || null, spine: h.spine, startOffset: h.startOffset,
       endOffset: h.endOffset, chapter: h.chapter,
     }, now, source);
+  }
+  if (added.length) {
+    try {
+      scheduleMicroblogClippings(db, userId, document);
+    } catch (err) {
+      console.error(JSON.stringify({ msg: 'microblog schedule failed', user_id: userId, document,
+        error: err instanceof Error ? err.message : String(err) }));
+    }
   }
 }
 
