@@ -105,7 +105,14 @@ export function scheduleMicroblogClippings(db: DB, userId: number, document?: st
     const isbn = match.external_edition ?? (/^(?:\d{13}|\d{9}[\dXx])$/.test(match.external_id) ? match.external_id : null);
     const bookUrl = isbn ? `https://micro.blog/books/${encodeURIComponent(isbn)}` : state.book_url;
     if (state.url && bookUrl && state.matched_book === match.external_id
-        && state.fingerprint === microblogClippingsContent(db, userId, doc, bookUrl)?.fingerprint) continue;
+        && state.fingerprint === microblogClippingsContent(db, userId, doc, bookUrl)?.fingerprint) {
+      // Removing rejected unpublished content can restore the last successful
+      // post without another network update. Its old validation error is stale.
+      db.prepare(`UPDATE connector_queue SET status='done',last_error=NULL,updated_at=?
+        WHERE user_id=? AND connector_id='microblog' AND document=? AND kind='microblog:clippings' AND status='dead'`)
+        .run(nowSeconds(), userId, doc);
+      continue;
+    }
     const existing = db.prepare("SELECT status FROM connector_queue WHERE user_id=? AND connector_id='microblog' AND document=? AND kind='microblog:clippings'")
       .get(userId, doc) as { status: string } | undefined;
     if (existing?.status === 'pending') continue; // Preserve backoff after a transient failure.
@@ -265,7 +272,9 @@ export async function publishMicroblogClippings(
           db.prepare('UPDATE microblog_clipping_posts SET missing=1 WHERE user_id=? AND document=?').run(userId, document);
           return permanent(err.message);
         }
-        if (err instanceof ConnectorOperationError && !err.retryable && !err.needsReauth) return permanent(`${err.message}. Review the saved Micro.blog post before syncing again.`);
+        if (err instanceof ConnectorOperationError && !err.retryable && !err.needsReauth) return {
+          ok: false, retryable: false, error: `${err.message}. Correct the clippings and sync this book again.`,
+        };
         throw err;
       }
     } else {

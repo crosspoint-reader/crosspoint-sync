@@ -123,6 +123,32 @@ it.each([400, 401, 403, 429, 500])('does not mark an unrelated update failure as
   expect(s.writes.filter((w) => !w.body.action)).toHaveLength(1);
   s.db.close();
 });
+it.each([400, 413, 422])('can retry the existing post after correcting a rejected update (%s)', async (code) => {
+  const s = await setup(); await s.choose(b); await s.sync();
+  s.updateFailure(code, 'Content is too large'); s.change(); await s.sync();
+  expect(await s.status()).toMatchObject({ items: [{ missing: false, url: `${b}post.html`, error: null }] });
+  expect(s.db.prepare("SELECT status FROM connector_queue WHERE kind='microblog:clippings'").get()).toEqual({ status: 'dead' });
+  s.db.prepare('UPDATE clippings SET note=? WHERE user_id=?').run('Short corrected note', s.uid);
+  s.updateFailure(200); await s.sync();
+  expect(s.writes).toHaveLength(3);
+  expect(s.writes[2]).toMatchObject({ destination: b, body: { action: 'update', url: `${b}post.html` } });
+  expect(JSON.stringify(s.writes[2])).toContain('Short corrected note');
+  expect(s.writes.filter((w) => !w.body.action)).toHaveLength(1);
+  expect(s.db.prepare("SELECT status FROM connector_queue WHERE kind='microblog:clippings'").get()).toEqual({ status: 'done' });
+  await s.sync(); expect(s.writes).toHaveLength(3);
+  s.db.close();
+});
+it('clears a rejected update when removing an unpublished clipping restores the published content', async () => {
+  const s = await setup(); await s.choose(b); await s.sync();
+  s.db.prepare('INSERT INTO clippings(user_id,document,id,text,spine_index,created_at,updated_at) VALUES(?,?,?,?,1,2,2)').run(s.uid, DOC, 'two', 'Rejected passage');
+  selectMicroblogClipping(s.db, s.uid, DOC, 'two');
+  s.updateFailure(413); await s.sync();
+  s.db.prepare('UPDATE clippings SET deleted=1 WHERE user_id=? AND id=?').run(s.uid, 'two');
+  await s.sync();
+  expect(s.writes).toHaveLength(2); // The remote content is already correct.
+  expect(s.db.prepare("SELECT status,last_error FROM connector_queue WHERE kind='microblog:clippings'").get()).toEqual({ status: 'done', last_error: null });
+  s.db.close();
+});
 it('recreates on the current clippings blog when explicitly chosen and pins later updates there', async () => {
   const s = await setup(); await s.choose(b); await s.sync(); s.missing(); s.change(); await s.sync();
   await s.choose(a);
