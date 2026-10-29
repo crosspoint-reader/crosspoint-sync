@@ -127,7 +127,11 @@ async function editBook(session, document, field, patch) {
   const version = sessionVersion
   const result = await call(session, `/api/v1/documents/${document}/${field}`, { method: 'PUT', body: JSON.stringify(patch) })
   // A later library refresh must not be overwritten by a pre-edit response.
-  if (version === sessionVersion) readingVersion++
+  if (version === sessionVersion) {
+    readingVersion++
+    patchCachedBook(session, result.document ?? document, field, result)
+    await syncShortcutsCache(session)?.catch(() => {})
+  }
   return result
 }
 
@@ -261,6 +265,37 @@ function invalidateClippingCaches(s, documents) {
 }
 
 const PROGRESS = '/api/v1/progress?limit=500'
+
+function patchCachedBook(session, document, field, result) {
+  const key = `${OFFLINE}${session.username}@${session.server}${PROGRESS}`
+  const progress = read(key)
+  if (!progress?.items.some((b) => b.document === document)) return
+  // Clearing a manual status needs server-side reading stats to derive it.
+  if (field === 'status' && result.status === null) {
+    localStorage.removeItem(key)
+    localStorage.removeItem(`${key}:saved-at`)
+    return
+  }
+  const fields = field === 'info'
+    ? ['title', 'author', 'language', 'cover_url', 'page_count', 'genres', 'moods', 'content_warnings', 'series', 'series_position', 'release_year']
+    : field === 'status' ? ['status', 'status_at'] : ['status']
+  const patch = Object.fromEntries(fields.filter((f) => Object.hasOwn(result, f) && (f !== 'status' || result[f] !== null)).map((f) => [f, result[f]]))
+  const items = progress.items.map((b) => {
+    if (b.document !== document) return b
+    const edited = { ...b, ...patch }
+    if (field === 'status' && patch.status) edited.pause_reason = patch.status === 'paused' ? 'manual' : null
+    if (field === 'dates' && patch.status && patch.status !== b.status) {
+      delete edited.status_at // The dates response does not include this timestamp.
+      edited.pause_reason = null
+    }
+    return edited
+  })
+  // Keep the library's fetch time and the reader's Last Sync unchanged.
+  if (!keep(key, { ...progress, items })) {
+    localStorage.removeItem(key)
+    localStorage.removeItem(`${key}:saved-at`)
+  }
+}
 
 function removeCachedBook(session, document) {
   const prefix = `${OFFLINE}${session.username}@${session.server}`

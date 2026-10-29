@@ -939,3 +939,49 @@ it.each(bookEdits)('ignores an old session %s edit completing during a new libra
   await flush()
   expect(snapshot().books.items).toHaveLength(1)
 })
+
+it.each([
+  ['status', () => api.setStatus(session, 'one', 'finished'), { document: 'one', status: 'finished', status_at: 200 }, { status: 'finished', percentage: 1 }],
+  ['metadata', () => api.setInfo(session, 'one', { title: '  Edited  ', author: '' }), { document: 'one', title: 'Edited', author: null }, { title: 'Edited', author: null }],
+  ['dates', () => api.setDates(session, 'one', { finished_date: '2026-10-28' }), { document: 'one', status: 'finished', finished_date: 1793145600 }, { status: 'finished', percentage: 1 }],
+])('patches confirmed %s edits before an offline library reload', async (_, edit, result, expected) => {
+  const key = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/progress?limit=500'
+  const initial = { ...book, status: 'reading', percentage: 0.3, title: 'Old title', author: 'Old author' }
+  localStorage.setItem(key, JSON.stringify({ items: [initial, { ...book, document: 'other' }], next: null, savedAt: 100 }))
+  http.mockResolvedValueOnce(response(result))
+  await expect(edit()).resolves.toEqual(result)
+  expect(apiModule.cached.books(session)[0]).toMatchObject(expected)
+  expect(snapshot().books.items[0]).toMatchObject({ ...expected, author: expected.author ?? (expected.author === null ? '' : 'Old author') })
+  expect(snapshot().books.savedAt).toBe(100)
+  http.mockRejectedValueOnce(new Error('offline'))
+  const reloaded = await api.books(session)
+  await flush()
+  expect(reloaded[0]).toMatchObject(expected)
+  expect(reloaded[1].document).toBe('other')
+  expect(snapshot().books.savedAt).toBe(100)
+  expect(snapshot().books.items[0].timestamp).toBe(initial.timestamp)
+})
+
+it('invalidates library data if an edited title cannot fit in its cached record', async () => {
+  const key = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/progress?limit=500'
+  const record = { items: [book], next: null, savedAt: 100 }
+  localStorage.setItem(key, JSON.stringify(record))
+  const storage = limitStorage(key.length + JSON.stringify(record).length)
+  try {
+    http.mockResolvedValueOnce(response({ document: 'one', title: 'x'.repeat(500) }))
+    await api.setInfo(session, 'one', { title: 'x'.repeat(500) })
+    expect(apiModule.cached.books(session)).toBeNull()
+    expect(snapshot().books).toBeNull()
+  } finally {
+    storage.mockRestore()
+  }
+})
+
+it('requires a new library copy when clearing a manual status needs server derivation', async () => {
+  const key = 'crosspoint-offline:v2:reader@https://sync.test/api/v1/progress?limit=500'
+  localStorage.setItem(key, JSON.stringify({ items: [{ ...book, status: 'paused' }], next: null, savedAt: 100 }))
+  http.mockResolvedValueOnce(response({ document: 'one', status: null, status_at: 200 }))
+  await api.setStatus(session, 'one', null)
+  expect(apiModule.cached.books(session)).toBeNull()
+  expect(snapshot().books).toBeNull()
+})
