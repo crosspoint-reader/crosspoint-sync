@@ -168,6 +168,25 @@ it('allows explicit recreation on the current blog after access to the previous 
   expect((await s.recreate('current')).status).toBe(200); await drainQueue(s.db, s.http);
   expect(s.writes[1]?.destination).toBe(a); s.db.close();
 });
+it.each(['before recreation', 'during discovery'])('preserves a paused post when its book match is removed %s', async (when) => {
+  const s = await setup(); await s.choose(b); await s.sync(); s.missing(); s.change(); await s.sync();
+  await s.choose(a);
+  const before = s.db.prepare('SELECT * FROM microblog_clipping_posts').get();
+  const removeMatch = () => { s.db.prepare("DELETE FROM connector_matches WHERE user_id=? AND connector_id='microblog'").run(s.uid); };
+  if (when === 'before recreation') removeMatch();
+  else s.onDiscover(removeMatch);
+  const result = await s.recreate('current');
+  expect(result.status).toBe(409);
+  expect(await result.json()).toMatchObject({ message: expect.stringContaining('Match this book') });
+  expect(s.db.prepare('SELECT * FROM microblog_clipping_posts').get()).toEqual(before);
+  expect(s.writes).toHaveLength(1);
+  s.onDiscover(() => {});
+  saveMatch(s.db, s.uid, 'microblog', DOC, { externalId: '123', externalEdition: '9781786487849', confidence: 1 }, 'manual');
+  expect((await s.recreate('current')).status).toBe(200);
+  await drainQueue(s.db, s.http);
+  expect(s.writes[1]?.destination).toBe(a);
+  s.db.close();
+});
 it('rejects an invalid recreation choice without changing the paused post', async () => {
   const s = await setup(); await s.choose(b); await s.sync(); s.missing(); s.change(); await s.sync();
   expect((await s.recreate('elsewhere')).status).toBe(400);

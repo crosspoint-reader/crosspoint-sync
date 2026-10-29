@@ -341,6 +341,12 @@ export async function recreateMicroblogClippings(db: DB, userId: number, doc: st
   if (!account?.enabled) throw new ConnectorOperationError('Micro.blog is not linked or enabled', false);
   const state = db.prepare('SELECT * FROM microblog_clipping_posts WHERE user_id=? AND document=?').get(userId, document) as unknown as ClippingsPost | undefined;
   if (!state?.missing || !state.url) throw new ConnectorOperationError('This book does not have a confirmed missing clippings post.', false);
+  const requireMatch = () => {
+    if (!getMatch(db, userId, 'microblog', document)?.external_id) {
+      throw new ConnectorOperationError('Match this book in Micro.blog before recreating this post.', false);
+    }
+  };
+  requireMatch();
   let locks = publishing.get(db); if (!locks) { locks = new Set(); publishing.set(db, locks); }
   const key = `${userId}:${document}`;
   if (locks.has(key)) throw new ConnectorOperationError('Micro.blog publication is already in progress', true);
@@ -348,6 +354,7 @@ export async function recreateMicroblogClippings(db: DB, userId: number, doc: st
   const current = () => {
     const row = db.prepare('SELECT identity FROM microblog_clipping_posts WHERE user_id=? AND document=?').get(userId, document) as { identity: string } | undefined;
     if (getAccount(db, userId, 'microblog')?.cred_enc !== account.cred_enc || row?.identity !== state.identity) throw new ConnectorOperationError('Micro.blog account or book changed; reload before retrying.', false);
+    requireMatch();
   };
   try {
     const cred = decryptCredential(account, db);
