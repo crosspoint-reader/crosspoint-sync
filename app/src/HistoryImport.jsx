@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { api } from './api.js'
 import { Card, notify, STATUS } from './ui.jsx'
 
 export default function HistoryImport({ session }) {
+  const input = useRef(null)
   const [file, setFile] = useState(null)
   const [timezone, setTimezone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')
   const [preview, setPreview] = useState(null)
@@ -38,18 +39,18 @@ export default function HistoryImport({ session }) {
   return (
     <Card className="mt-3 space-y-3 p-4">
       <h3 className="font-semibold text-stone-900">Import reading history</h3>
-      <p className="text-sm text-stone-500">Upload a Goodreads or StoryGraph CSV (up to 10 MB), or a KOReader / KOInsight database or ZIP (up to 50 MB). CrossPoint backups inside a ZIP are ignored.</p>
+      <p className="text-sm text-stone-500">Upload a Goodreads or StoryGraph CSV (up to 10 MB), or a KOReader / KOInsight database or ZIP (up to 50 MB).</p>
       <p className="text-sm text-stone-500">Your reader positions stay unchanged. Existing book stats, statuses and dates are preserved, and no updates are sent to linked services. Export an account backup before importing.</p>
       <fieldset disabled={busy} className="space-y-3 disabled:opacity-60">
-        <label className="block text-sm font-medium text-stone-700">
-          Reading-history file
-          <input type="file" accept=".csv,.sqlite,.sqlite3,.db,.zip" className="mt-2 block w-full text-sm" onChange={e => { setFile(e.target.files?.[0] || null); setPreview(null); setError(null) }} />
-        </label>
+        <div className="flex flex-wrap items-center gap-3">
+          <button type="button" className={button} onClick={() => input.current.click()}>Choose file</button>
+          <span className="min-w-0 break-all text-sm text-stone-500" role="status">{file?.name || 'No file selected'}</span>
+          <input ref={input} type="file" accept=".csv,.sqlite,.sqlite3,.db,.zip" aria-label="Reading-history file" className="hidden" onChange={e => { setFile(e.target.files?.[0] || null); setPreview(null); setError(null) }} />
+        </div>
         <label className="block text-sm font-medium text-stone-700">
           Reading time zone
           <input value={timezone} onChange={e => { setTimezone(e.target.value); setPreview(null) }} placeholder="America/New_York" className="mt-1 block min-h-11 w-full rounded-xl bg-surface px-3 ring-1 ring-stone-950/10" />
         </label>
-        <p className="text-xs text-stone-500">Used for device activity, including daylight saving time. CSV calendar dates stay as exported.</p>
         {!preview && <button type="button" className={button} disabled={!file || !timezone} onClick={review}>{busy ? 'Reading file…' : 'Review history'}</button>}
         {preview && <>
           {preview.kind === 'tracker' ? <>
