@@ -1,0 +1,6 @@
+Book Id,Title,Author,ISBN,ISBN13,My Rating,Number of Pages,Date Read,Date Added,Exclusive Shelf,My Review
+101,"A Book, with ""Quotes""",Example Author,"=""0306406152""","=""9780306406157""",4,240,2020/03/10,2019/01/01,read,"Two lines
+in a review"
+102,Undated Book,Another Author,,,0,100,,2001/02/03,read,
+103,Still Reading,Example Author,,,3,200,,2020/01/01,currently-reading,
+104,Someday,Example Author,,,0,300,,2020/01/01,to-read,

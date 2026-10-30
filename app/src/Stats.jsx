@@ -541,7 +541,7 @@ function Finished({ list, titles }) {
         <a key={b.document} href={`#/book/${b.document}`} className="flex items-baseline justify-between gap-3 py-2.5">
           <span className="truncate text-sm font-medium text-stone-800">{titles.get(b.document) ?? b.document}</span>
           <span className="shrink-0 font-mono text-xs text-stone-500">
-            {new Date(b.finished_at * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+            {b.finished_at ? new Date(b.finished_at * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'Date unknown'}
           </span>
         </a>
       ))}
@@ -563,14 +563,14 @@ function PagesAndBooks({ activity: all, books }) {
   // Only books the library shows (metadata-less ones are hidden everywhere).
   const shown = all.books.filter((b) => titles.has(b.document))
   const activity = { ...all, books: shown, pages_total: shown.reduce((n, b) => n + (b.pages_read ?? 0), 0) }
-  const finished = activity.books.filter((b) => b.finished_at).sort((a, b) => b.finished_at - a.finished_at)
+  const finished = activity.books.filter((b) => b.completed || b.finished_at).sort((a, b) => (b.finished_at ?? 0) - (a.finished_at ?? 0))
   const spans = finished.map((b) => b.days_to_finish).filter(Boolean)
   const known = activity.books.filter((b) => b.page_count).length
   const tiles = [
     ['Pages read', activity.pages_total.toLocaleString()],
-    ['Books finished', finished.length],
+    ['Books finished', activity.books.filter(b => b.completed || b.finished_at).length],
     ['Reading now', books.filter((b) => b.status === 'reading').length],
-    ['Finished this year', finished.filter((b) => new Date(b.finished_at * 1000).getFullYear() === new Date().getFullYear()).length],
+    ['Finished this year', finished.filter((b) => b.finished_at && new Date(b.finished_at * 1000).getFullYear() === new Date().getFullYear()).length],
     ['Pages per book', known ? Math.round(activity.books.reduce((n, b) => n + (b.page_count ?? 0), 0) / known) : '-'],
     ['Days per book', spans.length ? Math.round(spans.reduce((a, b) => a + b, 0) / spans.length) : '-'],
   ]

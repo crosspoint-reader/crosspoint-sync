@@ -1,0 +1,6 @@
+Title,Authors,ISBN/UID,Read Status,Date Added,Last Date Read,Dates Read,Read Count,Star Rating,Review
+Reread Book,Example Author,9780306406157,read,2020/01/01,02/11/2023,"2023/10/09-2023/11/02, 2016/05/01-2016/06/01",2,4.25,
+Undated Book,Another Author,example-uid,read,2020/01/01,,,1,,
+In Progress,Author,another-uid,currently-reading,2024/01/01,,2024/01/02-,0,,
+Abandoned Book,Author,dnf-uid,did-not-finish,2020/01/01,,,0,1.5,
+Someday,Author,tbr-uid,to-read,2020/01/01,,,0,,

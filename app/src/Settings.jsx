@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import HistoryImport from './HistoryImport.jsx'
 import MicroblogPosting from './MicroblogPosting.jsx'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { onOpenUrl } from '@tauri-apps/plugin-deep-link'
@@ -991,6 +992,7 @@ export default function Settings({ session, theme, onSession, onLogout }) {
 
       <h2 className={section}>Account migration</h2>
       <AccountTransfer session={session} />
+      <HistoryImport session={session} />
 
       <h2 className={section}>Public profile</h2>
       <p className="mt-1 text-sm text-stone-500">A page with your reading stats and shelves to link to or embed on a website. Turning it off and on makes a new link.</p>

@@ -108,11 +108,11 @@ function clearOffline(session) {
 }
 
 // store: false keeps the offline fallback but leaves saving to the caller.
-async function call(session, path, init = {}, keepOffline = true, { offlineFallback = true, timestampSaved = false, store = true } = {}) {
+async function call(session, path, init = {}, keepOffline = true, { offlineFallback = true, timestampSaved = false, store = true, cachePath = path } = {}) {
   const version = sessionVersion
   const reading = readingVersion
   const readingGet = (!init.method || init.method === 'GET') && /^\/api\/v1\/(clippings|progress)([/?]|$)/.test(path)
-  const key = `${OFFLINE}${session.username}@${session.server}${path}`
+  const key = `${OFFLINE}${session.username}@${session.server}${cachePath}`
   const isGet = keepOffline && (!init.method || init.method === 'GET')
   let res
   try {
@@ -121,7 +121,7 @@ async function call(session, path, init = {}, keepOffline = true, { offlineFallb
       credentials: 'omit',
       cache: 'no-store',
       headers: {
-        'content-type': 'application/json',
+        ...(init.body instanceof FormData ? {} : { 'content-type': 'application/json' }),
         'x-auth-user': session.username,
         'x-auth-key': session.key,
       },
@@ -347,13 +347,13 @@ async function allProgress(session) {
   const version = sessionVersion
   const reading = readingVersion
   const sequence = ++libraryReadSequence
-  const first = await call(session, PROGRESS, {}, true, { store: false })
+  const first = await call(session, `${PROGRESS}&include_history=1`, {}, true, { store: false, cachePath: PROGRESS })
   const items = [...first.items]
   for (let next = first.next, seen = new Set(); next; ) {
     // A loop would otherwise end early and save a short list as the whole library.
     if (seen.has(next)) throw new Error('Server repeated a page cursor')
     seen.add(next)
-    const page = await call(session, `${PROGRESS}&cursor=${encodeURIComponent(next)}`, {}, false)
+    const page = await call(session, `${PROGRESS}&include_history=1&cursor=${encodeURIComponent(next)}`, {}, false)
     items.push(...page.items)
     next = page.next
   }
@@ -477,7 +477,7 @@ export function syncShortcutsCache(session) {
       savedAt: Object.hasOwn(books, 'savedAt') ? books.savedAt : read(`${prefix}${PROGRESS}:saved-at`),
       items: bookList(books).map((b) => ({
         document: b.document, title: b.title || b.filename, author: b.author ?? '',
-        status: b.status ?? 'reading', percentage: b.percentage, timestamp: b.timestamp,
+        status: b.status ?? 'reading', percentage: b.percentage ?? 0, timestamp: b.timestamp,
       })),
     } : null,
     clippings: clippings ? { items: clippings.items.map((c) => ({
@@ -576,6 +576,18 @@ export const api = {
   setProfile: (s, enabled) => call(s, '/api/v1/profile', { method: 'PUT', body: JSON.stringify({ enabled }) }),
   // Archives must be fetched online and never stored in the offline cache.
   exportAccount: (s) => call(s, '/api/v1/account/export', {}, false),
+  async importHistory(s, file, timezone, choices) {
+    const body = new FormData()
+    body.append('file', file)
+    body.append('timezone', timezone)
+    if (choices) body.append('choices', JSON.stringify(choices))
+    const result = await call(s, `/api/v1/account/import/history${choices ? '' : '?preview=1'}`, { method: 'POST', body }, false)
+    if (choices) {
+      sessionVersion++
+      clearOffline()
+    }
+    return result
+  },
   async importAccount(s, archive, mode) {
     const result = await call(s, '/api/v1/account/import', { method: 'POST', body: JSON.stringify({ archive, mode }) }, false)
     sessionVersion++

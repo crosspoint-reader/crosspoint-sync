@@ -151,8 +151,8 @@ export function mergeDocuments(
     // documents: canonical metadata wins, alias fills the gaps.
     const manual = MANUAL_COLUMNS.join(', ');
     db.prepare(
-      `INSERT INTO documents (user_id, document, title, author, filename, filesize, status, status_at, pause_reason, start_date, finished_date, cover_url, page_count, language, ${manual}, updated_at)
-       SELECT user_id, ?, title, author, filename, filesize, status, status_at, pause_reason, start_date, finished_date, cover_url, page_count, language, ${manual}, ? FROM documents WHERE user_id = ? AND document = ?
+      `INSERT INTO documents (user_id, document, title, author, filename, filesize, status, status_at, pause_reason, start_date, finished_date, cover_url, page_count, language, isbn, user_rating, ${manual}, updated_at)
+       SELECT user_id, ?, title, author, filename, filesize, status, status_at, pause_reason, start_date, finished_date, cover_url, page_count, language, isbn, user_rating, ${manual}, ? FROM documents WHERE user_id = ? AND document = ?
        ON CONFLICT(user_id, document) DO UPDATE SET
          title = COALESCE(documents.title, excluded.title),
          author = COALESCE(documents.author, excluded.author),
@@ -166,6 +166,8 @@ export function mergeDocuments(
          cover_url = COALESCE(documents.cover_url, excluded.cover_url),
          page_count = COALESCE(documents.page_count, excluded.page_count),
          language = COALESCE(documents.language, excluded.language),
+         isbn = COALESCE(documents.isbn, excluded.isbn),
+         user_rating = COALESCE(documents.user_rating, excluded.user_rating),
          ${mergeManualSql()},
          updated_at = excluded.updated_at`
     ).run(into, now, userId, from);

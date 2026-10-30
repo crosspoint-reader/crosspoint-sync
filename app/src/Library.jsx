@@ -23,15 +23,15 @@ function ReadingCard({ session, book }) {
         <div aria-hidden="true" className="dot-field-sm pointer-events-none absolute inset-y-0 right-0 w-1/2 rounded-r-xl text-stone-200 [mask-image:linear-gradient(to_left,black,transparent)]" />
         <Cover session={session} book={book} className="w-28 sm:w-36 md:w-40" />
         <div className="relative flex min-w-0 flex-1 flex-col self-stretch">
-          <p className="text-xs font-medium text-brand-600">Continue reading</p>
+          <p className="text-xs font-medium text-brand-600">{book.history_only ? 'Reading history' : 'Continue reading'}</p>
           <h2 className="mt-2 line-clamp-3 font-display text-xl/snug font-semibold text-stone-900 md:text-2xl/snug">{book.title || book.filename}</h2>
           <p className="truncate text-sm text-stone-500 md:text-base">{book.author}</p>
           <div className="mt-auto pt-3 md:max-w-md">
             <div className="mb-1.5 flex justify-between text-xs tabular-nums text-stone-500">
-              <span className="font-semibold text-brand-600">{pct(book.percentage)}</span>
+              <span className="font-semibold text-brand-600">{book.history_only ? 'Historical reading' : pct(book.percentage)}</span>
               <span>{ago(book.timestamp)}</span>
             </div>
-            <ProgressBar value={book.percentage} />
+            {!book.history_only && <ProgressBar value={book.percentage} />}
           </div>
         </div>
       </div>
@@ -46,10 +46,10 @@ function Row({ session, book }) {
       <div className="min-w-0 flex-1">
         <p className="truncate font-display md:text-sm text-[0.95rem] font-semibold text-stone-900">{book.title || book.filename || 'Untitled book'}</p>
         <p className="truncate text-xs text-stone-500">{book.author}</p>
-        <div className="mt-2 flex items-center gap-2">
+        {book.history_only ? <p className="mt-2 text-xs text-stone-500">Historical reading</p> : <div className="mt-2 flex items-center gap-2">
           <ProgressBar value={book.percentage} className="flex-1" />
           <span className="w-9 text-right font-mono text-[0.7rem] text-stone-500">{pct(book.percentage)}</span>
-        </div>
+        </div>}
       </div>
     </a>
   )
@@ -96,7 +96,7 @@ export default function Library({ session, books, summary, activity }) {
             : [
                 [counts.reading, 'reading'],
                 [read.reduce((n, b) => n + (b.pages_read ?? 0), 0).toLocaleString(), 'pages read'],
-                [read.filter((b) => b.finished_at).length, 'finished'],
+                [counts.finished, 'finished'],
               ]
           ).map(([v, l]) => (
             <div key={l}>

@@ -76,10 +76,10 @@ function Stats({ session, doc, aliases, activity: a, wide = false, revision = 0 
       ['Finished', a?.finish_manual ? date(a.finished_at) : calendarDate(c.finished_date)],
     ]
   } else if (a) {
-    const days = a.days_to_finish ?? Math.max(1, Math.round(((a.finished_at ?? Date.now() / 1000) - a.started_at) / 86400))
+    const days = a.days_to_finish ?? (a.started_at && (!a.completed || a.finished_at) ? Math.max(1, Math.round(((a.finished_at ?? Date.now() / 1000) - a.started_at) / 86400)) : null)
     cells = [
-      ['Print pages', a.page_count ? `${a.pages_read} of ${a.page_count}` : 'Unknown'],
-      [a.finished_at ? 'Took' : 'Reading for', `${days} ${days === 1 ? 'day' : 'days'}`],
+      ['Print pages', a.page_count && a.pages_read != null ? `${a.pages_read} of ${a.page_count}` : 'Unknown'],
+      [a.completed || a.finished_at ? 'Took' : 'Reading for', days == null ? null : `${days} ${days === 1 ? 'day' : 'days'}`],
       [a.start_manual ? 'Started' : 'First synced', date(a.started_at)],
       ['Finished', date(a.finished_at)],
     ]
@@ -958,6 +958,7 @@ export default function Book({ session, book, books, activity, back = { href: '#
               </h1>
               <p className="mt-1 text-sm text-stone-500">{book.author}</p>
               {seriesLabel(book) && <p className="mt-1 text-xs text-stone-500">{seriesLabel(book)}</p>}
+              {book.user_rating != null && <p className="mt-1 text-sm text-stone-600">Your rating: {book.user_rating} / 5</p>}
               {book.rating && (
                 <p className="mt-1 flex items-center gap-1 text-xs text-stone-500">
                   <Star className="size-3.5 fill-current text-amber-500" strokeWidth={0} />
@@ -966,9 +967,9 @@ export default function Book({ session, book, books, activity, back = { href: '#
                 </p>
               )}
               <p className="mt-3 font-mono text-xs text-stone-500">
-                <span className="font-semibold text-brand-600">{pct(book.percentage)}</span> · {book.device || book.device_id} · {ago(book.timestamp)}
+                {book.history_only ? 'Historical reading · No synced position' : <><span className="font-semibold text-brand-600">{pct(book.percentage)}</span> · {book.device || book.device_id} · {ago(book.timestamp)}</>}
               </p>
-              <ProgressBar value={book.percentage} className="mt-2" />
+              {!book.history_only && <ProgressBar value={book.percentage} className="mt-2" />}
               {wide && <Stats session={session} doc={book.document} aliases={book.aliases} activity={activity} wide revision={revision} />}
             </div>
             <div className="col-span-2 mt-6 md:col-span-1 md:col-start-2 md:self-end">

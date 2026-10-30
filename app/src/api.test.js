@@ -45,7 +45,7 @@ describe('prefixed server URLs', () => {
     await api.books(s)
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       'https://sync.test/reading/healthz', 'https://sync.test/reading/users/auth',
-      `https://sync.test/reading${progress}`,
+      `https://sync.test/reading${progress}&include_history=1`,
     ])
   })
 });
@@ -79,7 +79,7 @@ describe('account data isolation', () => {
   it('uses only the selected account credentials and bypasses the HTTP cache', async () => {
     fetchMock.mockResolvedValue(response({ items: [] }))
     await api.books(session('uxj3'))
-    expect(fetchMock).toHaveBeenCalledWith(`https://sync.test${progress}`, expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith(`https://sync.test${progress}&include_history=1`, expect.objectContaining({
       credentials: 'omit', cache: 'no-store', headers: expect.objectContaining({ 'x-auth-user': 'uxj3', 'x-auth-key': 'key' }),
     }))
   })
@@ -150,9 +150,9 @@ describe('book list paging', () => {
     fetchMock.mockResolvedValueOnce(page([1, 2], '100:d2')).mockResolvedValueOnce(page([3], '99:d3')).mockResolvedValueOnce(page([4], null))
     expect(titles(await api.books(s))).toEqual(['Book 1', 'Book 2', 'Book 3', 'Book 4'])
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      `https://sync.test${progress}`,
-      `https://sync.test${progress}&cursor=100%3Ad2`,
-      `https://sync.test${progress}&cursor=99%3Ad3`,
+      `https://sync.test${progress}&include_history=1`,
+      `https://sync.test${progress}&include_history=1&cursor=100%3Ad2`,
+      `https://sync.test${progress}&include_history=1&cursor=99%3Ad3`,
     ])
     expect(titles(cached.books(s))).toEqual(['Book 1', 'Book 2', 'Book 3', 'Book 4'])
     // Later pages are not saved under their own keys (cursors change with every sync).
@@ -250,4 +250,22 @@ it('exports online without caching and invalidates offline data only after a suc
   await api.importAccount(s, archive, 'replace')
   expect(cached.books(s)).toBeNull()
   expect(fetchMock).toHaveBeenLastCalledWith('https://sync.test/api/v1/account/import', expect.objectContaining({ method: 'POST', body: JSON.stringify({ archive, mode: 'replace' }) }))
+})
+
+it('uploads history as multipart data and only clears cached data after a successful commit', async () => {
+  const s = session('history-reader')
+  const file = new File(['database'], 'history.sqlite')
+  const key = `${prefix(s)}${progress}`
+  localStorage.setItem(key, JSON.stringify({ items: [] }))
+  fetchMock.mockResolvedValueOnce(response({ books: [] }))
+  await api.importHistory(s, file, 'UTC')
+  const [url, init] = fetchMock.mock.calls.at(-1)
+  expect(url).toBe('https://sync.test/api/v1/account/import/history?preview=1')
+  expect(init.headers['content-type']).toBeUndefined()
+  expect(init.body.get('file')).toBe(file)
+  expect(init.body.get('timezone')).toBe('UTC')
+  expect(localStorage.getItem(key)).not.toBeNull()
+  fetchMock.mockResolvedValueOnce(response({ books: 0 }))
+  await api.importHistory(s, file, 'UTC', {})
+  expect(localStorage.getItem(key)).toBeNull()
 })

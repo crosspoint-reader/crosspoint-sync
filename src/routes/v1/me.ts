@@ -5,6 +5,8 @@ import type { DB } from '../../db/db.js';
 import { invalidateAuthCache, type AppEnv } from '../../auth/middleware.js';
 import { hashKey } from '../../auth/password.js';
 import { deleteKosyncUserData } from '../account.js';
+import { readTrackerCsv, trackerPreview, importTracker } from '../../models/tracker-import.js';
+import { MAX_HISTORY_FILE, readHistoryFile, prepareHistory, historyPreview, importHistory } from '../../models/koinsight-import.js';
 import { autoPauseDays, setAutoPauseDays } from '../../models/pause.js';
 
 /**
@@ -32,6 +34,38 @@ export function meRoutes(db: DB): Hono<AppEnv> {
       return c.json(importAccountData(db, c.get('user').id, body.archive, body.mode === 'replace'));
     } catch (error) {
       if (error instanceof AccountImportError) return c.json({ message: error.message }, error.status);
+      throw error;
+    }
+  });
+
+  app.on('POST', ['/account/import/history', '/account/import/koinsight'], bodyLimit({ maxSize: MAX_HISTORY_FILE + 1024 * 1024 }), async (c) => {
+    c.header('Cache-Control', 'no-store');
+    try {
+      const form = await c.req.formData();
+      const file = form.get('file');
+      const timezone = form.get('timezone');
+      if (!(file instanceof File) || typeof timezone !== 'string') {
+        return c.json({ message: 'Choose a reading-history file and time zone.' }, 400);
+      }
+      const bytes = Buffer.from(await file.arrayBuffer());
+      if (bytes.subarray(0, 16).toString() !== 'SQLite format 3\0' && bytes.subarray(0, 2).toString() !== 'PK') {
+        const tracker = readTrackerCsv(bytes);
+        if (c.req.query('preview') === '1') return c.json(trackerPreview(db, c.get('user').id, tracker));
+        let choices: unknown;
+        try { choices = JSON.parse(String(form.get('choices') ?? form.get('finishes'))); }
+        catch { return c.json({ message: 'Review the books before importing.' }, 400); }
+        return c.json(importTracker(db, c.get('user').id, tracker, choices));
+      }
+      const history = await readHistoryFile(bytes);
+      const prepared = prepareHistory(db, c.get('user').id, history, timezone);
+      if (c.req.query('preview') === '1') return c.json({ kind: 'activity', source: history.source, ...historyPreview(prepared) });
+      let finishes: unknown;
+      try { finishes = JSON.parse(String(form.get('choices') ?? form.get('finishes'))); }
+      catch { return c.json({ message: 'Review the finished books before importing.' }, 400); }
+      return c.json(importHistory(db, c.get('user').id, prepared, finishes));
+    } catch (error) {
+      if (error instanceof AccountImportError) return c.json({ message: error.message }, error.status);
+      if (error instanceof TypeError) return c.json({ message: 'Invalid history upload.' }, 400);
       throw error;
     }
   });

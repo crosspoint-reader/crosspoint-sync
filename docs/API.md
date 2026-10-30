@@ -910,3 +910,48 @@ Unauthenticated. `{"status": "ok", "version": "0.1.0"}`.
 | clipping `text` / `note` / `chapter` | 2048 / 4096 bytes / 64 chars |
 | bookmark `xpath` / `summary` | 512 / 256 chars |
 | username / password key | 64 / 128 chars |
+
+### Reading-history import
+
+`POST /api/v1/account/import/history?preview=1` accepts authenticated multipart
+form data with `file` (Goodreads/StoryGraph CSV, KOReader/KOInsight SQLite, or a ZIP
+containing one supported database) and `timezone` (an IANA identifier). Preview
+validates the file without writing account data. `/account/import/koinsight`
+remains an alias for compatibility.
+
+Database previews return `{ kind: "activity", source, books: [{ document, title,
+author, start_date, finished_date, completed, existing_history, status, records }] }`.
+To commit, POST the same file/timezone without `preview=1`, plus `choices`: a JSON
+object mapping every preview document to a reviewed finish date or null for
+unfinished. The previous `finishes` form field is also accepted. The response is
+`{ books, imported_history, preserved_history }`.
+
+CSV previews return `{ kind: "tracker", source, skipped, warnings, library, books }`.
+Each book includes `source_id`, `title`, `author`, `isbn`, `user_rating`, `page_count`,
+`status`, `start_date`, `finished_date`, `target`, `locked`, and `candidates`.
+`target` is an existing document ID, `"new"`, or an empty string requiring a choice.
+Commit with `choices` keyed by every `source_id`, each containing:
+
+```json
+{"target":"new","status":"finished","start_date":null,"finished_date":null}
+```
+
+`target: null` skips a row. Dates are `YYYY-MM-DD` or null, independently of status.
+A known source identity cannot be redirected to another book. Targets must belong
+to the signed-in account. Two rows cannot target the same book. All choices are
+validated before a transactional write. The CSV response includes `books` and
+`skipped`; no activity snapshots or reader positions are created.
+
+See [supported fields, matching and limits](account-migration.md#import-reading-history).
+The Library response includes nullable `isbn` and `user_rating` fields; `rating`
+continues to mean the community catalog rating. Activity books include `completed`
+independently of `finished_at`; undated finished books count in the all-time overview
+but not `finished_this_year`.
+
+`GET /api/v1/progress?include_history=1` includes metadata-backed historical books
+with statistics, activity, or a manual status even when they have no current
+progress. These rows have `history_only: true`, null `percentage`, `progress`,
+`device_id`, and `device`; their timestamp comes from their last historical activity
+or metadata. Pagination works across current and historical books. The app uses
+this option for its Library. Without this option, the endpoint continues to return
+only synced progress; the KOReader sync and progress change endpoints are unchanged.

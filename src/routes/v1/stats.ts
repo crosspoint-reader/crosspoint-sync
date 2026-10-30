@@ -453,7 +453,7 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
         reading_days: past.length,
         current_streak: current,
         longest_streak: longest,
-        books_finished: finished.length,
+        books_finished: books.filter(b => b.completed || b.finished_at).length,
         finished_this_year: finished.filter((b) => new Date((b.finished_at! - tz * 60) * 1000).getUTCFullYear() === year).length,
         pages_read: pages,
         // Reading time as the reader measured it (devices that upload stats); none for synced-only books.

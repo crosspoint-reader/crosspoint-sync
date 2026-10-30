@@ -95,18 +95,29 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
     const limitRaw = Number(c.req.query('limit') ?? 100);
     const limit =
       Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 500) : 100;
+    const includeHistory = c.req.query('include_history') === '1';
     const rows = db
       .prepare(
-        `SELECT p.document, p.device_id, p.device, p.percentage, p.progress, p.position, p.updated_at,
+        `WITH library AS (
+           SELECT user_id, document, device_id, device, percentage, progress, position, updated_at FROM progress WHERE user_id = ?
+           ${includeHistory ? `UNION ALL
+           SELECT d.user_id, d.document, NULL, NULL, NULL, NULL, NULL,
+             COALESCE((SELECT MAX(at) FROM progress_log l WHERE l.user_id = d.user_id AND l.document = d.document), d.updated_at)
+           FROM documents d WHERE d.user_id = ?
+             AND NOT EXISTS (SELECT 1 FROM progress p WHERE p.user_id = d.user_id AND p.document = d.document)
+             AND NOT EXISTS (SELECT 1 FROM document_aliases a WHERE a.user_id = d.user_id AND a.alias = d.document)
+             AND (d.status IS NOT NULL OR EXISTS (SELECT 1 FROM stats_device_book s WHERE s.user_id = d.user_id AND s.document = d.document)
+               OR EXISTS (SELECT 1 FROM progress_log l WHERE l.user_id = d.user_id AND l.document = d.document))` : ''}
+         ) SELECT p.document, p.device_id, p.device, p.percentage, p.progress, p.position, p.updated_at,
                 d.title, d.author, d.filename, d.language, d.cover_url, d.page_count,
-                d.hc_slug, d.moods, d.genres, d.content_warnings, d.rating, d.series, d.series_position, d.release_year,
+                d.hc_slug, d.moods, d.genres, d.content_warnings, d.rating, d.user_rating, d.isbn, d.series, d.series_position, d.release_year,
                 COALESCE(d.status, CASE WHEN p.percentage >= 0.98 OR ${completedBookStatsSql('p.user_id', 'p.document')}
-                  THEN 'finished' ELSE 'reading' END) AS status,
+                  THEN 'finished' WHEN p.device_id IS NULL THEN 'paused' ELSE 'reading' END) AS status,
                 d.status_at, d.pause_reason
-         FROM progress p
+         FROM library p
          LEFT JOIN documents d ON d.user_id = p.user_id AND d.document = p.document
          WHERE p.user_id = ?
-           AND p.updated_at = (
+           AND (p.device_id IS NULL OR (p.updated_at = (
              SELECT MAX(p2.updated_at) FROM progress p2
              WHERE p2.user_id = p.user_id AND p2.document = p.document
            )
@@ -114,17 +125,17 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
              SELECT MIN(p3.device_id) FROM progress p3
              WHERE p3.user_id = p.user_id AND p3.document = p.document
                AND p3.updated_at = p.updated_at
-           )
+           )))
            AND (? IS NULL OR p.updated_at < ? OR (p.updated_at = ? AND p.document < ?))
          ORDER BY p.updated_at DESC, p.document DESC
          LIMIT ?`
       )
-      .all(user.id, cursor?.at ?? null, cursor?.at ?? null, cursor?.at ?? null, cursor?.document ?? null, limit + 1) as unknown as {
+      .all(user.id, ...(includeHistory ? [user.id] : []), user.id, cursor?.at ?? null, cursor?.at ?? null, cursor?.at ?? null, cursor?.document ?? null, limit + 1) as unknown as {
       document: string;
-      device_id: string;
-      device: string;
-      percentage: number;
-      progress: string;
+      device_id: string | null;
+      device: string | null;
+      percentage: number | null;
+      progress: string | null;
       position: string | null;
       updated_at: number;
       title: string | null;
@@ -138,6 +149,8 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
       genres: string | null;
       content_warnings: string | null;
       rating: number | null;
+      user_rating: number | null;
+      isbn: string | null;
       series: string | null;
       series_position: number | null;
       release_year: number | null;
@@ -168,6 +181,7 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
         }
         return {
           document: r.document,
+          history_only: r.device_id === null,
           title: r.title,
           author: r.author,
           filename: r.filename,
@@ -184,6 +198,8 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
           genres: list(r.genres),
           content_warnings: list(r.content_warnings),
           rating: r.rating,
+          user_rating: r.user_rating,
+          isbn: r.isbn,
           series: r.series,
           series_position: r.series_position,
           release_year: r.release_year,
