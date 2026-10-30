@@ -20,6 +20,7 @@ import type { HttpTransport } from '../../connectors/types.js';
 import { bookorbitExclusions, readBookorbitStats } from '../../models/bookorbit-stats.js';
 
 import { parseReadingSession } from '../../models/reading-sessions.js';
+import { combineReadingStreak } from '../../models/reading-streak.js';
 import { importBookorbitStats } from '../../connectors/bookorbit-stats.js';
 
 const MAX_BOOK_BATCH = 20;
@@ -302,6 +303,21 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
         updated_at: r.updated_at,
       })), ...(imported.global.sessions ? [{ device_id: 'connector:bookorbit', device: 'BookOrbit', updated_at: imported.updated_at }] : [])],
     });
+  });
+
+  // Compact response: readers never need to buffer the unbounded activity/summary payload.
+  app.get('/stats/streak', (c) => {
+    const userId = c.get('user').id;
+    const tz = Number(c.req.query('tz') ?? 0);
+    if (!Number.isInteger(tz) || Math.abs(tz) > 14 * 60) {
+      return kosyncError(c, 403, 2003, 'Invalid timezone');
+    }
+    const snapshots = db.prepare('SELECT payload FROM stats_device_global WHERE user_id = ?')
+      .all(userId).map((r) => JSON.parse(r.payload as string) as GlobalStatsSnapshot);
+    const activity = readingActivity(db, userId, tz);
+    const daily = db.prepare('SELECT DISTINCT date FROM stats_device_day WHERE user_id = ? AND seconds > 0')
+      .all(userId).map((r) => r.date as string);
+    return c.json(combineReadingStreak(snapshots, [...activity.reading_days, ...daily], tz));
   });
 
   app.get('/stats/books/:document', (c) => {

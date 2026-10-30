@@ -144,6 +144,34 @@ malformed, so nothing partial is written.
 
 ## 3. Reading combined stats back (optional, for the stats screen)
 
+### Two-way reading streak
+
+`GET /api/v1/stats/streak?tz=<minutes>` returns a compact calendar for readers:
+
+```json
+{"v":1,"anchor_day":9799,"history_b64":"<92 bytes in base64>","streak":21,"current_streak":5}
+```
+
+`tz` follows JavaScript's `Date#getTimezoneOffset()` convention (New York at
+UTC−4 sends `240`). The anchor is today in that timezone; bit N represents
+`anchor_day - N`, with the same bit order as global uploads. The 730-day bitmap
+combines device calendars, recorded daily reading, imported BookOrbit days,
+progress-sync days, and the calendar's chosen start/finish dates. Duplicate days
+count once; future dates are excluded. Longest streak uses all available dated
+history, including dates older than the bitmap. Current streak allows today to
+remain unread and is bounded by the 730-day reader window.
+
+CrossInk downloads this after uploading overall stats, including from an empty
+device with nothing to upload. It keeps a separate, server/account-specific
+calendar and combines it with local reading only when displaying streaks.
+Downloaded history and totals never become part of device uploads or nearby
+exports. Each successful download replaces the cached server calendar so date
+edits take effect; local offline reading is preserved. Older servers returning
+404/405 continue to sync without this download. Failed or malformed responses
+retain the last good calendar. Reading Stats must be enabled under What to Sync.
+
+### Other combined statistics
+
 - `GET /api/v1/stats/summary` — everything already combined server-side: scalars and `tod`/`dow`
   summed across devices, history bitmaps OR-ed after re-anchoring to the newest `anchor_day`,
   `streak` (all-time longest) and `current_streak` recomputed from the combined calendar. The
@@ -154,7 +182,8 @@ malformed, so nothing partial is written.
   nearby sync: display, never merge into local files.
 - `GET /api/v1/stats/books/{document}` — per-device rows plus a `combined` object for one book.
 
-All responses at current data sizes are well under 8KB; parse with a bounded JsonDocument.
+The streak response fits a 256-byte receive buffer. Other responses grow with
+history and device count; do not buffer them in the reader's streak-sync path.
 
 ## 4. When to sync
 
