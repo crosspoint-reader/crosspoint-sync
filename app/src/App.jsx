@@ -416,9 +416,9 @@ function Home({ session, onSession, onLogout, theme }) {
   else page = <Library session={session} books={books} summary={summary} activity={activity} />
 
   return (
-    <div className="min-h-screen-safe md:flex md:pl-60 lg:pl-64">
+    <div className="app-layout min-h-screen-safe md:flex md:pl-60 lg:pl-64">
       <Sidebar route={route} session={session} />
-      <main className="relative mx-auto w-full min-w-0 max-w-xl pb-16 md:max-w-6xl md:pb-10">
+      <main className="app-main relative mx-auto w-full min-w-0 max-w-xl pb-16 md:max-w-6xl md:pb-10">
         {isOffline && (
           <div className="sticky top-[env(safe-area-inset-top)] z-30 flex items-center justify-center gap-2 bg-stone-800 px-4 py-2 text-xs font-medium text-stone-100">
             <CloudOff className="size-3.5" /> Offline. Showing what was saved on this device.

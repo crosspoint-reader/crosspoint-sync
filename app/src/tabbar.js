@@ -5,6 +5,7 @@ import {
   hideTabBar,
   onComponentEvent,
   onTabSelected,
+  onTabBarLayoutChanged,
   removeComponent,
   removeTabBar,
   selectTab,
@@ -15,19 +16,12 @@ import { isApp } from './api.js'
 
 // Resolve before React mounts; older iPhones keep the same HTML controls as Android.
 export let nativeTabBar = false
-let wide
+let ready = false
 export async function initializeNavigation() {
   if (isApp && /iPhone/.test(navigator.userAgent)) {
     nativeTabBar = await invoke('supports_native_chrome').catch(() => false)
   }
-  wide = nativeTabBar ? matchMedia('(min-width: 768px)') : null
   document.documentElement.classList.toggle('native-chrome', nativeTabBar)
-  // Shows the top scroll edge effect (index.css) once content is under the buttons.
-  if (nativeTabBar) {
-    const on = () => document.documentElement.classList.toggle('scrolled', scrollY > 0)
-    addEventListener('scroll', on, { passive: true })
-    on()
-  }
 }
 
 let sheets = 0
@@ -40,23 +34,22 @@ const sync = () => {
   if (isApp) invoke('set_page_scroll', { enabled: !open }).catch(() => {})
   window.CrossPointRefresh?.setEnabled(!open)
   if (!nativeTabBar) return
-  const hidden = wide.matches || sheets > 0
+  const hidden = sheets > 0
   ;(hidden ? hideTabBar() : showTabBar()).catch(() => {})
   syncButtons(!hidden)
 }
 
-// Glass buttons pinned to the top corners (gear, back, a page's ⋯ menu), iOS 26
-// style. Components have no hide, so they're removed and recreated around sheets.
+// UIKit places actions in the top navigation bar or Duo’s vertical rail.
+// Components have no hide, so they are removed and recreated around sheets.
 const buttons = new Map() // id -> { sfSymbol, anchor, click, shown }
 let listening = false
 function syncButtons(show) {
+  if (!ready) return
   for (const [id, b] of buttons) {
     if (show && !b.shown) {
       b.shown = true
-      // No `label`: the plugin renders it as visible title text beside the symbol.
-      // The button is already glass on iOS 26; `glass` would wrap it in a second capsule.
-      const props = { sfSymbol: b.sfSymbol, width: 44, height: 44 }
-      createComponent({ id, kind: 'button', anchor: b.anchor, dx: 12, dy: 8, props }).catch(() => {})
+      const props = { sfSymbol: b.sfSymbol, label: b.label }
+      createComponent({ id, kind: 'button', navigation: b.anchor === 'topLeading' ? 'leading' : 'trailing', props }).catch(() => {})
     } else if (!show && b.shown) {
       b.shown = false
       removeComponent(id).catch(() => {})
@@ -64,7 +57,7 @@ function syncButtons(show) {
   }
 }
 
-export function useNativeButton(id, { sfSymbol, anchor }, onClick) {
+export function useNativeButton(id, { sfSymbol, anchor, label = id }, onClick) {
   const click = useRef(onClick)
   click.current = onClick
   useEffect(() => {
@@ -73,18 +66,18 @@ export function useNativeButton(id, { sfSymbol, anchor }, onClick) {
       listening = true
       onComponentEvent((e) => e.event === 'click' && buttons.get(e.id)?.click()).catch(() => {})
     }
-    buttons.set(id, { sfSymbol, anchor, click: () => click.current(), shown: false })
-    syncButtons(!(wide.matches || sheets > 0))
+    buttons.set(id, { sfSymbol, anchor, label, click: () => click.current(), shown: false })
+    syncButtons(sheets === 0)
     return () => {
       if (buttons.get(id)?.shown) removeComponent(id).catch(() => {})
       buttons.delete(id)
     }
-  }, [id, sfSymbol, anchor])
+  }, [id, sfSymbol, anchor, label])
 }
 
 // to: a hash, or a function (e.g. history.back).
 export const useNativeBack = (to) =>
-  useNativeButton('back', { sfSymbol: 'chevron.left', anchor: 'topLeading' }, () =>
+  useNativeButton('back', { sfSymbol: 'chevron.backward', anchor: 'topLeading', label: 'Back' }, () =>
     typeof to === 'function' ? to() : (location.hash = to)
   )
 
@@ -92,14 +85,31 @@ export const useNativeBack = (to) =>
 export function mountTabBar(items, selectedId) {
   let live = true
   let listener
-  configureTabBar({ items, selectedId, tint: '#4a7a62' }).then(sync, () => {})
+  let layoutListener
+  onTabBarLayoutChanged((insets) => {
+    if (!live) return
+    for (const edge of ['top', 'right', 'bottom', 'left']) {
+      document.documentElement.style.setProperty(`--native-inset-${edge}`, `${insets[edge]}px`)
+    }
+  }).then(async (subscription) => {
+    if (!live) { subscription.unregister(); return }
+    layoutListener = subscription
+    await configureTabBar({ items, selectedId, tint: '#4a7a62', layout: 'adaptive' })
+    if (!live) return
+    ready = true
+    document.documentElement.classList.add('native-adaptive')
+    sync()
+  }).catch(() => {})
   // replace, not push: switching tabs isn't a step the back swipe should undo.
   onTabSelected(({ id }) => location.replace(id)).then((l) => (live ? (listener = l) : l.unregister()), () => {})
-  wide.addEventListener('change', sync)
   return () => {
     live = false
     listener?.unregister()
-    wide.removeEventListener('change', sync)
+    layoutListener?.unregister()
+    ready = false
+    for (const b of buttons.values()) b.shown = false
+    document.documentElement.classList.remove('native-adaptive')
+    for (const edge of ['top', 'right', 'bottom', 'left']) document.documentElement.style.removeProperty(`--native-inset-${edge}`)
     removeTabBar().catch(() => {})
   }
 }

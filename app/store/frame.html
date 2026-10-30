@@ -29,6 +29,7 @@ h1 { font-family:Lora; font-weight:600; font-size:var(--h,76px); line-height:1.1
 .ios .scr { position:relative; border-radius:calc(var(--U) * var(--sr)) }
 .iphone { --bz:10; --sr:62; --or:72 }
 .ipad { --bz:28; --sr:18; --or:46 }
+.duo { --bz:12; --sr:34; --or:44 }
 .sbar { position:absolute; inset:0 0 auto; background:#fafaf9; display:grid; align-items:center; color:#000; font-weight:600; letter-spacing:-0.01em }
 .iphone .sbar { height:calc(var(--U) * 59); grid-template-columns:1fr calc(var(--U) * 126) 1fr; justify-items:center; font-size:calc(var(--U) * 17) }
 .ipad .sbar { height:calc(var(--U) * 24); grid-template-columns:auto 1fr auto; padding:0 calc(var(--U) * 22); font-size:calc(var(--U) * 13.5) }
@@ -58,8 +59,8 @@ const FLAT = 'border-top-left-radius:0;border-top-right-radius:0'
 const cap = (style, cls = '') => `<div class="cap ${cls}" style="${style}"><div class="kick">${s.kick}</div><h1>${s.head}</h1></div>`
 // height: show only the top of the screen (a device running off the canvas).
 const dev = (style, height, src = s.shot) => IOS ? iosDev(style, height, src) : `<div class="dev" style="${D};${style}"><div class="scr"${height ? ` style="height:${height}px"` : ''}><img src="${src}"></div></div>`
-// iPhone 6.9" / iPad 13": status bar, Dynamic Island, home indicator, side buttons. Widths in points, bezel included.
-const IOS = { iphone: 460, ipad: 1088 }[s.dev]
+// iPhone 6.9" / iPad 13" / iPhone Duo inner display: status bar, Dynamic Island, home indicator, side buttons. Widths in points, bezel included.
+const IOS = { iphone: 460, ipad: 1088, duo: 693 }[s.dev]
 const ICONS = '<span class="ic">'
   + '<svg viewBox="0 0 18 12"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/></svg>'
   + '<svg viewBox="0 0 16 12"><path d="M8 2.6c2.3 0 4.4.9 6 2.4l1.3-1.4A10.6 10.6 0 0 0 8 .7 10.6 10.6 0 0 0 .7 3.6L2 5c1.6-1.5 3.7-2.4 6-2.4Zm0 3.7c1.3 0 2.5.5 3.4 1.3l1.3-1.4A6.8 6.8 0 0 0 8 4.4c-1.8 0-3.4.7-4.7 1.8L4.6 7.6A4.9 4.9 0 0 1 8 6.3Zm0 3.7c.4 0 .8.1 1.1.4L8 11.7 6.9 10.4c.3-.3.7-.4 1.1-.4Z"/></svg>'
@@ -74,13 +75,16 @@ const BUTTONS = {
     + `<div class="btn" style="right:${u(-4)};top:${u(110)};width:${u(4)};height:${u(55)}"></div>`
     + `<div class="btn" style="right:${u(-4)};top:${u(175)};width:${u(4)};height:${u(55)}"></div>`
     + `<div class="cam" style="right:${u(10.5)};top:50%"></div>`,
+  duo: (u) => `<div class="btn" style="right:${u(-4)};top:${u(150)};width:${u(4)};height:${u(70)}"></div>`
+    + `<div class="btn" style="right:${u(-4)};top:${u(240)};width:${u(4)};height:${u(100)}"></div>`,
 }
 function iosDev(style, height, src) {
   const u = (n) => `calc(var(--U) * ${n})`
-  const bar = s.dev === 'iphone' ? `<div class="sbar"><span>9:41</span><span></span>${ICONS}</div><div class="island"></div>`
+  // Duo shots come from the simulator, with the real status bar and home indicator.
+  const bar = s.dev === 'duo' ? '' : s.dev === 'iphone' ? `<div class="sbar"><span>9:41</span><span></span>${ICONS}</div><div class="island"></div>`
     : `<div class="sbar"><span>9:41&ensp;Mon Oct 19</span><span></span>${ICONS}</div>`
   // height is a cap: a shorter capture shows whole (the home indicator is hidden below if it's cut off).
-  return `<div class="dev ios ${s.dev}" style="${style}"><div class="scr"${height ? ` style="max-height:${height}px"` : ''}><img src="${src}">${bar}<div class="home"></div></div>${BUTTONS[s.dev](u)}</div>`
+  return `<div class="dev ios ${s.dev}" style="${style}"><div class="scr"${height ? ` style="max-height:${height}px"` : ''}><img src="${src}">${bar}${s.dev === 'duo' ? '' : '<div class="home"></div>'}</div>${BUTTONS[s.dev](u)}</div>`
 }
 const call = (style, src = s.shot, crop = s.crop) =>
   `<div class="call" data-crop="${crop}" style="${style};aspect-ratio:${crop[2]}/${crop[3]}"><img src="${src}"></div>`
@@ -146,7 +150,7 @@ for (const d of document.querySelectorAll('.ios')) d.style.setProperty('--u', `$
 
 await document.fonts.ready
 await Promise.all([...document.images].map((i) => i.decode()))
-for (const scr of document.querySelectorAll('.ios .scr')) if (scr.clientHeight < scr.firstChild.clientHeight) scr.querySelector('.home').remove()
+for (const scr of document.querySelectorAll('.ios .scr')) if (scr.clientHeight < scr.firstChild.clientHeight) scr.querySelector('.home')?.remove()
 // Position each callout's screenshot so only its crop shows, enlarged to the callout's width.
 for (const box of document.querySelectorAll('.call')) {
   const [x, y, w] = box.dataset.crop.split(',').map(Number), img = box.firstChild, k = box.clientWidth / w

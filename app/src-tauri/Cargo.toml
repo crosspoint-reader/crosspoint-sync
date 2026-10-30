@@ -29,8 +29,8 @@ tauri-plugin-opener = "2"
 # https app links back from browser sign-in.
 tauri-plugin-deep-link = "2"
 tauri-plugin-haptics = "2"
-# Native Liquid Glass tab bar on iPhone (stubs elsewhere). One-person 0.x crate: pinned.
-tauri-plugin-system-components = "=0.1.8"
+# UIKit-managed iPhone/Duo navigation from our fork, pinned with the JS package.
+tauri-plugin-system-components = { git = "https://github.com/itsthisjustin/tauri-plugin-system-components", rev = "348476a5bd4ff19c95a944d9a5d93bf403d4e07b" }
 
 [target.'cfg(target_os = "ios")'.dependencies]
 objc2 = "0.6"

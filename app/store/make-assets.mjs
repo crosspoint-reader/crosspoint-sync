@@ -3,7 +3,7 @@
 // captures with frame.html. Usage: node make-assets.mjs [out-dir]. See README.md.
 import { execFileSync, spawn } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import http from 'node:http'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -64,6 +64,7 @@ const CROPS = {
   t7: { chart: [58, 890, 1084, 460], quote: [58, 272, 1084, 320], device: [58, 500, 1084, 180], conn: [54, 1048, 1092, 270] },
   t10: { chart: [600, 738, 1856, 400], quote: [604, 248, 1312, 280], device: [604, 466, 896, 160] },
   iphone: { chart: [48, 1511, 1224, 690], quote: [45, 586, 1230, 570], device: [48, 943, 1226, 245], conn: [48, 448, 1226, 450] },
+  duo: {}, // measured below
   ipad: { chart: [600, 786, 1400, 400], quote: [604, 296, 1300, 280], device: [607, 512, 650, 165], conn: [607, 871, 666, 289], svc: [607, 1048, 1155, 298] },
 }
 // Whole UI cards for the App Store header and search images: [iphone screen, crop in capture pixels].
@@ -82,6 +83,10 @@ const CAPTIONS = {
   send: ['Send to reader', 'Books to your CrossPoint over Wi‑Fi'],
   settings: ['Connected services', 'Sync to the services you already use'],
 }
+// The iPhone Duo set runs the real app in this simulator; DUO=0 skips it.
+// Its own simulator, named so `tauri ios dev` can't match a real iPhone Duo instead.
+const DUO = process.env.DUO !== '0', DUO_SIM = 'CrossPoint Store Duo'
+let simShot = {}, simPolled = false // what the simulator app shows; set once it first polls
 // [output prefix, device, canvas size, frame device, [[screen, layout, crop]], scale]
 // iOS canvases are drawn near the 1080-wide layouts and scaled up to Apple's exact pixel sizes.
 const SETS = [
@@ -105,7 +110,12 @@ const SETS = [
     ['library', 'p-top'], ['book', 'p-paper', 'conn'], ['stats', 'p-tiltcall', 'chart'],
     ['clippings', 'p-bottom'], ['send', 'p-split', 'device'], ['settings', 'p-paper', 'svc'],
   ], 2],
-]
+  // Captured from the iPhone Duo simulator (inner display), not Chrome; resized to exactly 2007x2853 below.
+  ['iphone-duo', 'duo', [1032, 1467], 'duo', [
+    ['library', 'p-top'], ['book', 'p-paper', 'conn'], ['stats', 'p-tiltcall', 'chart'],
+    ['clippings', 'p-bottom'], ['send', 'p-split', 'device'], ['settings', 'p-paper', 'conn'],
+  ], 2007 / 1032],
+].filter(([prefix]) => prefix !== 'iphone-duo' || DUO)
 
 const stops = []
 try {
@@ -123,10 +133,14 @@ try {
     const screens = Object.keys(ROUTES).filter((s) => (s !== 'settings' || ['phone', 'iphone', 'ipad'].includes(tag)) && (s !== 'days' || tag === 'iphone'))
     await capture(browser, tag, viewport, scale, mobile, screens, insets)
   }
+  if (DUO) await captureDuo(Object.keys(ROUTES).filter((s) => s !== 'days'))
   for (const [prefix, tag, [w, h], dev, frames, scale] of SETS) {
     for (const [n, [screen, layout, crop]] of frames.entries()) {
       const [kick, head] = CAPTIONS[screen]
-      await frame(browser, w, h, { layout, dev, kick, head, shot: raw(`${tag}-${screen}`), crop: crop && CROPS[tag][crop] }, `${prefix}-${n + 1}-${screen}.png`, scale)
+      const name = `${prefix}-${n + 1}-${screen}.png`
+      await frame(browser, w, h, { layout, dev, kick, head, shot: raw(`${tag}-${screen}`), crop: crop && CROPS[tag][crop] }, name, scale)
+      // A fractional scale can land a pixel off Apple's size; no alpha either.
+      if (tag === 'duo') execFileSync('magick', [path.join(OUT, name), '-resize', '2007x2853!', '-alpha', 'off', `PNG24:${path.join(OUT, name)}`])
     }
   }
   const icon = `data:image/svg+xml;base64,${readFileSync(path.join(APP, 'src-tauri/icons/icon-ios.svg')).toString('base64')}`
@@ -279,11 +293,70 @@ async function startVite() {
     root: APP,
     cacheDir: path.join(HERE, 'node_modules/.vite'),
     logLevel: 'warn',
-    server: { port: VITE_PORT, strictPort: true },
+    // All interfaces: `tauri ios dev` points the simulator at the Mac's LAN address.
+    server: { port: VITE_PORT, strictPort: true, host: true },
     resolve: { alias: { '@tauri-apps/plugin-http': path.join(HERE, 'http-shim.js') } },
+    plugins: [simDriver()],
   })
   await vite.listen()
   stops.push(() => vite.close())
+}
+
+// The simulator app loads ?sim: sign in to the local stand-ins, then follow /__shot ({route, anchor})
+// set by captureDuo. Chrome never loads ?sim, so its captures are unaffected.
+function simDriver() {
+  const session = { server: `http://localhost:${SYNC_PORT}`, username: USER, key: KEY }
+  const device = { host: `localhost:${READER_PORT}`, folder: '/', optimize: true, quality: 70, renameFromMetadata: true }
+  const script = `if (location.search.includes('sim')) {
+    localStorage.setItem('crosspoint-sync-session', ${JSON.stringify(JSON.stringify(session))})
+    localStorage.setItem('crosspoint-device', ${JSON.stringify(JSON.stringify(device))})
+    let shown
+    setInterval(async () => {
+      const { route, anchor } = await fetch('/__shot').then((r) => r.json())
+      if (route === undefined || route + anchor === shown) return
+      shown = route + anchor
+      window.scrollTo(0, 0)
+      location.hash = '#/' + route
+      if (anchor) setTimeout(() => {
+        const e = [...document.querySelectorAll('body *')].find((e) => !e.children.length && e.textContent.trim() === anchor)
+        if (e) window.scrollBy(0, e.getBoundingClientRect().top - 24 - parseFloat(getComputedStyle(document.body).paddingTop))
+      }, 2500)
+    }, 300)
+  }`
+  return {
+    name: 'sim-driver',
+    transformIndexHtml: () => [{ tag: 'script', children: script, injectTo: 'head-prepend' }],
+    configureServer: (server) => { server.middlewares.use('/__shot', (req, res) => (simPolled = true, res.end(JSON.stringify(simShot)))) },
+  }
+}
+
+// Runs the real app in the iPhone Duo simulator (inner display, 2007x2853) against the stand-ins
+// and screenshots each screen with simctl. The folded outer display isn't exposed by simctl.
+async function captureDuo(screens) {
+  const list = () => Object.values(JSON.parse(execFileSync('xcrun', ['simctl', 'list', 'devices', 'available', '-j'])).devices).flat()
+  let sim = list().find((d) => d.name === DUO_SIM)
+  if (!sim) execFileSync('xcrun', ['simctl', 'create', DUO_SIM, 'com.apple.CoreSimulator.SimDeviceType.iPhone-Duo']), sim = list().find((d) => d.name === DUO_SIM)
+  const udid = sim.udid
+  if (sim.state !== 'Booted') execFileSync('xcrun', ['simctl', 'bootstatus', udid, '-b'])
+  const log = path.join(TMP, 'duo.log')
+  const config = JSON.stringify({ build: { devUrl: `http://localhost:${VITE_PORT}/?sim=1`, beforeDevCommand: '' } })
+  const child = spawn('npx', ['tauri', 'ios', 'dev', DUO_SIM, '--no-watch', '--config', config], { cwd: APP, detached: true, stdio: ['ignore', openSync(log, 'w'), openSync(log, 'a')] })
+  stops.push(() => { try { process.kill(-child.pid) } catch {} })
+  // First build takes minutes; the app is up once it polls /__shot.
+  for (let i = 0; !simPolled; i++) {
+    if (i > 1200 || child.exitCode !== null) throw new Error(`iPhone Duo app did not start, see:\n${readFileSync(log, 'utf8').slice(-2000)}`)
+    await sleep(500)
+  }
+  execFileSync('xcrun', ['simctl', 'ui', udid, 'appearance', 'light'])
+  execFileSync('xcrun', ['simctl', 'status_bar', udid, 'override', '--time', '9:41', '--batteryState', 'charged', '--batteryLevel', '100', '--cellularBars', '4', '--wifiBars', '3'])
+  stops.push(() => execFileSync('xcrun', ['simctl', 'status_bar', udid, 'clear']))
+  await sleep(3000)
+  for (const screen of screens) {
+    const anchor = screen === 'settings' ? 'Connected services' : ''
+    simShot = { route: ROUTES[screen], anchor }
+    await sleep(anchor ? 5000 : 4000) // covers and charts settle
+    execFileSync('xcrun', ['simctl', 'io', udid, 'screenshot', path.join(TMP, 'raw', `duo-${screen}.png`)])
+  }
 }
 
 async function capture(browser, tag, viewport, scale, mobile, screens, [top, bottom] = [0, 0]) {

@@ -201,3 +201,19 @@ body::before {
 }
 /* The ⋯ menu drops from its pinned native button, wherever the page has scrolled. */
 .native-chrome .native-menu { position: fixed; top: calc(env(safe-area-inset-top) + 3.75rem); right: 0.75rem; }
+
+/* UIKit reports the full unobscured area, including Duo’s side status/navigation rail. */
+.native-adaptive body {
+  padding-top: max(env(safe-area-inset-top), var(--native-inset-top, 0px));
+  padding-right: max(env(safe-area-inset-right), var(--native-inset-right, 0px));
+  padding-bottom: max(env(safe-area-inset-bottom), var(--native-inset-bottom, 0px));
+  padding-left: max(env(safe-area-inset-left), var(--native-inset-left, 0px));
+}
+.native-adaptive body::before { display: none; }
+.native-adaptive .app-layout { padding-left: 0; }
+.native-adaptive .app-layout > aside { display: none; }
+.native-adaptive .app-main { padding-bottom: 1rem; }
+.native-adaptive .native-menu {
+  top: max(env(safe-area-inset-top), var(--native-inset-top, 0px));
+  right: calc(max(env(safe-area-inset-right), var(--native-inset-right, 0px)) + 0.75rem);
+}
