@@ -42,7 +42,7 @@
     "iOS": {
       "minimumSystemVersion": "16.0",
       "developmentTeam": "96247QW4R8",
-      "bundleVersion": "12"
+      "bundleVersion": "14"
     }
   },
   "plugins": {

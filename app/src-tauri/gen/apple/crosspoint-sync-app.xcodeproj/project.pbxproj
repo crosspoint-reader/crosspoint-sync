@@ -7,21 +7,21 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A65E756C12B6408AA9100005 /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A65E756C12B6408AA9100006 /* AppIntents.framework */; };
-		A65E756C12B6408AA9100003 /* ReadingIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65E756C12B6408AA9100004 /* ReadingIntents.swift */; };
-		A65E756C12B6408AA9100001 /* ShortcutsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65E756C12B6408AA9100002 /* ShortcutsStore.swift */; };
 		05558E78087CE893FD133EED /* WidgetReload.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0FDA312FF333FEE325F3784 /* WidgetReload.swift */; };
 		07E120DC37D4E3BA35660834 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1C1D61425D6C89B023A68699 /* WebKit.framework */; };
 		0D22C69FE6169D6661235690 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BECC0ABE484B2047607C4F0A /* SwiftUI.framework */; };
 		184305EE28170BE91A0DA0D7 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = FEFB9FFA8A213DFAD642AEFC /* LaunchScreen.storyboard */; };
+		26930D41AF0173E9DC95DB1D /* ReadingIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9C2A47499B657D91403171A /* ReadingIntents.swift */; };
 		2D845AD7D500CAD58A0C283F /* CrossPointWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1922371C0F5CFC459D6C1332 /* CrossPointWidget.swift */; };
 		38A781FCEAE687FC1641C387 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 06400398C81B2BCE0778BAED /* MetalKit.framework */; };
 		48D2AF32130B5363BE06202A /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AC24C231669D97CA7F96CC3C /* QuartzCore.framework */; };
 		50F60BB35B74F58955FA1F82 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1602AFD916563BCBF295CAFA /* CoreGraphics.framework */; };
 		646FF206604B0703C0D25282 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FE54F751F09F6D338C764211 /* WidgetKit.framework */; };
 		8123A3E1D890F9F0D629F62F /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5B97ABE31780B7A6C5CAD74D /* Metal.framework */; };
+		9BE7E1E29C1F714FE65A5632 /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0AC18FF775756AF567A89A26 /* AppIntents.framework */; };
 		9CC5FA4D3B3EEAB970E0A4DE /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = 917F15BCA5CFDD43F04EE308 /* main.mm */; };
 		ACF9F68415059FC751B85E40 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 72ED45BA68D8C2F5A99C542D /* Assets.xcassets */; };
+		AEF42744360CA8E5CB715DE7 /* ShortcutsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D3121F5354631B1BCA5122B /* ShortcutsStore.swift */; };
 		C5448F553016109426054C67 /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = D14F66F0D47B664F9709AE4F /* libapp.a */; };
 		CEA14FCBC23E088D806332E2 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BEF7345547BE54CBD0CAA946 /* UIKit.framework */; };
 		D56C36B404A08FF3DD12A020 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = E4672BC0025EFAC99DE67520 /* AppIcon.icon */; };
@@ -56,16 +56,15 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		A65E756C12B6408AA9100006 /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
-		A65E756C12B6408AA9100004 /* ReadingIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingIntents.swift; sourceTree = "<group>"; };
-		A65E756C12B6408AA9100002 /* ShortcutsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutsStore.swift; sourceTree = "<group>"; };
 		06400398C81B2BCE0778BAED /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
+		0AC18FF775756AF567A89A26 /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
 		0ADABAFF8038D69A13E988F1 /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
 		1602AFD916563BCBF295CAFA /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
 		17ACFB99C55BF8081926A15E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		1922371C0F5CFC459D6C1332 /* CrossPointWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossPointWidget.swift; sourceTree = "<group>"; };
 		1C1D61425D6C89B023A68699 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
 		1CFA2E0FA07D12CBE7461BDD /* CrossPointWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CrossPointWidget.entitlements; sourceTree = "<group>"; };
+		2F812DCFCA0E7934743F675B /* shortcuts_cache.rs */ = {isa = PBXFileReference; path = shortcuts_cache.rs; sourceTree = "<group>"; };
 		4AE2C3E46EF866376181162A /* main.rs */ = {isa = PBXFileReference; path = main.rs; sourceTree = "<group>"; };
 		4D9B295417CA01F08FBEAF53 /* feed.rs */ = {isa = PBXFileReference; path = feed.rs; sourceTree = "<group>"; };
 		5B97ABE31780B7A6C5CAD74D /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
@@ -76,6 +75,7 @@
 		7CC754790240CD99815BE1B6 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		8379E0BC616B63E8DF220A7F /* crosspoint-sync-app_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "crosspoint-sync-app_iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		8C6F962704EE8ACE50636956 /* lib.rs */ = {isa = PBXFileReference; path = lib.rs; sourceTree = "<group>"; };
+		8D3121F5354631B1BCA5122B /* ShortcutsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutsStore.swift; sourceTree = "<group>"; };
 		917F15BCA5CFDD43F04EE308 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
 		A4B09C10DA0C22B267D90C67 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		AC24C231669D97CA7F96CC3C /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
@@ -85,6 +85,7 @@
 		BECC0ABE484B2047607C4F0A /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		BEF7345547BE54CBD0CAA946 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
 		C0FDA312FF333FEE325F3784 /* WidgetReload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetReload.swift; sourceTree = "<group>"; };
+		C9C2A47499B657D91403171A /* ReadingIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingIntents.swift; sourceTree = "<group>"; };
 		D14F66F0D47B664F9709AE4F /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		DB9EA204EB38B3A7B57FFDE6 /* books.rs */ = {isa = PBXFileReference; path = books.rs; sourceTree = "<group>"; };
 		DEB175945B16E108EDD85D78 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
@@ -117,9 +118,9 @@
 				48D2AF32130B5363BE06202A /* QuartzCore.framework in Frameworks */,
 				E5C50AE36BA05B191B1F4EB0 /* Security.framework in Frameworks */,
 				CEA14FCBC23E088D806332E2 /* UIKit.framework in Frameworks */,
+				9BE7E1E29C1F714FE65A5632 /* AppIntents.framework in Frameworks */,
 				07E120DC37D4E3BA35660834 /* WebKit.framework in Frameworks */,
 				E952F1320553223057A59239 /* WidgetKit.framework in Frameworks */,
-				A65E756C12B6408AA9100005 /* AppIntents.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -142,6 +143,7 @@
 				4AE2C3E46EF866376181162A /* main.rs */,
 				75F208D74C3164B18C8AFAE5 /* mdns.rs */,
 				725351A937E063D1D025CF2A /* refresh.rs */,
+				2F812DCFCA0E7934743F675B /* shortcuts_cache.rs */,
 				6A1455ECBA39E1ACC7E634A5 /* widget.rs */,
 				C1BB4D8BDB160ADDCC937AC4 /* opds */,
 			);
@@ -162,9 +164,9 @@
 			isa = PBXGroup;
 			children = (
 				917F15BCA5CFDD43F04EE308 /* main.mm */,
+				C9C2A47499B657D91403171A /* ReadingIntents.swift */,
+				8D3121F5354631B1BCA5122B /* ShortcutsStore.swift */,
 				C0FDA312FF333FEE325F3784 /* WidgetReload.swift */,
-				A65E756C12B6408AA9100004 /* ReadingIntents.swift */,
-				A65E756C12B6408AA9100002 /* ShortcutsStore.swift */,
 				967C288423B4F5D0AD41A6A9 /* bindings */,
 			);
 			path = "crosspoint-sync-app";
@@ -183,6 +185,7 @@
 		69BB132C411040FA2B328543 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				0AC18FF775756AF567A89A26 /* AppIntents.framework */,
 				1602AFD916563BCBF295CAFA /* CoreGraphics.framework */,
 				D14F66F0D47B664F9709AE4F /* libapp.a */,
 				5B97ABE31780B7A6C5CAD74D /* Metal.framework */,
@@ -193,7 +196,6 @@
 				BEF7345547BE54CBD0CAA946 /* UIKit.framework */,
 				1C1D61425D6C89B023A68699 /* WebKit.framework */,
 				FE54F751F09F6D338C764211 /* WidgetKit.framework */,
-				A65E756C12B6408AA9100006 /* AppIntents.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -251,18 +253,18 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		"TEMP_2222BFBE-41E3-4373-A496-C47BE6161615" /* arm64 */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = arm64;
-			sourceTree = "<group>";
-		};
-		"TEMP_BF418384-1464-4A0A-BAF2-93ED4D8CCC41" /* x86_64 */ = {
+		"TEMP_29B1D629-CC57-4EF8-9414-3AB1CC55DCBB" /* x86_64 */ = {
 			isa = PBXGroup;
 			children = (
 			);
 			path = x86_64;
+			sourceTree = "<group>";
+		};
+		"TEMP_B069490B-D65E-4683-9568-873873D8F64C" /* arm64 */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = arm64;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -394,9 +396,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				26930D41AF0173E9DC95DB1D /* ReadingIntents.swift in Sources */,
+				AEF42744360CA8E5CB715DE7 /* ShortcutsStore.swift in Sources */,
 				05558E78087CE893FD133EED /* WidgetReload.swift in Sources */,
-				A65E756C12B6408AA9100003 /* ReadingIntents.swift in Sources */,
-				A65E756C12B6408AA9100001 /* ShortcutsStore.swift in Sources */,
 				9CC5FA4D3B3EEAB970E0A4DE /* main.mm in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

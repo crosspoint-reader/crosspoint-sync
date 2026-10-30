@@ -57,7 +57,7 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         CFBundleShortVersionString: 0.1.1
-        CFBundleVersion: "12"
+        CFBundleVersion: "14"
         # iOS 27 refuses to launch SDK-27 apps on the legacy app-delegate
         # lifecycle; tao (>= 0.37) switches to its scene delegate when this is set.
         UIApplicationSceneManifest:
@@ -129,7 +129,7 @@ targets:
       properties:
         CFBundleDisplayName: CrossPoint Sync
         CFBundleShortVersionString: 0.1.1
-        CFBundleVersion: "12"
+        CFBundleVersion: "14"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
         # The widget fetches from the sync server itself; a self-hosted one on the LAN may be plain http.

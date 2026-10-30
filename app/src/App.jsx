@@ -277,10 +277,11 @@ function SettingsLink() {
   )
 }
 
-// iPad / desktop: sidebar.
+// iPad / desktop: sidebar. Fixed, not sticky: sticky rides along when the page rubber-bands.
+// Runs to the bottom and left screen edges; padding keeps its contents out of the insets.
 function Sidebar({ route, session }) {
   return (
-    <aside className="sticky top-[env(safe-area-inset-top)] hidden h-screen-safe w-60 shrink-0 flex-col border-r border-stone-200 bg-surface/60 px-4 py-6 md:flex lg:w-64">
+    <aside className="fixed top-[env(safe-area-inset-top)] bottom-0 left-0 hidden w-[calc(15rem+env(safe-area-inset-left))] flex-col border-r border-stone-200 bg-surface/60 pt-6 pr-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pl-[calc(1rem+env(safe-area-inset-left))] md:flex lg:w-[calc(16rem+env(safe-area-inset-left))]">
       {/* 44px band at the top, matching each page's first row (back button / title). */}
       <div className="flex h-11 items-center gap-2.5 px-2">
         <img src={`${import.meta.env.BASE_URL}logo.png`} alt="" className="size-8 rounded-lg" />
@@ -415,9 +416,9 @@ function Home({ session, onSession, onLogout, theme }) {
   else page = <Library session={session} books={books} summary={summary} activity={activity} />
 
   return (
-    <div className="min-h-screen-safe md:flex">
+    <div className="min-h-screen-safe md:flex md:pl-60 lg:pl-64">
       <Sidebar route={route} session={session} />
-      <main className="relative mx-auto w-full min-w-0 max-w-xl pb-24 md:max-w-6xl md:pb-10">
+      <main className="relative mx-auto w-full min-w-0 max-w-xl pb-16 md:max-w-6xl md:pb-10">
         {isOffline && (
           <div className="sticky top-[env(safe-area-inset-top)] z-30 flex items-center justify-center gap-2 bg-stone-800 px-4 py-2 text-xs font-medium text-stone-100">
             <CloudOff className="size-3.5" /> Offline. Showing what was saved on this device.
