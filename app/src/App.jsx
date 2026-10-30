@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { ChartColumn, CloudOff, Compass, Quote, Eye, EyeOff, LibraryBig, Loader2, Lock, Send as SendIcon, Server, Settings as SettingsIcon, User } from 'lucide-react'
+import { ChartColumn, CloudOff, Compass, MessageSquareQuote, Eye, EyeOff, LibraryBig, Loader2, Lock, Send as SendIcon, Server, Settings as SettingsIcon, User } from 'lucide-react'
 import { useTheme } from './theme.js'
 import { DEFAULT_SERVER, syncShortcutsCache, api, hostedServer, isApp, lastServer, loadSession, login, logout, offline, cached, register, saveSession } from './api.js'
 import { ErrorNote, LoadCacheProvider, PageSkeleton, RefreshPill, Toaster, useLoad } from './ui.jsx'
@@ -226,7 +226,7 @@ const NAV = [
   { href: '#/', label: 'Library', icon: LibraryBig, sf: 'books.vertical', active: (r) => !['stats', 'send', 'browse', 'clippings', 'settings'].includes(r) },
   // Browse and Send need the app (catalog access and the reader on your Wi-Fi), so the web leaves them out.
   ...(isApp ? [{ href: '#/browse', label: 'Browse', icon: Compass, sf: 'safari', active: (r) => r === 'browse' }] : []),
-  { href: '#/clippings', label: 'Clippings', icon: Quote, sf: 'quote.opening', active: (r) => r === 'clippings' },
+  { href: '#/clippings', label: 'Clippings', icon: MessageSquareQuote, sf: 'quote.bubble', active: (r) => r === 'clippings' },
   { href: '#/stats', label: 'Stats', icon: ChartColumn, sf: 'chart.bar', active: (r) => r === 'stats' },
   ...(isApp ? [{ href: '#/send', label: 'Send', icon: SendIcon, sf: 'paperplane', active: (r) => r === 'send' }] : []),
 ]

@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { Copy, FileDown, Quote, Search } from 'lucide-react'
+import { Copy, FileDown, MessageSquareQuote, Search } from 'lucide-react'
 import { api, cached, isApp } from './api.js'
 import { saveFile } from './shareCard.js'
 import { ClipMenu, ClipShare, DeleteClip, hold } from './Book.jsx'
@@ -145,7 +145,7 @@ export default function Clippings({ session, books }) {
         <Spinner />
       ) : all.length === 0 ? (
         <div className="mt-6 md:max-w-2xl">
-          <EmptyState icon={Quote} note="Clean margins, for now" title="No clippings yet">
+          <EmptyState icon={MessageSquareQuote} note="Clean margins, for now" title="No clippings yet">
             Clippings saved on your reader land here, ready to search and share.
           </EmptyState>
         </div>

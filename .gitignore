@@ -11,3 +11,4 @@ data/
 
 # Google Play service account keys live in ~/.android-keys/, never here.
 play-publisher*.json
+app/scripts/testflight.sh
