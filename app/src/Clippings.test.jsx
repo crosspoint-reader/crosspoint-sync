@@ -151,3 +151,23 @@ it('keeps the refreshed book-list results if the earlier clipping request finish
   expect(screen.queryByText('Old snapshot')).toBeNull()
   expect(screen.getAllByText('New book passage').length).toBeGreaterThan(0)
 })
+
+it('filters clippings by book with the dropdown and restores all books', async () => {
+  api.allClippings.mockResolvedValue([
+    { id: 'one', document: 'book', text: 'A passage', created_at: 1 },
+    { id: 'two', document: 'other', text: 'Another passage', created_at: 2 },
+  ])
+  render(<Clippings session={session} books={[...books, { document: 'other', filename: 'Other.epub' }]} />)
+  const filter = await screen.findByRole('combobox', { name: 'Filter clippings by book' })
+  expect([...filter.options].map((option) => option.textContent)).toEqual(['All books (2)', 'Test book (1)', 'Other.epub (1)'])
+  fireEvent.change(filter, { target: { value: 'other' } })
+  expect(screen.queryByText('A passage')).toBeNull()
+  expect(screen.getByText('Another passage')).toBeTruthy()
+  fireEvent.change(screen.getByRole('textbox', { name: 'Search clippings' }), { target: { value: 'A passage' } })
+  expect(screen.getByText('No clippings match')).toBeTruthy()
+  fireEvent.change(filter, { target: { value: '' } })
+  expect(screen.getByText('A passage')).toBeTruthy()
+  fireEvent.change(screen.getByRole('textbox', { name: 'Search clippings' }), { target: { value: '' } })
+  expect(screen.getAllByText('A passage').length).toBeGreaterThan(0)
+  expect(screen.getAllByText('Another passage').length).toBeGreaterThan(0)
+})

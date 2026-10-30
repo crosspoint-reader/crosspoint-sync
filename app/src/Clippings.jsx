@@ -189,25 +189,17 @@ export default function Clippings({ session, books }) {
             </details>
           </div>
 
-          <div className="-mx-4 mt-4 flex gap-5 overflow-x-auto px-4 pb-1 [scrollbar-width:none] md:mx-0 md:flex-wrap md:px-0">
-            <button
-              aria-pressed={!only}
-              onClick={() => setOnly(null)}
-              className={`shrink-0 min-h-11 border-b-2 px-1 py-2 text-sm font-medium ${!only ? 'border-brand-500 text-brand-700' : 'border-transparent text-stone-500'}`}
-            >
-              All <span className="ml-0.5 text-xs tabular-nums">{all.length}</span>
-            </button>
+          <select
+            aria-label="Filter clippings by book"
+            value={only ?? ''}
+            onChange={(e) => setOnly(e.target.value || null)}
+            className="mt-4 h-12 w-full min-w-0 rounded-xl bg-surface px-3 text-base text-stone-900 ring-1 ring-stone-950/10 outline-none focus:ring-2 focus:ring-brand-500/60 md:max-w-sm"
+          >
+            <option value="">All books ({all.length})</option>
             {[...counts].map(([doc, n]) => (
-              <button
-                key={doc}
-                aria-pressed={only === doc}
-                onClick={() => setOnly(only === doc ? null : doc)}
-                className={`max-w-56 shrink-0 truncate min-h-11 border-b-2 px-1 py-2 text-sm font-medium ${only === doc ? 'border-brand-500 text-brand-700' : 'border-transparent text-stone-500'}`}
-              >
-                {byDoc.get(doc).title || byDoc.get(doc).filename} <span className="ml-0.5 text-xs tabular-nums">{n}</span>
-              </button>
+              <option key={doc} value={doc}>{byDoc.get(doc).title || byDoc.get(doc).filename} ({n})</option>
             ))}
-          </div>
+          </select>
 
           {groups.length === 0 && (
             <EmptyState compact icon={Search} title="No clippings match">
