@@ -12,7 +12,7 @@ RUN npm run build && npm prune --omit=dev
 FROM node:24-alpine AS web
 WORKDIR /web
 COPY app/package.json app/package-lock.json ./
-RUN npm ci --ignore-scripts
+RUN npm ci
 COPY app/index.html app/vite.config.js ./
 COPY app/public ./public
 COPY app/src ./src
