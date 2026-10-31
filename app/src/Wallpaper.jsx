@@ -519,7 +519,7 @@ export default function Wallpaper() {
             </div>
             {status?.text && <p className={`text-sm ${status.error ? 'text-red-700' : 'text-stone-600'}`}>{status.text}</p>}
             <p className="text-xs/5 text-stone-500">
-              On your reader, set Sleep Screen Cover Filter to No Filter to keep all four shades. A /sleep.bmp at the top of the SD card overrides
+              On your reader, set Sleep Screen Cover Filter to No Filter to keep all four shades. A /sleep.bmp in the SD Card Root overrides
               the rotating sleep screens.
             </p>
           </div>

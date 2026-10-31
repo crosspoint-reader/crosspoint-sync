@@ -337,7 +337,7 @@ export function notify(toast) {
   toasts.dispatchEvent(new CustomEvent('toast', { detail: { id: Date.now() + Math.random(), ...toast } }))
 }
 
-export const folderLabel = (folder) => (!folder || folder === '/' ? 'the top of the SD card' : folder)
+export const folderLabel = (folder) => (!folder || folder === '/' ? 'SD Card Root' : folder)
 
 export function Toaster() {
   const [toast, setToast] = useState(null)
