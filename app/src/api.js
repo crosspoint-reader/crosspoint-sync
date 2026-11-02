@@ -433,11 +433,33 @@ function saved(session, path) {
     return null
   }
 }
+// Books synced with no title or filename (e.g. KOReader on a binary hash) are hidden
+// unless Settings > Show books without metadata is on, remembered on this device, so
+// they can be named by hand and then match like any other book.
+const SHOW_UNTITLED = 'crosspoint-show-untitled'
+export const untitled = (b) => !b.title && !b.filename
+export function showUntitled() {
+  try {
+    return localStorage.getItem(SHOW_UNTITLED) === '1'
+  } catch {
+    return false
+  }
+}
+export function setShowUntitled(on) {
+  try {
+    if (on) localStorage.setItem(SHOW_UNTITLED, '1')
+    else localStorage.removeItem(SHOW_UNTITLED)
+  } catch {
+    // this session only
+  }
+  dispatchEvent(new Event('crosspoint-books-filter'))
+}
+
 // A book marked finished reads as 100% wherever the reader left off; the reader's
 // real position stays in device_percentage (and on the server, which syncs it back).
-const bookList = (r) =>
+const bookList = (r, all = showUntitled()) =>
   r.items
-    .filter((b) => b.title || b.filename)
+    .filter((b) => all || !untitled(b))
     .map((b) => (b.status === 'finished' ? { ...b, device_percentage: b.percentage, percentage: 1 } : b))
 
 // A credential-free mirror of the data already saved by this app. No requests.
@@ -475,7 +497,7 @@ export function syncShortcutsCache(session) {
     account: JSON.stringify([session.server, session.username]),
     books: books ? {
       savedAt: Object.hasOwn(books, 'savedAt') ? books.savedAt : read(`${prefix}${PROGRESS}:saved-at`),
-      items: bookList(books).map((b) => ({
+      items: bookList(books, false).map((b) => ({
         document: b.document, title: b.title || b.filename, author: b.author ?? '',
         status: b.status ?? 'reading', percentage: b.percentage ?? 0, timestamp: b.timestamp,
       })),
@@ -502,10 +524,10 @@ export const cached = {
 }
 
 export const api = {
-  // Books a device synced without any metadata can't be shown meaningfully; hide them.
-  books: (s) => allProgress(s).then(bookList),
+  // Books a device synced without any metadata are hidden unless showUntitled().
+  books: (s) => allProgress(s).then((r) => bookList(r)),
   // The hidden ones, so they can be merged into the book they really are.
-  untitledBooks: (s) => allProgress(s).then((r) => r.items.filter((b) => !b.title && !b.filename)),
+  untitledBooks: (s) => allProgress(s).then((r) => r.items.filter(untitled)),
   summary: (s) => call(s, '/api/v1/stats/summary'),
   // tz: minutes behind UTC, so the server buckets pages into local days.
   // Saved activity paints immediately via cached.activity, but a failed refresh

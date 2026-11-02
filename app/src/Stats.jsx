@@ -559,8 +559,8 @@ function Finished({ list, titles }) {
 }
 
 function PagesAndBooks({ activity: all, books }) {
-  const titles = new Map(books.map((b) => [b.document, b.title || b.filename]))
-  // Only books the library shows (metadata-less ones are hidden everywhere).
+  const titles = new Map(books.map((b) => [b.document, b.title || b.filename || 'Untitled book']))
+  // Only books the library shows (metadata-less ones are hidden everywhere unless Settings shows them).
   const shown = all.books.filter((b) => titles.has(b.document))
   const activity = { ...all, books: shown, pages_total: shown.reduce((n, b) => n + (b.pages_read ?? 0), 0) }
   const finished = activity.books.filter((b) => b.completed || b.finished_at).sort((a, b) => (b.finished_at ?? 0) - (a.finished_at ?? 0))
@@ -776,7 +776,7 @@ function Timeline({ session, activity, books }) {
             <a key={b.document} href={`#/book/${b.document}`} className="flex items-center gap-4 py-3">
               <Cover session={session} book={b} tiny className="w-14" />
               <div className="min-w-0 flex-1">
-                <p className="truncate font-display text-base font-semibold text-stone-900">{b.title || b.filename}</p>
+                <p className="truncate font-display text-base font-semibold text-stone-900">{b.title || b.filename || 'Untitled book'}</p>
                 {b.timestamp && <p className="mt-0.5 text-xs text-stone-500">Last read {shortDate(new Date(b.timestamp * 1000))}</p>}
                 <div className="mt-2 flex items-center gap-3">
                   <ProgressBar value={b.percentage} className="flex-1" />
@@ -818,7 +818,7 @@ function Timeline({ session, activity, books }) {
                       <a key={entry.document} href={`#/book/${entry.document}`} className="flex items-center gap-3 rounded-xl bg-surface p-3 ring-1 ring-stone-950/5 transition active:scale-[0.99] md:hover:bg-stone-50">
                         <Cover session={session} book={b} tiny className="w-11" />
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-semibold text-stone-900">{b.title || b.filename}</p>
+                          <p className="truncate text-sm font-semibold text-stone-900">{b.title || b.filename || 'Untitled book'}</p>
                           <p className={`mt-1 flex items-center gap-1.5 text-xs ${ev.text === 'Finished' ? 'font-medium text-brand-600' : 'text-stone-500'}`}>
                             <ev.icon className="size-3.5 shrink-0" strokeWidth={2} />
                             <span className="truncate">{ev.text}</span>

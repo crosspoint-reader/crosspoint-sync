@@ -24,7 +24,7 @@ function ReadingCard({ session, book }) {
         <Cover session={session} book={book} className="w-28 sm:w-36 md:w-40" />
         <div className="relative flex min-w-0 flex-1 flex-col self-stretch">
           <p className="text-xs font-medium text-brand-600">{book.history_only ? 'Reading history' : 'Continue reading'}</p>
-          <h2 className="mt-2 line-clamp-3 font-display text-xl/snug font-semibold text-stone-900 md:text-2xl/snug">{book.title || book.filename}</h2>
+          <h2 className="mt-2 line-clamp-3 font-display text-xl/snug font-semibold text-stone-900 md:text-2xl/snug">{book.title || book.filename || 'Untitled book'}</h2>
           <p className="truncate text-sm text-stone-500 md:text-base">{book.author}</p>
           <div className="mt-auto pt-3 md:max-w-md">
             <div className="mb-1.5 flex justify-between text-xs tabular-nums text-stone-500">
@@ -76,7 +76,7 @@ export default function Library({ session, books, summary, activity }) {
   // Only when the books change, not on every render.
   const dupe = useMemo(() => firstDuplicate(books), [books])
   // Totals count only books the library shows, as Stats does: metadata-less
-  // syncs are hidden everywhere, so they mustn't add a "finished" here (#18).
+  // syncs are hidden everywhere (unless Settings shows them), so they mustn't add a "finished" here (#18).
   const listed = new Set(books.map((b) => b.document))
   const read = (activity?.books ?? []).filter((b) => listed.has(b.document))
 

@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 vi.hoisted(() => {
   window.matchMedia = vi.fn(() => ({ matches: false, addEventListener() {}, removeEventListener() {} }))
 })
-vi.mock('./api.js', () => ({ isApp: false, api: { setStatus: vi.fn(), merge: vi.fn(), unmerge: vi.fn(), removeBook: vi.fn(), syncBook: vi.fn(), setInfo: vi.fn() } }))
+vi.mock('./api.js', () => ({ isApp: false, untitled: (b) => !b.title && !b.filename, api: { setStatus: vi.fn(), merge: vi.fn(), unmerge: vi.fn(), removeBook: vi.fn(), syncBook: vi.fn(), setInfo: vi.fn() } }))
 const loads = vi.hoisted(() => ({}))
 vi.mock('./ui.jsx', async (original) => ({ ...await original(), useLoad: (fn, deps, memo) => [loads[memo] ?? null] }))
 vi.mock('./tabbar.js', () => ({ useSheet() {}, useNativeBack() {}, useNativeButton() {} }))
@@ -223,6 +223,26 @@ it('edits only the author of a book without a stored title', async () => {
   fireEvent.change(screen.getByRole('textbox', { name: 'Author' }), { target: { value: 'Tove Jansson' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save' }))
   await waitFor(() => expect(api.setInfo).toHaveBeenCalledWith({}, 'book', { author: 'Tove Jansson' }))
+})
+
+it('prompts for a title and author on a book synced without metadata', async () => {
+  api.setInfo.mockResolvedValue({})
+  const onChange = vi.fn()
+  render(<Book session={{}} book={{ document: 'koreader-hash', percentage: 0.41, device: 'Kobo', timestamp: Date.now() / 1000 - 60 }} books={[]} onChange={onChange} />)
+  expect(screen.getByRole('heading', { name: 'Untitled book' })).toBeTruthy()
+  expect(screen.getByText('41%')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Add title & author' }))
+  fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), { target: { value: 'Moominland Midwinter' } })
+  fireEvent.change(screen.getByRole('textbox', { name: 'Author' }), { target: { value: 'Tove Jansson' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(api.setInfo).toHaveBeenCalledWith({}, 'koreader-hash', { title: 'Moominland Midwinter', author: 'Tove Jansson' }))
+  await waitFor(() => expect(onChange).toHaveBeenCalledOnce())
+  expect(screen.queryByRole('textbox', { name: 'Title' })).toBeNull()
+})
+
+it('does not prompt for metadata on a titled book', () => {
+  render(<Book session={{}} book={book} books={[book]} onChange={vi.fn()} />)
+  expect(screen.queryByRole('button', { name: 'Add title & author' })).toBeNull()
 })
 
 it('credits Hardcover only for a description it supplied', () => {

@@ -74,7 +74,7 @@ export default function Clippings({ session, books }) {
   const byDoc = useMemo(() => new Map(books.map((b) => [b.document, b])), [books])
   const missingPosts = microblog ? (postData?.items || []).filter((post) => post.missing && byDoc.has(post.document)) : []
 
-  // Only clippings of books the library shows (metadata-less ones are hidden everywhere).
+  // Only clippings of books the library shows (metadata-less ones are hidden everywhere unless Settings shows them).
   const all = (items ?? []).filter((c) => byDoc.has(c.document))
   const q = query.trim().toLowerCase()
   const matches = all.filter((c) => {

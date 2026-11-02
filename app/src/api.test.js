@@ -7,7 +7,7 @@ const fetchMock = vi.fn()
 vi.stubGlobal('fetch', fetchMock)
 // Node's experimental localStorage can shadow jsdom's storage in Vitest.
 vi.stubGlobal('localStorage', new JSDOM('', { url: 'https://app.test' }).window.localStorage)
-const { api, cached, loadSession, login, logout, saveSession, hostedServerUrl } = await import('./api.js')
+const { api, cached, loadSession, login, logout, saveSession, hostedServerUrl, setShowUntitled, showUntitled } = await import('./api.js')
 const session = (username, server = 'https://sync.test') => ({ server, username, key: 'key' })
 const prefix = (s) => `crosspoint-offline:v2:${s.username}@${s.server}`
 const progress = '/api/v1/progress?limit=500'
@@ -223,6 +223,23 @@ describe('book list paging', () => {
   it('finds untitled books on later pages', async () => {
     fetchMock.mockResolvedValueOnce(page([1], '1:d1')).mockResolvedValueOnce(response({ items: [{ document: 'u1', title: null, filename: null }], next: null }))
     expect((await api.untitledBooks(session('pager'))).map((b) => b.document)).toEqual(['u1'])
+  })
+
+  it('lists untitled books only while Show books without metadata is on', async () => {
+    const s = session('pager')
+    const items = [book(1), { document: 'u1', title: null, filename: null }]
+    fetchMock.mockResolvedValue(response({ items, next: null }))
+    expect((await api.books(s)).map((b) => b.document)).toEqual(['d1'])
+    const changed = vi.fn()
+    addEventListener('crosspoint-books-filter', changed)
+    setShowUntitled(true)
+    removeEventListener('crosspoint-books-filter', changed)
+    expect(changed).toHaveBeenCalledTimes(1)
+    expect(showUntitled()).toBe(true)
+    expect((await api.books(s)).map((b) => b.document)).toEqual(['d1', 'u1'])
+    expect(cached.books(s).map((b) => b.document)).toEqual(['d1', 'u1'])
+    setShowUntitled(false)
+    expect(cached.books(s).map((b) => b.document)).toEqual(['d1'])
   })
 })
 

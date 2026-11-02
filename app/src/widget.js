@@ -49,7 +49,7 @@ export async function updateWidget({ session, books, summary, activity }) {
     ? `${readingStreak(summary, activity)}-day streak · ${Math.round(summary.seconds / 3600)}h read`
     : `${pages.toLocaleString()} pages · ${finished} finished this year`
   const data = current
-    ? { label: 'CONTINUE READING', title: current.title || current.filename, author: current.author ?? '', percent: Math.round(current.percentage * 100), stats }
+    ? { label: 'CONTINUE READING', title: current.title || current.filename || 'Untitled book', author: current.author ?? '', percent: Math.round(current.percentage * 100), stats }
     : { label: 'CROSSPOINT SYNC', title: 'Nothing in progress', author: '', percent: -1, stats }
   if (session) data.session = { server: session.server, username: session.username, key: session.key }
   data.cover_url = current?.cover_url ?? null

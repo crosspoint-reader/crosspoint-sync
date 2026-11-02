@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, CalendarDays, MoreHorizontal, PenLine, Split, Trash2, Image as ImageIcon, Loader2, Merge, Quote, Search, Star, X } from 'lucide-react'
-import { api, isApp } from './api.js'
+import { api, isApp, untitled } from './api.js'
 import { renderCard } from './shareCard.js'
 import { isPace, moodEmoji } from './moods.js'
 import ShareSheet from './ShareSheet.jsx'
@@ -99,7 +99,7 @@ function Stats({ session, doc, aliases, activity: a, wide = false, revision = 0 
 
 // A clipping's share card: the quote with its book's cover, title and author.
 export function ClipShare({ session, book, clip, onClose }) {
-  const meta = { quote: clip.text, title: book.title || book.filename, author: book.author, chapter: clip.chapter }
+  const meta = { quote: clip.text, title: book.title || book.filename || 'Untitled book', author: book.author, chapter: clip.chapter }
   return (
     <ShareSheet
       heading="Share clipping"
@@ -354,7 +354,7 @@ function MergePicker({ session, book, books, onDone, onClose }) {
   const others = books
     .filter((b) => b.document !== book.document)
     .sort((a, b) => Number(looksLikeSame(book, b)) - Number(looksLikeSame(book, a)) || (a.title ?? '').localeCompare(b.title ?? ''))
-    .concat([...(untitled ?? [])].sort((a, b) => b.timestamp - a.timestamp))
+    .concat([...(untitled ?? [])].filter((u) => !books.some((b) => b.document === u.document)).sort((a, b) => b.timestamp - a.timestamp))
   // Matched the way duplicates are, so any script, width or case finds the book.
   const q = norm(query)
   const shown = q ? others.filter((b) => [b.title, b.author, b.filename].some((v) => norm(v).includes(q))) : others
@@ -932,6 +932,7 @@ const seriesLabel = (b) =>
 export default function Book({ session, book, books, activity, back = { href: '#/', label: 'Library' }, onChange }) {
   const wide = useWide()
   const [revision, setRevision] = useState(0)
+  const [naming, setNaming] = useState(false)
   const synced = () => { setRevision((n) => n + 1); onChange() }
   useNativeBack(back.href)
   if (!book) return <p className="py-16 text-center text-sm text-stone-500">Book not found.</p>
@@ -957,6 +958,20 @@ export default function Book({ session, book, books, activity, back = { href: '#
                 {book.title || book.filename || 'Untitled book'}
               </h1>
               <p className="mt-1 text-sm text-stone-500">{book.author}</p>
+              {untitled(book) && (
+                <div className="mt-2">
+                  <p className="text-xs text-stone-500">
+                    Synced without a title or author <span className="font-mono">({book.document.slice(0, 12)}…)</span>
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setNaming(true)}
+                    className="mt-2 inline-flex h-9 items-center gap-1.5 rounded-full bg-brand-500 px-3.5 text-xs font-semibold text-white transition active:scale-[0.98]"
+                  >
+                    <PenLine className="size-3.5" strokeWidth={2.25} /> Add title &amp; author
+                  </button>
+                </div>
+              )}
               {seriesLabel(book) && <p className="mt-1 text-xs text-stone-500">{seriesLabel(book)}</p>}
               {book.user_rating != null && <p className="mt-1 text-sm text-stone-600">Your rating: {book.user_rating} / 5</p>}
               {book.rating && (
@@ -991,6 +1006,7 @@ export default function Book({ session, book, books, activity, back = { href: '#
           <Clippings session={session} book={book} revision={revision} />
         </section>
       </div>
+      {naming && <EditDetailsSheet session={session} book={book} onDone={() => { setNaming(false); synced() }} onClose={() => setNaming(false)} />}
     </div>
   )
 }

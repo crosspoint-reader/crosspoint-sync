@@ -5,7 +5,7 @@ import { openUrl } from '@tauri-apps/plugin-opener'
 import { onOpenUrl } from '@tauri-apps/plugin-deep-link'
 import { ArrowLeft, ChevronRight, Copy, KeyRound, ListChecks, Loader2, LogOut, Monitor, Moon, RefreshCw, Search, Server, Sun, Trash2, UserX } from 'lucide-react'
 import SparkMD5 from 'spark-md5'
-import { api, isApp } from './api.js'
+import { api, isApp, setShowUntitled, showUntitled } from './api.js'
 import { ActionSheet, Bone, Card, EmptyState, notify, Toggle, useLoad } from './ui.jsx'
 import { saveFile } from './shareCard.js'
 import { useNativeBack } from './tabbar.js'
@@ -649,6 +649,24 @@ function Services({ session }) {
   )
 }
 
+// Remembered on this device; the library reloads when it changes.
+function UntitledBooks() {
+  const [on, setOn] = useState(showUntitled)
+  return (
+    <label className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-stone-800">
+      <span className="flex-1">Show books without metadata</span>
+      <Toggle
+        checked={on}
+        label="Show books without metadata"
+        onChange={(next) => {
+          setShowUntitled(next)
+          setOn(next)
+        }}
+      />
+    </label>
+  )
+}
+
 // Pause books in progress after N days without new progress (0 = never).
 function AutoPause({ session }) {
   const [data, error, reload] = useLoad(() => api.autoPause(session), [session], `auto-pause ${session.username}@${session.server}`)
@@ -964,18 +982,18 @@ export default function Settings({ session, theme, onSession, onLogout }) {
         </div>
       </Card>
 
-      {isApp && (
-        <>
-          <h2 className={section}>Library</h2>
-          <Card className="mt-3">
-            <a href="#/browse/manage" className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-stone-800 active:bg-stone-50">
-              <Server className="size-5 text-stone-500" strokeWidth={1.75} />
-              <span className="flex-1">Catalogs</span>
-              <ChevronRight className="size-4 text-stone-400" />
-            </a>
-          </Card>
-        </>
-      )}
+      <h2 className={section}>Library</h2>
+      <p className="mt-1 text-sm text-stone-500">Books your reader synced without a title or author are hidden. Show them to see their progress and last sync, then add the title and author so they match.</p>
+      <Card className="mt-3 divide-y divide-stone-100">
+        <UntitledBooks />
+        {isApp && (
+          <a href="#/browse/manage" className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-stone-800 active:bg-stone-50">
+            <Server className="size-5 text-stone-500" strokeWidth={1.75} />
+            <span className="flex-1">Catalogs</span>
+            <ChevronRight className="size-4 text-stone-400" />
+          </a>
+        )}
+      </Card>
 
       <h2 className={section}>Appearance</h2>
       <div className="mt-3">

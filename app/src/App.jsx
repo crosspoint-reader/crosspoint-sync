@@ -378,6 +378,11 @@ function Home({ session, onSession, onLogout, theme }) {
     addEventListener('crosspoint-refresh', on)
     return () => removeEventListener('crosspoint-refresh', on)
   })
+  // Settings > Show books without metadata changes which books the list keeps.
+  useEffect(() => {
+    addEventListener('crosspoint-books-filter', reloadBooks)
+    return () => removeEventListener('crosspoint-books-filter', reloadBooks)
+  })
   useEffect(() => {
     if (!pulling) return
     if (booksLoading) sawLoading.current = true

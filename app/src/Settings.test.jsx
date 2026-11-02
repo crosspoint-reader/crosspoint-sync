@@ -5,6 +5,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 const env = vi.hoisted(() => ({ isApp: false }))
 vi.mock('./api.js', () => ({
   get isApp() { return env.isApp },
+  showUntitled: vi.fn(() => false),
+  setShowUntitled: vi.fn(),
   api: { exportAccount: vi.fn(), importAccount: vi.fn(), oauthBegin: vi.fn(), oauthComplete: vi.fn(), connectors: vi.fn(), linkConnector: vi.fn(), setClientId: vi.fn(), removeClientId: vi.fn(), syncConnector: vi.fn(), unlinkConnector: vi.fn(), clearData: vi.fn(), deleteAccount: vi.fn(), autoPause: vi.fn(), setAutoPause: vi.fn() },
 }))
 vi.mock('./shareCard.js', () => ({ saveFile: vi.fn() }))
@@ -12,7 +14,7 @@ vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }))
 let deliver = null
 vi.mock('@tauri-apps/plugin-deep-link', () => ({ onOpenUrl: vi.fn(async (fn) => { deliver = fn; return () => (deliver = null) }) }))
 
-const { api } = await import('./api.js')
+const { api, setShowUntitled } = await import('./api.js')
 const { openUrl } = await import('@tauri-apps/plugin-opener')
 const { default: Settings, LinkForm, AccountTransfer } = await import('./Settings.jsx')
 vi.mock('./tabbar.js', async (orig) => ({ ...(await orig()), useNativeBack: vi.fn() }))
@@ -188,6 +190,17 @@ it('Settings provides a Library back destination for both native and HTML naviga
   render(<Settings session={{ ...session, username: 'reader' }} theme={['system', vi.fn()]} onSession={vi.fn()} onLogout={vi.fn()} />)
   expect(screen.getByRole('link', { name: 'Back to Library' }).getAttribute('href')).toBe('#/')
   expect(useNativeBack).toHaveBeenCalledWith('#/')
+  await waitFor(() => expect(api.connectors).toHaveBeenCalled())
+})
+
+it('toggles Show books without metadata on this device', async () => {
+  api.connectors.mockResolvedValue({ connectors: [] })
+  render(<Settings session={{ ...session, username: 'reader' }} theme={['system', vi.fn()]} onSession={vi.fn()} onLogout={vi.fn()} />)
+  const toggle = screen.getByRole('switch', { name: 'Show books without metadata' })
+  expect(toggle.getAttribute('aria-checked')).toBe('false')
+  fireEvent.click(toggle)
+  expect(setShowUntitled).toHaveBeenCalledWith(true)
+  expect(toggle.getAttribute('aria-checked')).toBe('true')
   await waitFor(() => expect(api.connectors).toHaveBeenCalled())
 })
 
