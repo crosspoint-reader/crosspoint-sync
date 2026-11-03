@@ -39,13 +39,15 @@ export default function HistoryImport({ session }) {
   return (
     <Card className="mt-3 space-y-3 p-4">
       <h3 className="font-semibold text-stone-900">Import reading history</h3>
-      <p className="text-sm text-stone-500">Upload a Goodreads or StoryGraph CSV (up to 10 MB), or a KOReader / KOInsight database or ZIP (up to 50 MB).</p>
+      <p className="text-sm text-stone-500">Upload a Goodreads or StoryGraph CSV (up to 10 MB), or a KOReader / KOInsight database or ZIP (up to 50 MB). KOReader keeps its database at settings/statistics.sqlite3.</p>
       <p className="text-sm text-stone-500">Your reader positions stay unchanged. Existing book stats, statuses and dates are preserved, and no updates are sent to linked services. Export an account backup before importing.</p>
       <fieldset disabled={busy} className="space-y-3 disabled:opacity-60">
         <div className="flex flex-wrap items-center gap-3">
           <button type="button" className={button} onClick={() => input.current.click()}>Choose file</button>
           <span className="min-w-0 break-all text-sm text-stone-500" role="status">{file?.name || 'No file selected'}</span>
-          <input ref={input} type="file" accept=".csv,.sqlite,.sqlite3,.db,.zip" aria-label="Reading-history file" className="hidden" onChange={e => { setFile(e.target.files?.[0] || null); setPreview(null); setError(null) }} />
+          {/* No accept filter: iOS greys out extensions it doesn't know, like KOReader's statistics.sqlite3.
+              The server recognizes the file by its contents and explains anything it can't read. */}
+          <input ref={input} type="file" aria-label="Reading-history file" className="hidden" onChange={e => { setFile(e.target.files?.[0] || null); setPreview(null); setError(null) }} />
         </div>
         <label className="block text-sm font-medium text-stone-700">
           Reading time zone
