@@ -327,4 +327,10 @@ export interface Connector {
   beginLink?(http: HttpTransport): Promise<DeviceLinkStart>;
   /** Poll a device-code link until it completes. Optional. */
   pollLink?(deviceCode: string, http: HttpTransport): Promise<DeviceLinkPoll>;
+  /**
+   * Revoke a credential the service issued, once it is unlinked or replaced by a
+   * new link. Best effort: the link is already gone here, so a failure is only
+   * logged. Optional.
+   */
+  revoke?(cred: Credential, http: HttpTransport): Promise<void>;
 }

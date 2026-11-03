@@ -11,6 +11,7 @@ import { kindleConnector } from './kindle.js';
 import { bookorbitConnector } from './bookorbit.js';
 import { spotifyConnector } from './spotify.js';
 import { seekquelConnector } from './seekquel.js';
+import { readestConnector } from './readest.js';
 
 let byId: Map<string, Connector> | undefined;
 
@@ -28,6 +29,7 @@ function connectorRegistry(): Map<string, Connector> {
       bookorbitConnector,
       spotifyConnector,
       seekquelConnector,
+      readestConnector,
       microblogConnector,
       kindleConnector,
     ];

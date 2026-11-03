@@ -9,9 +9,12 @@ import { invalidateAuthCache, USERS_BY_NAME_SQL } from '../auth/middleware.js';
 import { SESSION_COOKIE } from '../auth/session.js';
 import { nowSeconds } from '../models/sync.js';
 import { USERNAME_RE } from './kosync.js';
+import { revocations, revokeSoon } from '../connectors/revoke.js';
 
 /** Permanently delete a kosync user's reading data, and (unless keepUser) the user. */
 export function deleteKosyncUserData(db: DB, userId: number, username: string, { keepUser = false } = {}): void {
+  // Credentials services issued for this account's links stop working too.
+  const links = revocations(db, userId);
   withTransaction(db, () => {
     for (const table of [
       'microblog_clipping_selections',
@@ -40,6 +43,7 @@ export function deleteKosyncUserData(db: DB, userId: number, username: string, {
     }
     if (!keepUser) db.prepare('DELETE FROM users WHERE id = ?').run(userId);
   });
+  revokeSoon(links, userId);
   invalidateAuthCache(username);
 }
 
