@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { HttpTransport } from '../src/connectors/types.js';
 import { DOC, makeTestApp, registerUser } from './helpers.js';
 
@@ -97,6 +97,83 @@ describe('Amazon page count fallback (SearchAPI)', () => {
     calls.length = 0;
     expect((await findBookInfo(http, 'From Below', 'Darcy Coates', {})).pages).toBeNull();
     expect(calls.some((u) => u.includes('searchapi'))).toBe(false);
+  });
+
+  // Open Library knows the book but not its length; Amazon answers with `amazon`: an HTTP status (400 and up), pages, or a miss.
+  function paidSource(amazon: () => number | 'miss') {
+    const paid: string[] = [];
+    const http: HttpTransport = async (url) => {
+      if (url.includes('itunes')) return json({ results: [] });
+      if (url.includes('openlibrary')) return json({ docs: [{ title: 'Foundryside', author_name: ['Robert Jackson Bennett'], cover_i: 1 }] });
+      paid.push(url);
+      const answer = amazon();
+      if (typeof answer === 'number' && answer >= 400) return { ...json({}), status: answer };
+      if (url.includes('amazon_search')) {
+        return json({ organic_results: answer === 'miss' ? [] : [{ asin: 'B1', title: 'Foundryside', authors: [{ name: 'Robert Jackson Bennett' }] }] });
+      }
+      return json({ product: { specifications: [{ name: 'Print length', value: `${answer} pages` }] } });
+    };
+    return { http, paid };
+  }
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('asks SearchAPI only for stats, once per book across users', async () => {
+    vi.stubEnv('SEARCHAPI_KEY', 'k');
+    const { http, paid } = paidSource(() => 352);
+    const { app, db } = makeTestApp({}, { connectorTransport: http });
+    const { headers } = await registerUser(app);
+    await app.request('/syncs/progress', { method: 'PUT', headers, body: JSON.stringify(PUT_BODY) });
+
+    // A library cover never spends credits.
+    expect((await (await app.request(`/api/v1/documents/${DOC}/cover`, { headers })).json()).pages).toBeNull();
+    expect(paid).toHaveLength(0);
+
+    // Two stats views at once share one lookup: search + product, two credits.
+    await Promise.all([1, 2].map(() => app.request('/api/v1/stats/activity', { headers })));
+    expect(paid).toHaveLength(2);
+    expect((await (await app.request(`/api/v1/documents/${DOC}/cover`, { headers })).json()).pages).toBe(352);
+    expect(db.prepare("SELECT data FROM catalog_cache WHERE key LIKE 'searchapi:%'").get()).toEqual({ data: '2' });
+
+    // Another reader of the book gets it from the shared lookup.
+    const other = await registerUser(app, 'reader2');
+    await app.request('/syncs/progress', { method: 'PUT', headers: other.headers, body: JSON.stringify(PUT_BODY) });
+    expect((await (await app.request(`/api/v1/documents/${DOC}/cover`, { headers: other.headers })).json()).pages).toBe(352);
+    await app.request('/api/v1/stats/activity', { headers: other.headers });
+    expect(paid).toHaveLength(2);
+  });
+
+  it('remembers a miss instead of paying for it again', async () => {
+    vi.stubEnv('SEARCHAPI_KEY', 'k');
+    const { http, paid } = paidSource(() => 'miss');
+    const { app, db } = makeTestApp({}, { connectorTransport: http });
+    const { headers } = await registerUser(app);
+    await app.request('/syncs/progress', { method: 'PUT', headers, body: JSON.stringify(PUT_BODY) });
+    await app.request('/api/v1/stats/activity', { headers });
+    expect(paid).toHaveLength(1); // no ASIN: one credit
+    // Even once the free lookup is due again.
+    db.prepare('UPDATE documents SET cover_checked_at = NULL').run();
+    await app.request('/api/v1/stats/activity', { headers });
+    expect(paid).toHaveLength(1);
+  });
+
+  it('stops at SEARCHAPI_DAILY_LIMIT and pauses when SearchAPI refuses, without remembering a miss', async () => {
+    vi.stubEnv('SEARCHAPI_KEY', 'k');
+    vi.stubEnv('SEARCHAPI_DAILY_LIMIT', '1');
+    let status: number | 'miss' = 352;
+    const { http, paid } = paidSource(() => status);
+    const { app, db } = makeTestApp({}, { connectorTransport: http });
+    const { headers } = await registerUser(app);
+    await app.request('/syncs/progress', { method: 'PUT', headers, body: JSON.stringify(PUT_BODY) });
+    await app.request('/api/v1/stats/activity', { headers });
+    expect(paid).toHaveLength(1); // the search; the product page would go over the limit
+    expect(db.prepare('SELECT pages_checked_at FROM documents').get()).toEqual({ pages_checked_at: null });
+
+    vi.stubEnv('SEARCHAPI_DAILY_LIMIT', '');
+    status = 429;
+    await app.request('/api/v1/stats/activity', { headers }); // still paused from hitting the limit
+    expect(paid).toHaveLength(1);
+    expect(db.prepare("SELECT count(*) AS n FROM catalog_cache WHERE key LIKE 'amazon:%'").get()).toEqual({ n: 0 });
   });
 
   it('retries Open Library without a series prefix', async () => {

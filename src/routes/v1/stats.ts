@@ -14,7 +14,7 @@ import {
   type GlobalStatsSnapshot,
 } from '../../models/stats.js';
 import { readingActivity } from '../../models/activity.js';
-import { documentInfo } from '../../models/cover.js';
+import { documentInfo, pagesCheckedSince } from '../../models/cover.js';
 import { resolveDocument, statsAliases, statsDocuments } from '../../models/merge.js';
 import type { HttpTransport } from '../../connectors/types.js';
 import { bookorbitExclusions, readBookorbitStats } from '../../models/bookorbit-stats.js';
@@ -118,14 +118,17 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
   }
 
   async function activityFor(userId: number, tz: number) {
-    // Books never looked up yet get their page count now (bounded per request).
+    // Books never looked up yet get their page count now (bounded per request), never-looked-up
+    // first; with SEARCHAPI_KEY, so do books the free sources missed and SearchAPI hasn't been asked about.
+    const paid = !!process.env.SEARCHAPI_KEY;
     const pending = db
       .prepare(
-        `SELECT document FROM documents WHERE user_id = ? AND cover_checked_at IS NULL
-           AND (title IS NOT NULL OR filename IS NOT NULL) LIMIT ?`
+        `SELECT document FROM documents WHERE user_id = ? AND (title IS NOT NULL OR filename IS NOT NULL)
+           AND (cover_checked_at IS NULL OR (? AND page_count IS NULL AND (pages_checked_at IS NULL OR pages_checked_at < ?)))
+         ORDER BY cover_checked_at IS NOT NULL LIMIT ?`
       )
-      .all(userId, MAX_INFO_LOOKUPS) as { document: string }[];
-    await Promise.all(pending.map((d) => documentInfo(db, userId, d.document, http).catch(() => null)));
+      .all(userId, paid ? 1 : 0, pagesCheckedSince(), MAX_INFO_LOOKUPS) as { document: string }[];
+    await Promise.all(pending.map((d) => documentInfo(db, userId, d.document, http, process.env, { paid }).catch(() => null)));
 
     return readingActivity(db, userId, tz);
   }

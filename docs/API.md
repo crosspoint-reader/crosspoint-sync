@@ -700,8 +700,10 @@ finish date also marks the book `finished` and fans out a finished event dated t
 `{"url": "https://..." | null, "pages": 433 | null}`: cover URL and print-edition page count,
 resolved from the document's title/author and cached (a miss is retried after 7 days). Covers come
 from iTunes Search (ebooks), then Open Library; page counts from Open Library, then Google Books when
-the server has `GOOGLE_BOOKS_API_KEY`, then Amazon's "Print length" via SearchAPI when it has
-`SEARCHAPI_KEY`. `GET /api/v1/progress` items also carry `page_count`.
+the server has `GOOGLE_BOOKS_API_KEY`. Amazon's "Print length" via SearchAPI (when the server has
+`SEARCHAPI_KEY`) is paid, so this endpoint never asks it: the stats endpoints do, for books the
+free sources missed, and the result then shows up here too. `GET /api/v1/progress` items also carry
+`page_count`.
 
 #### PUT /api/v1/documents/{document}/info
 
