@@ -50,13 +50,13 @@ option { background-color: var(--color-surface); color: var(--color-stone-900); 
    utilities like cursor-grab (drag handles) still override it. Text fields stay
    on their I-beam cursor, and disabled controls stay on the default arrow. */
 @layer base {
-  button:not(:disabled),
-  summary,
-  [role="button"]:not([aria-disabled="true"]),
-  label[for],
-  select:not(:disabled),
-  input[type="checkbox"]:not(:disabled),
-  input[type="radio"]:not(:disabled) {
+  button:not(:disabled):not([aria-disabled="true"]),
+  summary:not([aria-disabled="true"]),
+  [role="button"]:not(:disabled):not([aria-disabled="true"]),
+  label[for]:not([aria-disabled="true"]),
+  select:not(:disabled):not([aria-disabled="true"]),
+  input[type="checkbox"]:not(:disabled):not([aria-disabled="true"]),
+  input[type="radio"]:not(:disabled):not([aria-disabled="true"]) {
     cursor: pointer;
   }
 
