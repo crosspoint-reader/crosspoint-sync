@@ -45,9 +45,10 @@ serve({ fetch: app.fetch, port: PORT, hostname: ADDRESS }, (info) => {
       connectors: connectorsEnabled ? 'enabled' : 'disabled (no TOKEN_ENC_KEY)',
     })
   );
-  // After listening: the first run hashes a token per old sync account (seconds).
-  const claimed = backfillMasterAccounts(db);
-  if (claimed) console.log(JSON.stringify({ msg: 'created master accounts for sync accounts', count: claimed }));
+  // After listening, in batches: the first run hashes a token per old sync account.
+  backfillMasterAccounts(db).then((claimed) => {
+    if (claimed) console.log(JSON.stringify({ msg: 'created master accounts for sync accounts', count: claimed }));
+  });
 });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

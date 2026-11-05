@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
-import type { DB } from '../db/db.js';
+import { withTransaction, type DB } from '../db/db.js';
 import type { Config } from '../config.js';
 import type { AppEnv } from '../auth/middleware.js';
 import { hashKey, verifyKey } from '../auth/password.js';
@@ -58,15 +58,22 @@ export function claimMasterAccount(db: DB, user: { id: number; username: string;
   return accountId;
 }
 
-/** Give every sync account without one a master account (and so a recovery token). Idempotent. */
-export function backfillMasterAccounts(db: DB): number {
-  const orphans = db.prepare('SELECT id, username, account_id FROM users WHERE account_id IS NULL').all() as {
-    id: number; username: string; account_id: null;
-  }[];
-  // ponytail: no wrapping transaction so syncing devices can write between claims; an
-  // interrupted run just leaves an unlinked accounts row and resumes next boot.
-  for (const u of orphans) claimMasterAccount(db, u);
-  return orphans.length;
+/**
+ * Give every sync account without one a master account (and so a recovery
+ * token). Idempotent. Batches share one commit (one fsync, not three per user)
+ * and yield between, so a big first run doesn't stall requests.
+ */
+export async function backfillMasterAccounts(db: DB, batch = 200): Promise<number> {
+  let total = 0;
+  for (;;) {
+    const orphans = db.prepare('SELECT id, username, account_id FROM users WHERE account_id IS NULL LIMIT ?').all(batch) as {
+      id: number; username: string; account_id: null;
+    }[];
+    if (!orphans.length) return total;
+    withTransaction(db, () => { for (const u of orphans) claimMasterAccount(db, u); });
+    total += orphans.length;
+    await new Promise((r) => setImmediate(r));
+  }
 }
 
 /** The master account id a well-formed, valid token belongs to, else null. */

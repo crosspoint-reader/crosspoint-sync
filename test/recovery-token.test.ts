@@ -31,11 +31,11 @@ describe('recovery token', () => {
     expect((await recover(shown.token)).status).toBe(401);
   });
 
-  it('backfills master accounts for existing sync accounts', () => {
+  it('backfills master accounts for existing sync accounts in batches', async () => {
     const { db } = makeTestApp();
-    db.prepare('INSERT INTO users (username, key_hash, created_at) VALUES (?, ?, 0)').run('old', hashKey(md5('pw')));
-    expect(backfillMasterAccounts(db)).toBe(1);
-    expect(backfillMasterAccounts(db)).toBe(0);
+    for (const name of ['old', 'old2', 'old3']) db.prepare('INSERT INTO users (username, key_hash, created_at) VALUES (?, ?, 0)').run(name, hashKey(md5('pw')));
+    expect(await backfillMasterAccounts(db, 2)).toBe(3);
+    expect(await backfillMasterAccounts(db)).toBe(0);
     const row = db.prepare('SELECT a.token_enc FROM users u JOIN accounts a ON a.id = u.account_id WHERE u.username = ?').get('old') as { token_enc: string };
     expect(row.token_enc).toBeTruthy();
   });
