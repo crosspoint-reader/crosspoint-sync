@@ -358,6 +358,7 @@ function ReadingCalendar({ byDay, view, days = [], books = [], pages }) {
   const { level: pageLevel } = shadeLevels(pages ?? new Map(), { fallback: FALLBACK_PAGES })
   const syncedPages = (day) => (byDay.get(day) === undefined ? pages?.get(day) ?? 0 : 0)
   const level = (day) => (!byDay.has(day) ? 0 : syncedPages(day) > 0 ? pageLevel(syncedPages(day)) : amountLevel(byDay.get(day)))
+  const usesPages = [...byDay.keys()].some((day) => syncedPages(day) > 0)
   const tipFor = (day) => (syncedPages(day) > 0 ? PAGES_VIEW.tip(syncedPages(day)) : view.tip(byDay.get(day)))
   const today = new Date()
   today.setHours(12, 0, 0, 0)
@@ -470,7 +471,11 @@ function ReadingCalendar({ byDay, view, days = [], books = [], pages }) {
           ))}
         </div>
       </div>
-      {view.source && <p className="mt-3 text-xs text-stone-500">{view.source}</p>}
+      {view.source && (
+        <p className="mt-3 text-xs text-stone-500">
+          {usesPages ? `${view.source}; synced pages where no time was recorded` : view.source}
+        </p>
+      )}
       <div className="mt-3 flex items-center justify-between">
         <button type="button" className={arrow} onClick={() => setBack(back + 1)} aria-label="Earlier">
           <ChevronLeft className="size-5" strokeWidth={1.75} />

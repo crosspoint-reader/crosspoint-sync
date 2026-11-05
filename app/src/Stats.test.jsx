@@ -221,7 +221,7 @@ describe('reading grids', () => {
   it('keeps time available with daily history outside the visible period', () => {
     const daily = [{ date: '2025-08-01', seconds: 600 }]
     const { getByText, getByLabelText } = render(<Stats session={{}} books={[]} activity={synced} summary={{ ...summary, daily }} />)
-    expect(getByText('Reading time recorded by your reader')).toBeTruthy()
+    expect(getByText('Reading time recorded by your reader; synced pages where no time was recorded')).toBeTruthy()
     expect(getByLabelText('Wed, Sep 30: 5 pages')).toBeTruthy()
     expect(getByText('Today').nextElementSibling.textContent).toBe('0m')
   })
@@ -258,10 +258,11 @@ describe('reading grids', () => {
       books: [], pages_total: 32, reading_days: ['2026-09-20', '2026-09-24', '2026-09-30'],
       days: [{ day: '2026-09-20', syncs: 2, pages: 12 }, { day: '2026-09-24', syncs: 1, pages: 0 }, { day: '2026-09-30', syncs: 1, pages: 20 }],
     }
-    const { getByLabelText } = render(<Stats session={{}} books={[]} summary={summary} activity={history} />)
+    const { getByLabelText, getByText } = render(<Stats session={{}} books={[]} summary={summary} activity={history} />)
     expect(getByLabelText('Wed, Sep 30: 1h 10m reading time')).toBeTruthy()
     expect(getByLabelText('Sun, Sep 20: 12 pages')).toBeTruthy()
     expect(getByLabelText('Thu, Sep 24: read')).toBeTruthy()
+    expect(getByText('Reading time recorded by your reader; synced pages where no time was recorded')).toBeTruthy()
   })
 
   it('updates both streaks from the same dates that fill the grid', () => {
