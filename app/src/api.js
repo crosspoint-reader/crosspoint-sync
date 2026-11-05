@@ -606,9 +606,10 @@ export const api = {
   // Days without progress before a book auto-pauses: { days } (0 = never).
   autoPause: (s) => call(s, '/api/v1/account/auto-pause'),
   setAutoPause: (s, days) => call(s, '/api/v1/account/auto-pause', { method: 'PUT', body: JSON.stringify({ days }) }),
-  // Public reading profile: { slug } (null = off).
+  // Public reading profile: { slug (null = off), display_name (null = username) }.
   profile: (s) => call(s, '/api/v1/profile'),
   setProfile: (s, enabled) => call(s, '/api/v1/profile', { method: 'PUT', body: JSON.stringify({ enabled }) }),
+  setDisplayName: (s, display_name) => call(s, '/api/v1/profile', { method: 'PUT', body: JSON.stringify({ display_name }) }),
   // Archives must be fetched online and never stored in the offline cache.
   exportAccount: (s) => call(s, '/api/v1/account/export', {}, false),
   async importHistory(s, file, timezone, choices) {

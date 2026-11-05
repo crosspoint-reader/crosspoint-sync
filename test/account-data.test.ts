@@ -18,7 +18,7 @@ async function seed(s: Awaited<ReturnType<typeof fixture>>) {
   s.db.prepare('INSERT INTO stats_device_book VALUES (?, ?, ?, ?, ?)').run(s.id, 'reader', DOC, '{"reading_time":123}', 12);
   s.db.prepare('INSERT INTO reading_sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(s.id, 'reader', 'session', DOC, 10, 20, 10, 0, 20);
   s.db.prepare('INSERT INTO document_aliases VALUES (?, ?, ?, ?, ?)').run(s.id, 'opaque-id', DOC, 12, 1);
-  s.db.prepare('UPDATE users SET auto_pause_days = 7, profile_slug = ? WHERE id = ?').run('source-profile', s.id);
+  s.db.prepare('UPDATE users SET auto_pause_days = 7, profile_slug = ?, display_name = ? WHERE id = ?').run('source-profile', 'Jane Reader', s.id);
 }
 const archiveOf = async (s: Awaited<ReturnType<typeof fixture>>) => (await s.app.request('/api/v1/account/export', { headers: s.headers })).json();
 const restore = (s: Awaited<ReturnType<typeof fixture>>, archive: unknown, mode = 'empty') => s.app.request('/api/v1/account/import', { method: 'POST', headers: s.headers, body: JSON.stringify({ archive, mode }) });
@@ -35,6 +35,7 @@ describe('account migration', () => {
     const exported = await archiveOf(target);
     expect(exported.data).toEqual(archive.data);
     expect(exported.profile.auto_pause_days).toBe(7);
+    expect(exported.profile.display_name).toBe('Jane Reader');
     expect(exported.profile.username).toBe(target.username);
     expect(target.db.prepare('SELECT profile_slug FROM users').get()!.profile_slug).not.toBe('source-profile');
     expect(target.db.prepare('SELECT change_seq, server_change_seq FROM progress').get()).toEqual({ change_seq: 901, server_change_seq: 901 });

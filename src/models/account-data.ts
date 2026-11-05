@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { withTransaction, type DB } from '../db/db.js';
 import { isValidDocument } from '../routes/kosync.js';
 import { nextChangeSeq } from './changes.js';
+import { cleanDisplayName } from '../routes/profile.js';
 
 // Only portable reading data belongs here; never authentication, secrets, queues or caches.
 export const ACCOUNT_TABLES = [
@@ -16,14 +17,14 @@ const columns = (db: DB, table: string) =>
   (db.prepare(`PRAGMA table_info(${table})`).all() as unknown as Column[]).filter(c => !localColumns.has(c.name));
 
 export function exportAccountData(db: DB, userId: number) {
-  const user = db.prepare('SELECT username, auto_pause_days, profile_slug FROM users WHERE id = ?').get(userId)!;
+  const user = db.prepare('SELECT username, display_name, auto_pause_days, profile_slug FROM users WHERE id = ?').get(userId)!;
   const data: Record<string, Row[]> = {};
   for (const table of ACCOUNT_TABLES) {
     data[table] = db.prepare(`SELECT ${columns(db, table).map(c => c.name).join(', ')} FROM ${table} WHERE user_id = ?`).all(userId) as Row[];
   }
   return {
     format: 'crosspoint-sync-account', version: 1, exported_at: new Date().toISOString(),
-    profile: { username: user.username, auto_pause_days: user.auto_pause_days, public_profile: !!user.profile_slug },
+    profile: { username: user.username, display_name: user.display_name, auto_pause_days: user.auto_pause_days, public_profile: !!user.profile_slug },
     data,
   };
 }
@@ -40,7 +41,9 @@ export function importAccountData(db: DB, userId: number, input: unknown, replac
   }
   const { data, profile } = input;
   const days = profile.auto_pause_days;
-  if (!(days === null || (Number.isInteger(days) && Number(days) >= 0 && Number(days) <= 365)) || typeof profile.public_profile !== 'boolean') {
+  // Older archives have no display name; the destination keeps its own then.
+  const displayName = 'display_name' in profile ? cleanDisplayName(profile.display_name) : null;
+  if (!(days === null || (Number.isInteger(days) && Number(days) >= 0 && Number(days) <= 365)) || typeof profile.public_profile !== 'boolean' || displayName === undefined) {
     return invalid('Invalid account preferences.');
   }
   if (Object.keys(data).some(t => !ACCOUNT_TABLES.includes(t as typeof ACCOUNT_TABLES[number]))) return invalid('Unknown archive data section.');
@@ -118,6 +121,7 @@ export function importAccountData(db: DB, userId: number, input: unknown, replac
     db.prepare('UPDATE users SET auto_pause_days = ?, profile_slug = ? WHERE id = ?').run(
       days as number | null, profile.public_profile ? (current.profile_slug ?? crypto.randomBytes(9).toString('base64url')) : null, userId,
     );
+    if ('display_name' in profile) db.prepare('UPDATE users SET display_name = ? WHERE id = ?').run(displayName as string | null, userId);
   });
   return { imported: count };
 }

@@ -10,27 +10,46 @@ import { fontFaces } from './web.js';
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
 
-/** Turn the signed-in account's public profile on (new random link) or off. */
+/** Trimmed display name (case and inner spaces kept), null when blank, undefined when invalid. */
+export function cleanDisplayName(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  if (typeof value !== 'string') return undefined;
+  const name = value.trim();
+  if (/[\p{Cc}]/u.test(name) || [...name].length > 64) return undefined;
+  return name || null;
+}
+
+/** Turn the signed-in account's public profile on (new random link) or off, and set its display name. */
 export function profileSettingsRoutes(db: DB): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
-  const slugOf = (id: number) =>
-    (db.prepare('SELECT profile_slug FROM users WHERE id = ?').get(id) as { profile_slug: string | null }).profile_slug;
+  const profileOf = (id: number) => {
+    const row = db.prepare('SELECT profile_slug, display_name FROM users WHERE id = ?').get(id) as
+      { profile_slug: string | null; display_name: string | null };
+    return { slug: row.profile_slug, display_name: row.display_name };
+  };
 
-  app.get('/profile', (c) => c.json({ slug: slugOf(c.get('user').id) }));
+  app.get('/profile', (c) => c.json(profileOf(c.get('user').id)));
 
   app.put('/profile', async (c) => {
     const user = c.get('user');
-    let enabled: unknown;
+    let body: Record<string, unknown> = {};
     try {
-      enabled = ((await c.req.json()) as Record<string, unknown>).enabled;
+      body = (await c.req.json()) as Record<string, unknown>;
     } catch {
       /* validated below */
     }
-    if (typeof enabled !== 'boolean') return c.json({ code: 2003, message: 'Send { enabled: boolean }' }, 400);
-    // Keep an existing link when it's already on; turning off and on again makes a new one.
-    const slug = enabled ? (slugOf(user.id) ?? crypto.randomBytes(9).toString('base64url')) : null;
-    db.prepare('UPDATE users SET profile_slug = ? WHERE id = ?').run(slug, user.id);
-    return c.json({ slug });
+    const { enabled } = body;
+    const name = 'display_name' in body ? cleanDisplayName(body.display_name) : null;
+    if ((enabled !== undefined && typeof enabled !== 'boolean') || name === undefined || (enabled === undefined && !('display_name' in body))) {
+      return c.json({ code: 2003, message: 'Send { enabled?: boolean, display_name?: string | null } (display name up to 64 characters)' }, 400);
+    }
+    if ('display_name' in body) db.prepare('UPDATE users SET display_name = ? WHERE id = ?').run(name, user.id);
+    if (typeof enabled === 'boolean') {
+      // Keep an existing link when it's already on; turning off and on again makes a new one.
+      const slug = enabled ? (profileOf(user.id).slug ?? crypto.randomBytes(9).toString('base64url')) : null;
+      db.prepare('UPDATE users SET profile_slug = ? WHERE id = ?').run(slug, user.id);
+    }
+    return c.json(profileOf(user.id));
   });
 
   return app;
@@ -62,8 +81,8 @@ export function publicProfileRoutes(db: DB, basePath: string): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   app.get('/u/:slug', (c) => {
-    const user = db.prepare('SELECT id, username FROM users WHERE profile_slug = ?').get(c.req.param('slug')) as
-      | { id: number; username: string }
+    const user = db.prepare('SELECT id, username, display_name FROM users WHERE profile_slug = ?').get(c.req.param('slug')) as
+      | { id: number; username: string; display_name: string | null }
       | undefined;
     if (!user) return c.notFound();
 
@@ -96,7 +115,7 @@ export function publicProfileRoutes(db: DB, basePath: string): Hono<AppEnv> {
     const pages = activity.books.reduce((n, b) => n + (listed.has(b.document) ? (b.pages_read ?? 0) : 0), 0);
     const streak = Math.max(stats.current_streak, syncStreak(activity.reading_days));
 
-    const name = esc(user.username);
+    const name = esc(user.display_name ?? user.username);
     // Zero stats are left out: a reader that never uploads time shouldn't show "0 hours read".
     const tile = (value: number, label: string) =>
       value > 0 ? `<div class="tile"><b>${value.toLocaleString('en-US')}</b><span>${label}</span></div>` : '';

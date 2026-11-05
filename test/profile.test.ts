@@ -12,7 +12,7 @@ describe('public profile', () => {
       await app.request('/api/v1/documents', { method: 'PUT', headers, body: JSON.stringify({ items: [{ document, title }] }) });
       await app.request(`/api/v1/documents/${document}/info`, { method: 'PUT', headers, body: JSON.stringify({ page_count: document === DOC ? 250 : 0 }) });
     }
-    expect(await (await app.request('/api/v1/profile', { headers })).json()).toEqual({ slug: null });
+    expect(await (await app.request('/api/v1/profile', { headers })).json()).toEqual({ slug: null, display_name: null });
 
     const { slug } = (await (await app.request('/api/v1/profile', { method: 'PUT', headers, body: JSON.stringify({ enabled: true }) })).json()) as { slug: string };
     const page = await app.request(`/u/${slug}`);
@@ -27,6 +27,26 @@ describe('public profile', () => {
 
     await app.request('/api/v1/profile', { method: 'PUT', headers, body: JSON.stringify({ enabled: false }) });
     expect((await app.request(`/u/${slug}`)).status).toBe(404);
+  });
+});
+
+describe('display name', () => {
+  it('keeps case and inner spaces, trims, clears when blank, and titles the public page', async () => {
+    const { app } = makeTestApp();
+    const { headers, username } = await registerUser(app);
+    const put = (body: unknown) => app.request('/api/v1/profile', { method: 'PUT', headers, body: JSON.stringify(body) });
+    const { slug } = (await (await put({ enabled: true })).json()) as { slug: string };
+    expect(await (await app.request(`/u/${slug}`)).text()).toContain(`<h1>${username}'s reading</h1>`);
+
+    expect(await (await put({ display_name: '  Jane  Q. <Reader> ' })).json()).toEqual({ slug, display_name: 'Jane  Q. <Reader>' });
+    expect(await (await app.request(`/u/${slug}`)).text()).toContain("<h1>Jane  Q. &lt;Reader&gt;'s reading</h1>");
+
+    expect((await put({ display_name: 'x'.repeat(65) })).status).toBe(400);
+    expect((await put({ display_name: 'a\nb' })).status).toBe(400);
+    expect((await put({ display_name: 5 })).status).toBe(400);
+    expect((await put({})).status).toBe(400);
+
+    expect(await (await put({ display_name: '   ' })).json()).toEqual({ slug, display_name: null });
   });
 });
 

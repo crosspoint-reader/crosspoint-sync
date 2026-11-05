@@ -7,7 +7,7 @@ vi.mock('./api.js', () => ({
   get isApp() { return env.isApp },
   showUntitled: vi.fn(() => false),
   setShowUntitled: vi.fn(),
-  api: { exportAccount: vi.fn(), importAccount: vi.fn(), oauthBegin: vi.fn(), oauthComplete: vi.fn(), connectors: vi.fn(), linkConnector: vi.fn(), setClientId: vi.fn(), removeClientId: vi.fn(), syncConnector: vi.fn(), unlinkConnector: vi.fn(), clearData: vi.fn(), deleteAccount: vi.fn(), autoPause: vi.fn(), setAutoPause: vi.fn(), recoveryToken: vi.fn(() => Promise.resolve({ token: null })), newRecoveryToken: vi.fn() },
+  api: { exportAccount: vi.fn(), importAccount: vi.fn(), oauthBegin: vi.fn(), oauthComplete: vi.fn(), connectors: vi.fn(), linkConnector: vi.fn(), setClientId: vi.fn(), removeClientId: vi.fn(), syncConnector: vi.fn(), unlinkConnector: vi.fn(), clearData: vi.fn(), deleteAccount: vi.fn(), autoPause: vi.fn(), setAutoPause: vi.fn(), profile: vi.fn(), setProfile: vi.fn(), setDisplayName: vi.fn(), recoveryToken: vi.fn(() => Promise.resolve({ token: null })), newRecoveryToken: vi.fn() },
 }))
 vi.mock('./shareCard.js', () => ({ saveFile: vi.fn() }))
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }))
@@ -450,4 +450,16 @@ describe('account migration controls', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
     expect(api.importAccount).not.toHaveBeenCalled()
   })
+})
+
+it('saves a display name with its case and spaces, falling back to the username when blank', async () => {
+  api.connectors.mockResolvedValue({ connectors: [] })
+  api.profile.mockResolvedValue({ slug: null, display_name: null })
+  api.setDisplayName.mockResolvedValue({})
+  render(<Settings session={{ ...session, username: 'reader' }} theme={['system', vi.fn()]} onSession={vi.fn()} onLogout={vi.fn()} />)
+  const input = await screen.findByRole('textbox', { name: 'Display name' })
+  expect(input.getAttribute('placeholder')).toBe('reader')
+  fireEvent.change(input, { target: { value: '  Jane Q. Reader ' } })
+  fireEvent.blur(input)
+  await waitFor(() => expect(api.setDisplayName).toHaveBeenCalledWith(expect.anything(), 'Jane Q. Reader'))
 })

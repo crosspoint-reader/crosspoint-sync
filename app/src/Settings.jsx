@@ -729,8 +729,23 @@ function AutoPause({ session }) {
 function Profile({ session }) {
   const [data, error, reload] = useLoad(() => api.profile(session), [session], `profile ${session.username}@${session.server}`)
   const [busy, setBusy] = useState(false)
+  const [name, setName] = useState(null) // the typed name while editing, else the saved one shows
   if (error && !data) return <p className="py-4 text-sm text-stone-500">Couldn&apos;t load your profile ({error.message}).</p>
   if (!data) return <Loader2 className="mx-auto my-6 size-5 animate-spin text-stone-400" />
+  const saveName = async () => {
+    const next = name?.trim() || null
+    setName(null)
+    if (name === null || next === data.display_name) return
+    setBusy(true)
+    try {
+      await api.setDisplayName(session, next)
+      reload()
+    } catch (e) {
+      notify({ error: true, title: "That didn't work", detail: e.message })
+    } finally {
+      setBusy(false)
+    }
+  }
   const url = data.slug && `${session.server.replace(/\/$/, '')}/u/${data.slug}`
   const copy = async (text, what) => {
     await navigator.clipboard.writeText(text)
@@ -739,6 +754,22 @@ function Profile({ session }) {
   const button = 'flex h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-stone-100 text-sm font-semibold text-stone-800 active:bg-stone-200'
   return (
     <Card className="mt-3 divide-y divide-stone-100">
+      <label className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-stone-800">
+        <span className="shrink-0">Display name</span>
+        <input
+          type="text"
+          maxLength={64}
+          autoComplete="name"
+          aria-label="Display name"
+          placeholder={session.username}
+          value={name ?? data.display_name ?? ''}
+          disabled={busy}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={saveName}
+          onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+          className="h-9 min-w-0 flex-1 rounded-lg bg-stone-100 px-3 text-right text-sm text-stone-900 outline-none focus:ring-2 focus:ring-brand-300"
+        />
+      </label>
       <label className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-stone-800">
         <span className="flex-1">Public profile</span>
         {busy ? (
@@ -1084,7 +1115,7 @@ export default function Settings({ session, theme, onSession, onLogout }) {
       <HistoryImport session={session} />
 
       <h2 className={section}>Public profile</h2>
-      <p className="mt-1 text-sm text-stone-500">A page with your reading stats and shelves to link to or embed on a website. Turning it off and on makes a new link.</p>
+      <p className="mt-1 text-sm text-stone-500">A page with your reading stats and shelves to link to or embed on a website, shown under your display name (or username if blank). Turning it off and on makes a new link.</p>
       <Profile session={session} />
 
       <h2 className={section}>Account</h2>
