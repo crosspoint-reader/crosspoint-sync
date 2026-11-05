@@ -37,6 +37,22 @@ describe('v1 clippings sync', () => {
     expect(body.items[0]).toMatchObject({ ...CLIP, deleted: 0, note: null, color: null });
   });
 
+  it('stamps a timeless pre-v2 clipping with its first sync and keeps that time on later uploads', async () => {
+    const { app } = makeTestApp();
+    const { headers } = await registerUser(app);
+    const put = (clip: object) => app.request(`/api/v1/clippings/${DOC}`, { method: 'PUT', headers, body: JSON.stringify({ items: [clip] }) });
+    const read = async () => (await (await app.request(`/api/v1/clippings/${DOC}`, { headers })).json()).items[0].created_at;
+    const { created_at: _created, ...timeless } = CLIP;
+    const before = Math.floor(Date.now() / 1000);
+    await put(timeless);
+    const first = await read();
+    expect(first).toBeGreaterThanOrEqual(before);
+    await put({ ...CLIP, created_at: 0, note: 'later edit' });
+    expect(await read()).toBe(first);
+    await put(CLIP);
+    expect(await read()).toBe(CLIP.created_at);
+  });
+
   it('para is optional (CrossInk uses UINT16_MAX for unavailable)', async () => {
     const { app } = makeTestApp();
     const { headers } = await registerUser(app);

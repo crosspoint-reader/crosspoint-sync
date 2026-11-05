@@ -5,7 +5,7 @@ import { saveFile } from './shareCard.js'
 import { ClipMenu, ClipShare, DeleteClip, hold } from './Book.jsx'
 import { ActionSheet, Cover, EmptyState, ErrorNote, ShareIcon, Spinner, useLoad } from './ui.jsx'
 
-const date = (unix) => new Date(unix * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+const date = (unix) => unix && new Date(unix * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 
 // Same clipping all day, a different one tomorrow.
 function ofTheDay(items) {

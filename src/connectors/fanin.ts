@@ -187,7 +187,7 @@ function importHighlights(db: DB, userId: number, document: string, items: Inbou
       const note = h.note && Buffer.byteLength(h.note) <= 4096 ? h.note : null;
       bump.run();
       const r = insert.run(userId, document, id, h.spine, (h.chapter ?? '').slice(0, 64), h.text, note,
-        h.createdAt, now, h.startOffset, h.endOffset);
+        h.createdAt || now, now, h.startOffset, h.endOffset);
       if (r.changes) { added.push({ id, h }); known.add(squash(h.text)); }
     }
   });
