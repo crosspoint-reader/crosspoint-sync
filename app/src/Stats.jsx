@@ -528,10 +528,21 @@ function ReadingCalendar({ summary, activity, books = [] }) {
               {weeks.map((monday) => (
                 <Fragment key={monday.getTime()}>
                   {WEEKDAYS.map((w, r) => cell(new Date(monday.getTime() + r * DAY_MS), 'rounded-[2px]'))}
-                  <p className="pt-1 font-mono text-[0.6rem] whitespace-nowrap text-stone-400">
-                    {monday.getDate() <= 7 || monday.getTime() === weeks[0].getTime() ? fmt(monday, { month: 'short' }) : ''}
-                  </p>
                 </Fragment>
+              ))}
+              {/* Labels span weeks so their text fits; keep the last month inside the grid. */}
+              {weeks.map((monday, i) => (monday.getDate() <= 7 || i === 0) && (
+                <p
+                  key={monday.getTime()}
+                  className="w-max pt-1 font-mono text-[0.6rem] whitespace-nowrap text-stone-400"
+                  style={{
+                    gridRow: 8,
+                    gridColumn: `${i + 2} / span ${Math.min(4, weeks.length - i)}`,
+                    justifySelf: i > weeks.length - 4 ? 'end' : 'start',
+                  }}
+                >
+                  {fmt(monday, { month: 'short' })}
+                </p>
               ))}
             </div>
           </div>
