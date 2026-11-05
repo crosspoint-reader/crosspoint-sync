@@ -53,7 +53,7 @@ function useCellTip() {
   const bubble = tip && (
     <div
       role="tooltip"
-      className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full rounded-md bg-stone-900 px-2 py-1 text-center font-mono text-[0.7rem] whitespace-pre text-stone-50 shadow-md"
+      className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full rounded-md bg-stone-900 px-2 py-1 text-center w-max max-w-64 font-mono text-[0.7rem] whitespace-normal text-stone-50 shadow-md"
       style={{ left: tip.x, top: tip.y - 6 }}
     >
       {tip.text}
@@ -332,30 +332,38 @@ function timeByDay(summary, activity) {
 
 const PAGES_VIEW = {
   source: 'Print pages estimated from synced progress',
-  fallback: FALLBACK_PAGES,
   tip: (pages) => (pages ? `${Math.round(pages)} pages` : 'read'),
-  total: ['pages read', (n) => Math.round(n).toLocaleString()],
 }
 const TIME_VIEW = {
   source: 'Reading time recorded by your reader',
-  fallback: FALLBACK_SECONDS,
   tip: (seconds) => (seconds === undefined ? 'read' : `${duration(seconds)} reading time`),
-  total: ['time read', duration],
 }
-// Older firmware sends read-day flags without daily time counters.
-const DAYS_VIEW = {
-  fallback: FALLBACK_SECONDS,
-  tip: () => 'read',
-}
-
-// byDay: every read day -> amount (undefined when unknown); view describes the available data.
-function ReadingCalendar({ byDay, view, days = [], books = [] }) {
+// Keep each measure separate: page estimates and measured seconds cannot be added together.
+function ReadingCalendar({ summary, activity, books = [] }) {
   const [scale, setScale] = useState('year')
   const [back, setBack] = useState(0)
   const [sharing, setSharing] = useState(false)
   const scroller = useRef(null)
-  const { level: amountLevel } = shadeLevels(byDay, { fallback: view.fallback })
-  const level = (day) => (!byDay.has(day) ? 0 : amountLevel(byDay.get(day)))
+  const pages = pagesByDay(activity?.days ?? [], activity?.reading_days)
+  const time = timeByDay(summary ?? {}, activity)
+  const byDay = new Set([...pages.keys(), ...time.keys()])
+  const hasPages = [...pages.values()].some((n) => n > 0)
+  const hasDaily = !!summary?.daily?.length
+  const pageLevel = shadeLevels(pages, { fallback: FALLBACK_PAGES }).level
+  const timeLevel = shadeLevels(time, { fallback: FALLBACK_SECONDS }).level
+  const level = (day) => {
+    if (!byDay.has(day)) return 0
+    if (pages.get(day) > 0) return pageLevel(pages.get(day))
+    if (time.get(day) !== undefined) return timeLevel(time.get(day))
+    return 2
+  }
+  const tipFor = (day) => {
+    const labels = [
+      pages.get(day) > 0 ? PAGES_VIEW.tip(pages.get(day)) : null,
+      time.get(day) !== undefined ? TIME_VIEW.tip(time.get(day)) : null,
+    ]
+    return labels.filter(Boolean).join(' · ') || 'read'
+  }
   const today = new Date()
   today.setHours(12, 0, 0, 0)
   const { weeks, first, last, label } = calendarRange(scale, back, today)
@@ -375,15 +383,16 @@ function ReadingCalendar({ byDay, view, days = [], books = [] }) {
   const cell = (d, round) => {
     if (!shown(d)) return <div key={d.getTime()} className="aspect-square" />
     const key = localDay(d)
-    const tip = `${fmt(d, { weekday: 'short', month: 'short', day: 'numeric' })}: ${byDay.has(key) ? view.tip(byDay.get(key)) : 'no reading'}`
+    const tip = `${fmt(d, { weekday: 'short', month: 'short', day: 'numeric' })}: ${byDay.has(key) ? tipFor(key) : 'no reading'}`
     return <div key={d.getTime()} data-tip={tip} aria-label={tip} className={`aspect-square ${round} ${SHADES[level(key)]}`} />
   }
   // Share the visible period, reading days, available page/time totals and longest streak.
   const share = () => {
-    let total = 0, streak = 0, run = 0
+    let pageTotal = 0, secondsTotal = 0, streak = 0, run = 0
     for (let d = first; d <= last && d <= today; d = new Date(d.getTime() + DAY_MS)) {
       const key = localDay(d)
-      total += byDay.get(key) ?? 0
+      pageTotal += pages.get(key) ?? 0
+      secondsTotal += time.get(key) ?? 0
       run = byDay.has(key) ? run + 1 : 0
       streak = Math.max(streak, run)
     }
@@ -406,7 +415,7 @@ function ReadingCalendar({ byDay, view, days = [], books = [] }) {
       year: back ? 'My year' : 'My past year',
     }[scale]
     // Moods of the books read in this period.
-    const inPeriod = days.filter((d) => {
+    const inPeriod = (activity?.days ?? []).filter((d) => {
       const at = dayDate(d.day)
       return at >= first && at <= last
     })
@@ -418,7 +427,8 @@ function ReadingCalendar({ byDay, view, days = [], books = [] }) {
       subtitle: label,
       tiles: [
         ['reading days', count],
-        ...(view.total ? [[view.total[0], view.total[1](total)]] : []),
+        ...(hasPages ? [['pages read', Math.round(pageTotal).toLocaleString()]] : []),
+        ...(hasDaily ? [['time read', duration(secondsTotal)]] : []),
         ['day streak', streak],
       ],
       blocks,
@@ -437,7 +447,7 @@ function ReadingCalendar({ byDay, view, days = [], books = [] }) {
             fileName: `Reading days ${label}.png`,
             text: `${count} reading ${count === 1 ? 'day' : 'days'}, ${label}. Tracked with CrossPoint Sync.`,
           }}
-          renderKey={`${view.total?.[0] ?? 'reading days'}-${scale}-${back}-${count}`}
+          renderKey={`${scale}-${back}-${count}-${JSON.stringify([...pages])}-${JSON.stringify([...time])}`}
           onClose={() => setSharing(false)}
           render={share}
         />
@@ -467,7 +477,9 @@ function ReadingCalendar({ byDay, view, days = [], books = [] }) {
           ))}
         </div>
       </div>
-      {view.source && <p className="mt-3 text-xs text-stone-500">{view.source}</p>}
+      {(hasPages || hasDaily) && <p className="mt-3 text-xs text-stone-500">
+        {[hasPages && PAGES_VIEW.source, hasDaily && TIME_VIEW.source].filter(Boolean).join(' · ')}
+      </p>}
       <div className="mt-3 flex items-center justify-between">
         <button type="button" className={arrow} onClick={() => setBack(back + 1)} aria-label="Earlier">
           <ChevronLeft className="size-5" strokeWidth={1.75} />
@@ -525,7 +537,7 @@ function ReadingCalendar({ byDay, view, days = [], books = [] }) {
           </div>
         )}
       </div>
-      {view.total && <div className="mt-3"><ShadeLegend /></div>}
+      {(hasPages || hasDaily) && <div className="mt-3"><ShadeLegend /></div>}
     </Card>
   )
 }
@@ -927,7 +939,11 @@ export default function Stats({ session, tab = '', summary, activity, books, goa
               ['Books finished', books.filter((b) => b.status === 'finished').length],
             ]}
           />
-          <ReadingCalendar byDay={timeByDay(summary, activity)} view={daily ? TIME_VIEW : DAYS_VIEW} days={activity?.days} books={books} />
+        </>
+      ) : null}
+      {(summary || activity) && <ReadingCalendar summary={summary} activity={activity} books={books} />}
+      {hasTime && (
+        <>
           <div className="md:grid md:grid-cols-2 md:gap-4">
             <Bars title="Time of day" labels={['Morning', 'Afternoon', 'Evening', 'Night']} values={summary.tod} />
             <Bars title="Day of week" labels={['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']} values={summary.dow} />
@@ -936,10 +952,6 @@ export default function Stats({ session, tab = '', summary, activity, books, goa
             Combined from {deviceList(summary.devices)}
           </p>
         </>
-      ) : (
-        activity && (
-          <ReadingCalendar byDay={pagesByDay(activity.days, activity.reading_days)} view={PAGES_VIEW} days={activity.days} books={books} />
-        )
       )}
     </div>
   )

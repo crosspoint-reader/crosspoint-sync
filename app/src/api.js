@@ -410,6 +410,19 @@ export async function register(server, username, password) {
   return login(base, username, password)
 }
 
+/** Lost password: the recovery token from Settings sets a new one, then signs in with it. */
+export async function recover(server, token, password) {
+  const base = await resolveServer(server)
+  const res = await http(`${base}/auth/recover`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token: token.trim(), key: SparkMD5.hash(password) }),
+  })
+  const body = await res.json().catch(() => null)
+  if (!res.ok) throw new Error(body?.error || `Server error ${res.status}`)
+  return login(base, body.username, password)
+}
+
 export async function login(server, username, password) {
   const session = {
     server: await resolveServer(server),
@@ -629,9 +642,10 @@ export const api = {
   // Days without progress before a book auto-pauses: { days } (0 = never).
   autoPause: (s) => call(s, '/api/v1/account/auto-pause'),
   setAutoPause: (s, days) => call(s, '/api/v1/account/auto-pause', { method: 'PUT', body: JSON.stringify({ days }) }),
-  // Public reading profile: { slug } (null = off).
+  // Public reading profile: { slug (null = off), display_name (null = username) }.
   profile: (s) => call(s, '/api/v1/profile'),
   setProfile: (s, enabled) => call(s, '/api/v1/profile', { method: 'PUT', body: JSON.stringify({ enabled }) }),
+  setDisplayName: (s, display_name) => call(s, '/api/v1/profile', { method: 'PUT', body: JSON.stringify({ display_name }) }),
   // Archives must be fetched online and never stored in the offline cache.
   exportAccount: (s) => call(s, '/api/v1/account/export', {}, false),
   async importHistory(s, file, timezone, choices) {
@@ -653,6 +667,8 @@ export const api = {
     return result
   },
   // The sync account itself.
+  recoveryToken: (s) => call(s, '/api/v1/account/recovery-token', {}, false),
+  newRecoveryToken: (s) => call(s, '/api/v1/account/recovery-token', { method: 'POST' }, false),
   changePassword: (s, password) => call(s, '/api/v1/account/password', { method: 'POST', body: JSON.stringify({ key: SparkMD5.hash(password) }) }),
   async clearData(s) {
     const version = sessionVersion

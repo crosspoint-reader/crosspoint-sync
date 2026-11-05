@@ -7,7 +7,7 @@ and any KOReader device.
   only the sync-server URL. Same accounts, same auth, same endpoints as `sync.koreader.rocks`.
 - **Better multi-device sync.** Progress is stored per device and the newest position wins, fixing
   the ping-pong you get with stock kosync servers.
-- **Server-side service connectors.** Link services such as Hardcover, Micro.blog, Audiobookshelf, Jellyfin, BookOrbit, Readwise Reader, and Seekquel once; readers continue speaking standard KOSync while the server updates external reading state.
+- **Server-side service connectors.** Link services such as Hardcover, Micro.blog, Audiobookshelf, Jellyfin, BookOrbit, Readwise Reader, Seekquel, and Readest once; readers continue speaking standard KOSync while the server updates external reading state.
 - **BookOrbit on demand.** Reader progress requests fetch the matched book’s latest progress and highlights. On a book’s page, **Connected services → BookOrbit → Sync now** pulls before queueing outbound updates and refreshes that book’s reading history. BookOrbit has no periodic polling; reading-session uploads trigger delivery directly.
 - **Lossless CrossPoint sync.** An extended API carries the full CrossPoint position (spine,
   paragraph, anchor, page hints), not just a lossy xpath + percentage.
@@ -165,8 +165,11 @@ DATABASE_PATH=./data/crosspoint.db PORT=8080 node dist/index.js
 | `HARDCOVER_API_KEY` | _(unset)_ | Optional. A Hardcover API key (`read:catalog` is enough) for book details from Hardcover's catalog: moods, genres, content warnings, rating, series, release year, and page counts/covers where other sources miss. One lookup per distinct book, cached for all users, throttled under Hardcover's free-plan limits. |
 | `LEGACY_WEB` | _(unset)_ | The website is the CrossPoint Sync app at `/app/` (the old account pages redirect there; Kindle setup keeps its pages). Set `1` to keep the old server-rendered website instead. |
 | `HARDCOVER_CLIENT_ID` | CrossPoint Sync's app | Optional. Hardcover OAuth client id for "Connect Hardcover" sign-in. The built-in id is CrossPoint Sync's public Hardcover app and works for self-hosted servers too; set this only to use your own Hardcover developer app. |
-| `SEARCHAPI_KEY` | _(unset)_ | Optional, paid ([searchapi.io](https://www.searchapi.io)). Last fallback for print page counts: Amazon search + product "Print length", 2 requests per book, only for books the free sources miss. Cached forever. |
+| `SEARCHAPI_KEY` | _(unset)_ | Optional, paid ([searchapi.io](https://www.searchapi.io)). Last fallback for print page counts: Amazon search + product "Print length", up to 2 credits per book. Only stats views ask (never library covers), only for books the free sources miss, once per book across all users; a miss is retried after 90 days. Pauses for an hour when SearchAPI refuses (out of credits, rate limited). |
+| `SEARCHAPI_DAILY_LIMIT` | _(unset)_ | Optional. Most SearchAPI credits to spend per UTC day; unset means no cap. Usage is counted either way. |
 | `SEEKQUEL_URL` | `https://api.seekquel.app` | Optional. The Seekquel API the Seekquel connector links to and syncs with. Only for testing against a local Seekquel. |
+| `READEST_URL` | `https://web.readest.com` | Optional. The Readest web origin the Readest connector links to and syncs with. Only for testing against a local Readest. |
+| `READEST_SUPABASE_URL` / `READEST_SUPABASE_ANON_KEY` | Readest's hosted values | Optional. The Supabase project the Readest connector refreshes its sign-in with. Only for testing against a local Readest. |
 | `CORS_ORIGINS` | `*` | Origins allowed to call the sync API from browsers (comma-separated). The default wildcard is safe: the API authenticates with headers, not cookies, and the web UI's cookie routes never get CORS headers. |
 
 With `BASE_PATH=/crosspoint-sync`, open `https://your-host/crosspoint-sync/`
@@ -295,8 +298,14 @@ time. Counters are monotonic history, independent of resettable global totals.
 `GET /api/v1/stats/summary` includes date-sorted `daily` rows with `date`, summed
 `seconds`, and fractional `minutes`. The reader has already applied its timezone;
 these dates are never converted using the server or browser timezone. Absent daily
-history means unknown, not historical zero. Account data deletion removes the new
-data; book merges/unmerges/deletion do not change device/day counters.
+history means unknown, not historical zero. The reading calendar preserves
+progress-derived page estimates alongside recorded daily time, including when
+CrossInk uploads only read-day flags. One calendar shows both measurements
+together in each day's tooltip. Shading uses page counts when available, otherwise
+recorded time; days without either metric retain a generic read marker.
+Share cards keep page and time totals separate. Durations are never inferred
+from read-day flags.
+Account data deletion removes the new data; book merges/unmerges/deletion do not change device/day counters.
 
 
 Regression checks: `npm test`, `npm run build`; after building the CrossInk

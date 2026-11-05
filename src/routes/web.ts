@@ -25,7 +25,7 @@ const OG_IMAGE = fs.readFileSync(path.join(ASSETS_DIR, 'og.jpg'));
 // Service app icons, served at /icons/:id.png. Loaded once at boot; a missing
 // file just means no icon for that service (the UI falls back gracefully).
 const SERVICE_ICONS = new Map<string, Buffer>();
-for (const id of ['kosync', 'hardcover', 'audiobookshelf', 'jellyfin', 'bookfusion', 'readwise', 'microblog', 'bookorbit', 'seekquel', 'spotify', 'kindle']) {
+for (const id of ['kosync', 'hardcover', 'audiobookshelf', 'jellyfin', 'bookfusion', 'readwise', 'microblog', 'bookorbit', 'seekquel', 'readest', 'spotify', 'kindle']) {
   try {
     SERVICE_ICONS.set(id, fs.readFileSync(path.join(ASSETS_DIR, 'icons', `${id}.png`)));
   } catch {
@@ -292,6 +292,9 @@ const LANDING = (basePath: string) => shell(basePath,
        <span class="pill warn">beta</span></div>
      <div class="svc"><div class="lead"><img class="svc-icon" src="${basePath}/icons/seekquel.png" alt="" width="34" height="34"><div><div class="name">Seekquel</div>
        <div class="desc">Log your reading in Seekquel, a book tracker: where you are in each book, the books you finish, and your highlights.</div></div></div>
+       <span class="pill warn">beta</span></div>
+     <div class="svc"><div class="lead"><img class="svc-icon" src="${basePath}/icons/readest.png" alt="" width="34" height="34"><div><div class="name">Readest</div>
+       <div class="desc">Keep your place in sync, both ways, with the Readest reading app. Clippings show up as highlights.</div></div></div>
        <span class="pill warn">beta</span></div>
      <p style="font-family:'Caveat',cursive;font-weight:600;font-size:19px;color:var(--brand-600);margin:16px 0 0;transform:rotate(-1deg)">more on the way, and it's all open source</p>
    </div>
@@ -621,7 +624,8 @@ const HINTS = {
   audiobookshelf: 'Sync your reading position to the matching audiobook on your Audiobookshelf server. Create an API key in Audiobookshelf under Settings, Users, API Keys.',
   jellyfin: 'Sync reading progress with books in your Jellyfin library. Requires Jellyfin 12.0 or newer. Sign in with your Jellyfin username and password.',
   bookorbit: 'Sync reading progress both ways with your BookOrbit server. Import reading time and session history for matched books, including Kindle and other BookOrbit reader history alongside your device stats. Repeated sessions are counted once. Finishing a book marks it Read, and clippings appear as highlights. Sign in with your BookOrbit account.',
-  seekquel: 'Log your reading in your Seekquel library: where you are in each book, the books you finish, and your highlights. You will approve the request in the Seekquel app.'
+  seekquel: 'Log your reading in your Seekquel library: where you are in each book, the books you finish, and your highlights. You will approve the request in the Seekquel app.',
+  readest: 'Sync reading progress both ways with Readest. Clippings become Readest highlights for books in your Readest cloud library. Use this instead of the Readest plugin\u2019s progress sync, which moves your reader off CrossPoint Sync and stops clipping sync. You will approve the request on readest.com.'
 };
 
 const TOKEN_HELP = {

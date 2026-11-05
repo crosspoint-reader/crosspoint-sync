@@ -52,7 +52,7 @@ year has its own target, synced with your account. A target adds a progress card
 and populates the goal widget; removing it removes the Stats card. Unset years have no
 target or goal prompts in Stats or the other widgets, and targets never carry forward
 automatically. You can explicitly choose a future year's target in advance.
-Goals require an updated server with migration `0044_reading_goals.sql`.
+Goals require an updated server with migration `0048_reading_goals.sql`.
 
 Widgets keep saved data offline and clear it on sign-out. The OS controls background
 refresh timing. Saved yearly targets remain available offline across year/timezone

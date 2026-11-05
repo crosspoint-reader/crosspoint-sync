@@ -171,3 +171,13 @@ it('filters clippings by book with the dropdown and restores all books', async (
   expect(screen.getAllByText('A passage').length).toBeGreaterThan(0)
   expect(screen.getAllByText('Another passage').length).toBeGreaterThan(0)
 })
+
+it('searches clipping text, not book title or author', async () => {
+  api.allClippings.mockResolvedValue([{ id: 'one', document: 'book', text: 'A passage', note: 'my note', created_at: 1 }])
+  render(<Clippings session={session} books={books} />)
+  const search = await screen.findByRole('textbox', { name: 'Search clippings' })
+  fireEvent.change(search, { target: { value: 'Test book' } })
+  expect(screen.getByText('No clippings match')).toBeTruthy()
+  fireEvent.change(search, { target: { value: 'my note' } })
+  expect(screen.queryByText('No clippings match')).toBeNull()
+})

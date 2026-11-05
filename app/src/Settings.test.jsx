@@ -8,7 +8,7 @@ vi.mock('./api.js', () => ({
   showUntitled: vi.fn(() => false),
   setShowUntitled: vi.fn(),
   cached: { readingGoals: () => null },
-  api: { exportAccount: vi.fn(), importAccount: vi.fn(), oauthBegin: vi.fn(), oauthComplete: vi.fn(), connectors: vi.fn(), linkConnector: vi.fn(), setClientId: vi.fn(), removeClientId: vi.fn(), syncConnector: vi.fn(), unlinkConnector: vi.fn(), clearData: vi.fn(), deleteAccount: vi.fn(), autoPause: vi.fn(), setAutoPause: vi.fn() },
+  api: { exportAccount: vi.fn(), importAccount: vi.fn(), oauthBegin: vi.fn(), oauthComplete: vi.fn(), connectors: vi.fn(), linkConnector: vi.fn(), setClientId: vi.fn(), removeClientId: vi.fn(), syncConnector: vi.fn(), unlinkConnector: vi.fn(), clearData: vi.fn(), deleteAccount: vi.fn(), autoPause: vi.fn(), setAutoPause: vi.fn(), profile: vi.fn(), setProfile: vi.fn(), setDisplayName: vi.fn(), recoveryToken: vi.fn(() => Promise.resolve({ token: null })), newRecoveryToken: vi.fn() },
 }))
 vi.mock('./shareCard.js', () => ({ saveFile: vi.fn() }))
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }))
@@ -192,6 +192,19 @@ it('Settings provides a Library back destination for both native and HTML naviga
   expect(screen.getByRole('link', { name: 'Back to Library' }).getAttribute('href')).toBe('#/')
   expect(useNativeBack).toHaveBeenCalledWith('#/')
   await waitFor(() => expect(api.connectors).toHaveBeenCalled())
+})
+
+it('shows the recovery token and can create one', async () => {
+  api.connectors.mockResolvedValue({ connectors: [] })
+  api.newRecoveryToken.mockResolvedValue({ token: 'xp1_7_new' })
+  render(<Settings session={{ ...session, username: 'reader' }} theme={['system', vi.fn()]} onSession={vi.fn()} onLogout={vi.fn()} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Create recovery token' }))
+  expect(await screen.findByText('xp1_7_new')).toBeTruthy()
+  api.newRecoveryToken.mockResolvedValue({ token: 'xp1_7_newer' })
+  fireEvent.click(screen.getByRole('button', { name: 'Replace' }))
+  expect(api.newRecoveryToken).toHaveBeenCalledTimes(1)
+  fireEvent.click(await screen.findByRole('button', { name: 'Replace token' }))
+  expect(await screen.findByText('xp1_7_newer')).toBeTruthy()
 })
 
 it('toggles Show books without metadata on this device', async () => {
@@ -438,4 +451,16 @@ describe('account migration controls', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
     expect(api.importAccount).not.toHaveBeenCalled()
   })
+})
+
+it('saves a display name with its case and spaces, falling back to the username when blank', async () => {
+  api.connectors.mockResolvedValue({ connectors: [] })
+  api.profile.mockResolvedValue({ slug: null, display_name: null })
+  api.setDisplayName.mockResolvedValue({})
+  render(<Settings session={{ ...session, username: 'reader' }} theme={['system', vi.fn()]} onSession={vi.fn()} onLogout={vi.fn()} />)
+  const input = await screen.findByRole('textbox', { name: 'Display name' })
+  expect(input.getAttribute('placeholder')).toBe('reader')
+  fireEvent.change(input, { target: { value: '  Jane Q. Reader ' } })
+  fireEvent.blur(input)
+  await waitFor(() => expect(api.setDisplayName).toHaveBeenCalledWith(expect.anything(), 'Jane Q. Reader'))
 })

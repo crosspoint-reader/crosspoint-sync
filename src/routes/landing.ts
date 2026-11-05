@@ -47,6 +47,7 @@ const SERVICES: [string, string, string, 'ready' | 'beta'][] = [
   ['jellyfin', 'Jellyfin', 'Keep your place in sync with books on your Jellyfin server.', 'beta'],
   ['bookorbit', 'BookOrbit', 'Two-way progress with your own library, clippings as highlights.', 'beta'],
   ['seekquel', 'Seekquel', 'Log your progress, finished books and highlights in your Seekquel library.', 'beta'],
+  ['readest', 'Readest', 'Two-way progress with the Readest app, clippings as highlights.', 'beta'],
 ];
 
 const STYLE = `

@@ -1,6 +1,6 @@
 import type { DB } from '../db/db.js';
 import { combineBookStats, type BookStatsSnapshot } from './stats.js';
-import { statsAliases } from './merge.js';
+import { resolveDocument, statsAliases, statsDocuments } from './merge.js';
 import { readBookorbitStats } from './bookorbit-stats.js';
 
 /**
@@ -163,10 +163,15 @@ export function computeActivity(
     const completed = info?.status === 'finished' || finished !== null;
     const pagesRead = pageCount ? (list.length ? Math.round(max * pageCount) : completed ? pageCount : null) : null;
     pagesTotal += pagesRead ?? 0;
-    // A start date the user set, else CrossInk's: a book is often read before it ever syncs.
+    // A start date the user set, else CrossInk's when it comes before the first sync: a book is often
+    // read before it ever syncs. A device that started later (another device opened it first) did not
+    // start the book; the first sync did.
     const manualStart = localNoon(info?.start_date ?? undefined);
-    const datedStart = manualStart ?? localNoon(startDates.get(document));
-    const started = datedStart ?? list[0]?.at ?? 0;
+    const deviceStart = localNoon(startDates.get(document));
+    const firstSync = list[0]?.at;
+    const datedStart =
+      manualStart ?? (deviceStart !== null && (firstSync === undefined || deviceStart <= firstSync) ? deviceStart : null);
+    const started = datedStart ?? firstSync ?? 0;
     if (datedStart !== null) {
       const key = dayKey(datedStart);
       let d = days.get(key);
@@ -251,4 +256,112 @@ export function readingActivity(db: DB, userId: number, tz: number): Activity {
   const imported = readBookorbitStats(db, userId);
   activity.reading_days = [...new Set([...activity.reading_days, ...imported.daily.map((d) => d.date)])].sort();
   return activity;
+}
+
+/** One book's day: syncs and print pages from the progress history, and the seconds every device recorded. */
+export interface BookActivityDay {
+  day: string;
+  syncs: number;
+  pages: number;
+  seconds: number;
+  /** Furthest position before and after that day's syncs (0..1); 0 on a day with recorded time only. */
+  from: number;
+  to: number;
+  /** A chosen start date, independent of the first uploaded position. */
+  started?: boolean;
+}
+
+export interface BookActivityDetail extends BookActivity {
+  /** Days with a sync, recorded time, or a chosen start or finish, oldest first. */
+  reading_days: string[];
+  days: BookActivityDay[];
+}
+
+/**
+ * One book's activity, for a reader that wants the book's whole history without the account's:
+ * the same dates and pages as {@link readingActivity}, plus each day's seconds from every device's
+ * stats (merged copies and BookOrbit imports folded in, as `/stats/books/:document` combines them).
+ * `document` may be any hash the book is known by. Null when the server knows nothing about it.
+ */
+export function bookActivity(db: DB, userId: number, tz: number, document: string): BookActivityDetail | null {
+  const canonical = resolveDocument(db, userId, document);
+  // Merging re-homes the progress history; stats stay under each copy's hash and combine on read.
+  const statsDocs = statsDocuments(db, userId, canonical);
+  const marks = statsDocs.map(() => '?').join(',');
+  const rows = db
+    .prepare('SELECT document, percentage, at FROM progress_log WHERE user_id = ? AND document = ?')
+    .all(userId, canonical) as unknown as LogRow[];
+  const info = db
+    .prepare('SELECT page_count, status, status_at, start_date, finished_date FROM documents WHERE user_id = ? AND document = ?')
+    .get(userId, canonical) as DocInfo | undefined;
+  const snapshots = (
+    db.prepare(`SELECT payload FROM stats_device_book WHERE user_id = ? AND document IN (${marks})`).all(userId, ...statsDocs) as {
+      payload: string;
+    }[]
+  ).map((r) => JSON.parse(r.payload) as BookStatsSnapshot);
+  const finishedDates = new Map<string, number>();
+  const startDates = new Map<string, number>();
+  if (snapshots.length) {
+    const combined = combineBookStats(snapshots);
+    if (combined.completed && combined.finished_date > 0) finishedDates.set(canonical, combined.finished_date);
+    if (combined.start_date > 0) startDates.set(canonical, combined.start_date);
+  }
+  // Always this book: with no documents row, device-reported dates alone still make an entry.
+  const docInfo: DocInfo = info ?? { page_count: null, status: null, status_at: null };
+  const activity = computeActivity(rows, new Map([[canonical, docInfo]]), tz, finishedDates, startDates);
+
+  const seconds = new Map<string, number>();
+  const timed = db
+    .prepare(`SELECT date, seconds FROM stats_device_book_day WHERE user_id = ? AND document IN (${marks})`)
+    .all(userId, ...statsDocs) as { date: string; seconds: number }[];
+  for (const d of [...timed, ...readBookorbitStats(db, userId, statsDocs).daily]) {
+    seconds.set(d.date, (seconds.get(d.date) ?? 0) + Number(d.seconds));
+  }
+  // Sessions measure the same reading as the snapshots: per day the larger, as the overview counts it.
+  const sessions = new Map<string, number>();
+  for (const s of db
+    .prepare(`SELECT started_at, utc_offset_minutes, seconds FROM reading_sessions WHERE user_id = ? AND document IN (${marks})`)
+    .all(userId, ...statsDocs) as { started_at: number; utc_offset_minutes: number; seconds: number }[]) {
+    const date = new Date((Number(s.started_at) + Number(s.utc_offset_minutes) * 60) * 1000).toISOString().slice(0, 10);
+    sessions.set(date, (sessions.get(date) ?? 0) + Number(s.seconds));
+  }
+  for (const [date, s] of sessions) seconds.set(date, Math.max(seconds.get(date) ?? 0, s));
+  const book = activity.books.find((b) => b.document === canonical);
+  if (!book && seconds.size === 0) return null;
+
+  const days = new Map<string, BookActivityDay>();
+  for (const d of activity.days) {
+    const b = d.books.find((x) => x.document === canonical);
+    if (b) days.set(d.day, { day: d.day, syncs: b.syncs, pages: b.pages, seconds: 0, from: b.from, to: b.to, ...(b.started ? { started: true } : {}) });
+  }
+  for (const [day, s] of seconds) {
+    const d = days.get(day);
+    if (d) d.seconds = s;
+    else days.set(day, { day, syncs: 0, pages: 0, seconds: s, from: 0, to: 0 });
+  }
+  const readingDays = new Set(activity.reading_days);
+  for (const [day, s] of seconds) if (s > 0) readingDays.add(day);
+  // Known only from recorded time: it started on the first day with any (local noon, as device dates are).
+  const firstTimed = [...seconds.keys()].sort()[0];
+  const timedStart = firstTimed ? Date.parse(`${firstTimed}T12:00:00Z`) / 1000 + tz * 60 : 0;
+  return {
+    ...(book ?? {
+      document: canonical,
+      started_at: timedStart,
+      last_at: 0,
+      percentage: 0,
+      finished_at: null,
+      completed: false,
+      page_count: info?.page_count ?? null,
+      pages_read: null,
+      days_to_finish: null,
+      start_manual: false,
+      finish_manual: false,
+    }),
+    document: canonical,
+    // An entry with no start (finished by hand, never synced) still started on its first recorded day.
+    ...(book && book.started_at === 0 && timedStart > 0 ? { started_at: timedStart } : {}),
+    reading_days: [...readingDays].sort(),
+    days: [...days.values()].sort((a, b) => (a.day < b.day ? -1 : 1)),
+  };
 }

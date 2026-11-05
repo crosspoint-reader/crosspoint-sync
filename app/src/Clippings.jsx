@@ -5,7 +5,7 @@ import { saveFile } from './shareCard.js'
 import { ClipMenu, ClipShare, DeleteClip, hold } from './Book.jsx'
 import { ActionSheet, Cover, EmptyState, ErrorNote, ShareIcon, Spinner, useLoad } from './ui.jsx'
 
-const date = (unix) => new Date(unix * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+const date = (unix) => unix && new Date(unix * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 
 // Same clipping all day, a different one tomorrow.
 function ofTheDay(items) {
@@ -79,9 +79,8 @@ export default function Clippings({ session, books }) {
   const q = query.trim().toLowerCase()
   const matches = all.filter((c) => {
     if (only && c.document !== only) return false
-    if (!q) return true
-    const b = byDoc.get(c.document)
-    return [c.text, c.note, b.title, b.author].some((s) => s?.toLowerCase().includes(q))
+    // Search the clipped text only; the book dropdown filters by book.
+    return !q || [c.text, c.note].some((s) => s?.toLowerCase().includes(q))
   })
   const groups = [...new Set(matches.map((c) => c.document))].map((doc) => ({ book: byDoc.get(doc), clips: matches.filter((c) => c.document === doc) }))
   const counts = all.reduce((m, c) => m.set(c.document, (m.get(c.document) ?? 0) + 1), new Map())

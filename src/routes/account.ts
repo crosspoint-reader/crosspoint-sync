@@ -9,9 +9,12 @@ import { invalidateAuthCache, USERS_BY_NAME_SQL } from '../auth/middleware.js';
 import { SESSION_COOKIE } from '../auth/session.js';
 import { nowSeconds } from '../models/sync.js';
 import { USERNAME_RE } from './kosync.js';
+import { revocations, revokeSoon } from '../connectors/revoke.js';
 
 /** Permanently delete a kosync user's reading data, and (unless keepUser) the user. */
 export function deleteKosyncUserData(db: DB, userId: number, username: string, { keepUser = false } = {}): void {
+  // Credentials services issued for this account's links stop working too.
+  const links = revocations(db, userId);
   withTransaction(db, () => {
     for (const table of [
       'reading_goals',
@@ -41,6 +44,7 @@ export function deleteKosyncUserData(db: DB, userId: number, username: string, {
     }
     if (!keepUser) db.prepare('DELETE FROM users WHERE id = ?').run(userId);
   });
+  revokeSoon(links, userId);
   invalidateAuthCache(username);
 }
 
@@ -128,10 +132,13 @@ export function accountRoutes(db: DB, config: Config): Hono<AppEnv> {
     if (!row) {
       return c.json({ error: 'Invalid sync account credentials' }, 401);
     }
-    if (row.account_id && row.account_id !== account.id) {
-      return c.json({ error: 'That sync account is linked to another login' }, 409);
-    }
+    // Every sync account has a master account; proving its password moves it
+    // here (that password signs into the old one anyway), and the old one,
+    // left empty, is removed along with its token.
     db.prepare('UPDATE users SET account_id = ? WHERE id = ?').run(account.id, row.id);
+    if (row.account_id && row.account_id !== account.id) {
+      db.prepare('DELETE FROM accounts WHERE id = ?').run(row.account_id);
+    }
     return c.json({ linked: true, username });
   });
 

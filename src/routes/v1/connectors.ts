@@ -32,6 +32,7 @@ import {
 } from '../../connectors/store.js';
 import { isValidDocument, listCursor, parseListCursor } from '../kosync.js';
 import { ConnectorOperationError, type HttpTransport } from '../../connectors/types.js';
+import { revocations, revokeSoon } from '../../connectors/revoke.js';
 import { importBookorbitStats } from '../../connectors/bookorbit-stats.js';
 import { resolveDocument } from '../../models/merge.js';
 import { hasDocumentData } from '../../models/document.js';
@@ -319,7 +320,9 @@ export function connectorRoutes(
         // Confirm the freshly minted credential works, then store it.
         const v = await conn.validate(result.credential, transport);
         if (!v.ok) return c.json({ status: 'error', error: v.error ?? 'Credential rejected' }, 400);
+        const replaced = revocations(db, user.id, conn.id);
         upsertAccount(db, user.id, conn.id, result.credential, v.accountLabel ?? result.accountLabel ?? null);
+        revokeSoon(replaced, user.id, transport);
         return c.json({ status: 'ok', linked: true });
       }
       return c.json({ status: result.status, error: result.error ?? null });
@@ -593,6 +596,7 @@ export function connectorRoutes(
     const conn = getConnector(c.req.param('id'));
     if (!conn) return c.json({ code: 2003, message: 'Unknown connector' }, 404);
     const user = c.get('user');
+    const unlinked = revocations(db, user.id, conn.id);
     withTransaction(db, () => {
       deleteAccount(db, user.id, conn.id);
       purgeConnector(db, user.id, conn.id);
@@ -602,6 +606,7 @@ export function connectorRoutes(
       );
       db.prepare('DELETE FROM epub_maps WHERE user_id = ? AND connector_id = ?').run(user.id, conn.id);
     });
+    revokeSoon(unlinked, user.id, transport);
     return c.json({ id: conn.id, linked: false });
   });
 

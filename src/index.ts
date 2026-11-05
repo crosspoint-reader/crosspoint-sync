@@ -4,6 +4,7 @@ import { fromEnv } from './config.js';
 import { migrate, openDatabase } from './db/db.js';
 import { secretsEnabled } from './crypto/secrets.js';
 import { loadSessionSecret } from './auth/session.js';
+import { backfillMasterAccounts } from './routes/auth.js';
 import { startQueueWorker } from './connectors/runner.js';
 import { pollMatched, pollSpotify, startFanInWorker } from './connectors/fanin.js';
 import { autoPause } from './models/pause.js';
@@ -44,6 +45,10 @@ serve({ fetch: app.fetch, port: PORT, hostname: ADDRESS }, (info) => {
       connectors: connectorsEnabled ? 'enabled' : 'disabled (no TOKEN_ENC_KEY)',
     })
   );
+  // After listening, in batches: the first run hashes a token per old sync account.
+  backfillMasterAccounts(db).then((claimed) => {
+    if (claimed) console.log(JSON.stringify({ msg: 'created master accounts for sync accounts', count: claimed }));
+  });
 });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

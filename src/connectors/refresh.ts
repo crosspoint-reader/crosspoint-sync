@@ -35,6 +35,7 @@ const PER_BOOK_PULLERS: { id: string; strict: boolean; sidecarOnly: boolean; mat
   { id: 'spotify', strict: false, sidecarOnly: false, matchOnDemand: true },
   { id: 'audiobookshelf', strict: false, sidecarOnly: false, matchOnDemand: true },
   { id: 'seekquel', strict: false, sidecarOnly: false, matchOnDemand: true },
+  { id: 'readest', strict: false, sidecarOnly: false, matchOnDemand: true },
 ];
 
 /** Shared by both progress endpoints; only overlapping requests share a refresh. */

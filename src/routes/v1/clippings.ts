@@ -173,7 +173,8 @@ export function clippingRoutes(db: DB): Hono<AppEnv> {
          text = excluded.text,
          note = CASE WHEN ? THEN excluded.note ELSE clippings.note END,
          color = CASE WHEN ? THEN excluded.color ELSE clippings.color END,
-         created_at = excluded.created_at,
+         -- Pre-v2 firmware sends no time (0): keep the one the server already has.
+         created_at = CASE WHEN excluded.created_at > 0 THEN excluded.created_at ELSE clippings.created_at END,
          deleted = 0,
          updated_at = excluded.updated_at,
          layout_signature = excluded.layout_signature,
@@ -253,7 +254,7 @@ export function clippingRoutes(db: DB): Hono<AppEnv> {
           startWord, endWord, words, para, chapter, text,
           Object.hasOwn(o, 'note') ? note : (previous?.note ?? null),
           Object.hasOwn(o, 'color') ? color : (previous?.color ?? null),
-          createdAt, now, layoutSignature, startOffset, endOffset, 1, 1
+          createdAt || now, now, layoutSignature, startOffset, endOffset, 1, 1
         );
         if (result.changes) highlightIds.add(id);
       });

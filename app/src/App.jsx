@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrent, onOpenUrl } from '@tauri-apps/plugin-deep-link'
 import { widgetRoute } from './widgetLinks.js'
-import { ChartColumn, CloudOff, Compass, MessageSquareQuote, Eye, EyeOff, LibraryBig, Loader2, Lock, Send as SendIcon, Server, Settings as SettingsIcon, User } from 'lucide-react'
+import { ChartColumn, CloudOff, Compass, MessageSquareQuote, Eye, EyeOff, LibraryBig, Loader2, Lock, Send as SendIcon, Server, Settings as SettingsIcon, ShieldCheck, User } from 'lucide-react'
 import { useTheme } from './theme.js'
-import { DEFAULT_SERVER, syncShortcutsCache, api, hostedServer, isApp, lastServer, loadSession, login, logout, offline, cached, register, saveSession } from './api.js'
+import { DEFAULT_SERVER, syncShortcutsCache, api, hostedServer, isApp, lastServer, loadSession, login, logout, offline, cached, recover, register, saveSession } from './api.js'
 import { ErrorNote, LoadCacheProvider, PageSkeleton, RefreshPill, Toaster, useLoad } from './ui.jsx'
 import Library from './Library.jsx'
 import Book from './Book.jsx'
@@ -37,10 +37,11 @@ function Field({ icon: Icon, trailing, inputRef, ...props }) {
 function Login({ onLogin }) {
   const [form, setForm] = useState(() => {
     const server = lastServer()
-    return { selfHosted: server !== DEFAULT_SERVER, server: server === DEFAULT_SERVER ? '' : server, username: '', password: '' }
+    return { selfHosted: server !== DEFAULT_SERVER, server: server === DEFAULT_SERVER ? '' : server, username: '', password: '', token: '' }
   })
   const [showPassword, setShowPassword] = useState(false)
   const [creating, setCreating] = useState(false) // create an account instead of signing in
+  const [recovering, setRecovering] = useState(false) // set a new password with the recovery token
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
   const passwordRef = useRef(null)
@@ -68,8 +69,8 @@ function Login({ onLogin }) {
       // What the fields show, even if autofill set them without an input event.
       const username = usernameRef.current?.value ?? form.username
       const password = passwordRef.current?.value ?? form.password
-      if (creating && password.length < 4) throw new Error('Pick a password of at least 4 characters.')
-      onLogin(await (creating ? register : login)(server, username, password))
+      if ((creating || recovering) && password.length < 4) throw new Error('Pick a password of at least 4 characters.')
+      onLogin(await (recovering ? recover(server, form.token, password) : (creating ? register : login)(server, username, password)))
     } catch (err) {
       setError(err.status === 401 ? 'Wrong username or password.' : err.message)
     }
@@ -95,9 +96,11 @@ function Login({ onLogin }) {
         onSubmit={submit}
         className="flex flex-1 flex-col px-5 pt-4 pb-5 md:max-w-md md:justify-center md:px-10 lg:max-w-lg lg:px-16"
       >
-        <h2 className="font-display text-2xl font-semibold text-stone-900">{creating ? 'Create your account' : 'Sign in'}</h2>
+        <h2 className="font-display text-2xl font-semibold text-stone-900">{recovering ? 'Recover your account' : creating ? 'Create your account' : 'Sign in'}</h2>
         <p className="mt-1 text-sm/6 text-stone-500">
-          {creating ? 'Pick a username and password, then use the same ones in CrossPoint Sync on your reader.' : 'Use the username and password from CrossPoint Sync on your reader.'}
+          {recovering
+            ? 'Paste the recovery token from Settings and pick a new password, then enter it in CrossPoint Sync on your reader too.'
+            : creating ? 'Pick a username and password, then use the same ones in CrossPoint Sync on your reader.' : 'Use the username and password from CrossPoint Sync on your reader.'}
         </p>
 
         {!hostedServer && (
@@ -139,6 +142,20 @@ function Login({ onLogin }) {
               <Server className="size-3.5" /> {new URL(DEFAULT_SERVER).host}
             </p>
           )}
+          {recovering ? (
+            <Field
+              icon={ShieldCheck}
+              value={form.token}
+              onChange={set('token')}
+              onKeyDown={next(passwordRef)}
+              placeholder="Recovery token (xp1_…)"
+              enterKeyHint="next"
+              autoComplete="off"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+          ) : (
           <Field
             icon={User}
             inputRef={usernameRef}
@@ -152,14 +169,15 @@ function Login({ onLogin }) {
             autoCorrect="off"
             spellCheck={false}
           />
+          )}
           <Field
             icon={Lock}
             inputRef={passwordRef}
             value={form.password}
             onChange={set('password')}
-            placeholder="Password"
+            placeholder={recovering ? 'New password' : 'Password'}
             type={showPassword ? 'text' : 'password'}
-            autoComplete="current-password"
+            autoComplete={recovering || creating ? 'new-password' : 'current-password'}
             enterKeyHint="go"
             trailing={
               <button
@@ -181,21 +199,37 @@ function Login({ onLogin }) {
             disabled={busy}
             className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-brand-500 text-base font-semibold text-white shadow-sm transition active:scale-[0.98] active:bg-brand-600 disabled:opacity-60"
           >
-            {busy ? <Loader2 className="size-5 animate-spin" /> : creating ? 'Create account' : 'Sign in'}
+            {busy ? <Loader2 className="size-5 animate-spin" /> : recovering ? 'Set password and sign in' : creating ? 'Create account' : 'Sign in'}
           </button>
           <p className="mt-4 text-center text-sm text-stone-500">
-            {creating ? 'Already have an account?' : 'No account yet?'}{' '}
+            {creating || recovering ? 'Already have an account?' : 'No account yet?'}{' '}
             <button
               type="button"
               onClick={() => {
-                setCreating(!creating)
+                setCreating(!creating && !recovering)
+                setRecovering(false)
                 setError(null)
               }}
               className="font-semibold text-brand-600"
             >
-              {creating ? 'Sign in' : 'Create one'}
+              {creating || recovering ? 'Sign in' : 'Create one'}
             </button>
           </p>
+          {!creating && !recovering && (
+            <p className="mt-2 text-center text-sm text-stone-500">
+              Forgot your password?{' '}
+              <button
+                type="button"
+                onClick={() => {
+                  setRecovering(true)
+                  setError(null)
+                }}
+                className="font-semibold text-brand-600"
+              >
+                Recover account
+              </button>
+            </p>
+          )}
         </div>
       </form>
     </div>
