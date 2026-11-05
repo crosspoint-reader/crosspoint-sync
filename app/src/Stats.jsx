@@ -348,13 +348,17 @@ const DAYS_VIEW = {
 }
 
 // byDay: every read day -> amount (undefined when unknown); view describes the available data.
-function ReadingCalendar({ byDay, view, days = [], books = [] }) {
+// pages: synced print pages per day, shown for a day whose amount is unknown (#63).
+function ReadingCalendar({ byDay, view, days = [], books = [], pages }) {
   const [scale, setScale] = useState('year')
   const [back, setBack] = useState(0)
   const [sharing, setSharing] = useState(false)
   const scroller = useRef(null)
   const { level: amountLevel } = shadeLevels(byDay, { fallback: view.fallback })
-  const level = (day) => (!byDay.has(day) ? 0 : amountLevel(byDay.get(day)))
+  const { level: pageLevel } = shadeLevels(pages ?? new Map(), { fallback: FALLBACK_PAGES })
+  const syncedPages = (day) => (byDay.get(day) === undefined ? pages?.get(day) ?? 0 : 0)
+  const level = (day) => (!byDay.has(day) ? 0 : syncedPages(day) > 0 ? pageLevel(syncedPages(day)) : amountLevel(byDay.get(day)))
+  const tipFor = (day) => (syncedPages(day) > 0 ? PAGES_VIEW.tip(syncedPages(day)) : view.tip(byDay.get(day)))
   const today = new Date()
   today.setHours(12, 0, 0, 0)
   const { weeks, first, last, label } = calendarRange(scale, back, today)
@@ -374,7 +378,7 @@ function ReadingCalendar({ byDay, view, days = [], books = [] }) {
   const cell = (d, round) => {
     if (!shown(d)) return <div key={d.getTime()} className="aspect-square" />
     const key = localDay(d)
-    const tip = `${fmt(d, { weekday: 'short', month: 'short', day: 'numeric' })}: ${byDay.has(key) ? view.tip(byDay.get(key)) : 'no reading'}`
+    const tip = `${fmt(d, { weekday: 'short', month: 'short', day: 'numeric' })}: ${byDay.has(key) ? tipFor(key) : 'no reading'}`
     return <div key={d.getTime()} data-tip={tip} aria-label={tip} className={`aspect-square ${round} ${SHADES[level(key)]}`} />
   }
   // Share the visible period, reading days, available page/time totals and longest streak.
@@ -925,7 +929,13 @@ export default function Stats({ session, tab = '', summary, activity, books, act
               ['Books finished', books.filter((b) => b.status === 'finished').length],
             ]}
           />
-          <ReadingCalendar byDay={timeByDay(summary, activity)} view={daily ? TIME_VIEW : DAYS_VIEW} days={activity?.days} books={books} />
+          <ReadingCalendar
+            byDay={timeByDay(summary, activity)}
+            view={daily ? TIME_VIEW : DAYS_VIEW}
+            days={activity?.days}
+            books={books}
+            pages={activity ? pagesByDay(activity.days) : undefined}
+          />
           <div className="md:grid md:grid-cols-2 md:gap-4">
             <Bars title="Time of day" labels={['Morning', 'Afternoon', 'Evening', 'Night']} values={summary.tod} />
             <Bars title="Day of week" labels={['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']} values={summary.dow} />

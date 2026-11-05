@@ -195,7 +195,7 @@ describe('reading grids', () => {
     expect(queryByText('Today')).toBeNull()
     expect(queryByText('7-day average')).toBeNull()
     expect(queryByText('Less')).toBeNull()
-    expect(getByLabelText('Wed, Sep 30: read')).toBeTruthy()
+    expect(getByLabelText('Wed, Sep 30: 5 pages')).toBeTruthy()
     expect(getByLabelText('Tue, Sep 29: read')).toBeTruthy()
     fireEvent.click(getByRole('button', { name: 'Share your reading days' }))
     fireEvent.click(getByRole('button', { name: 'Render calendar share' }))
@@ -222,7 +222,7 @@ describe('reading grids', () => {
     const daily = [{ date: '2025-08-01', seconds: 600 }]
     const { getByText, getByLabelText } = render(<Stats session={{}} books={[]} activity={synced} summary={{ ...summary, daily }} />)
     expect(getByText('Reading time recorded by your reader')).toBeTruthy()
-    expect(getByLabelText('Wed, Sep 30: read')).toBeTruthy()
+    expect(getByLabelText('Wed, Sep 30: 5 pages')).toBeTruthy()
     expect(getByText('Today').nextElementSibling.textContent).toBe('0m')
   })
 
@@ -234,7 +234,8 @@ describe('reading grids', () => {
     rerender(<Stats {...props} activity={synced} />)
     expect(queryByRole('group', { name: 'Reading calendar measure' })).toBeNull()
     expect(queryByRole('button', { name: 'Pages read' })).toBeNull()
-    expect(getByLabelText(tip)).toBeTruthy()
+    // Recorded time wins; without it the day keeps its synced pages (#63).
+    expect(getByLabelText(hasDaily ? tip : 'Wed, Sep 30: 5 pages')).toBeTruthy()
     // The reader says Sep 29 was read; sync progress has pages only on Sep 28 and Sep 30.
     expect(getByLabelText('Tue, Sep 29: read')).toBeTruthy()
     expect(getByLabelText('Mon, Sep 28: no reading')).toBeTruthy()
@@ -248,6 +249,19 @@ describe('reading grids', () => {
     // Readers without device stats still get their original sync-page calendar.
     rerender(<Stats {...props} activity={synced} summary={null} />)
     expect(getByLabelText('Wed, Sep 30: 5 pages')).toBeTruthy()
+  })
+
+  // #63: once a reader sends time, days known only from sync history (before it did, or read on a
+  // position-only device) kept their pages instead of turning into a flat "read".
+  it('shows synced pages for days without recorded time', () => {
+    const history = {
+      books: [], pages_total: 32, reading_days: ['2026-09-20', '2026-09-24', '2026-09-30'],
+      days: [{ day: '2026-09-20', syncs: 2, pages: 12 }, { day: '2026-09-24', syncs: 1, pages: 0 }, { day: '2026-09-30', syncs: 1, pages: 20 }],
+    }
+    const { getByLabelText } = render(<Stats session={{}} books={[]} summary={summary} activity={history} />)
+    expect(getByLabelText('Wed, Sep 30: 1h 10m reading time')).toBeTruthy()
+    expect(getByLabelText('Sun, Sep 20: 12 pages')).toBeTruthy()
+    expect(getByLabelText('Thu, Sep 24: read')).toBeTruthy()
   })
 
   it('updates both streaks from the same dates that fill the grid', () => {
