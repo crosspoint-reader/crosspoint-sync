@@ -89,6 +89,32 @@ describe('GET /api/v1/stats/books/:document/activity', () => {
     expect(dated.days_to_finish).toBe(24);
   });
 
+  it('counts reading sessions per day as the overview does: the larger of sessions and snapshots', async () => {
+    const { app, headers, stats, get } = await setup();
+    await stats('x4', [book(A, { daily: [{ date: '2026-10-23', seconds: 600 }] })]);
+    const session = (session_id: string, started_at: number, seconds: number) => ({
+      session_id, document: A, started_at, ended_at: started_at + seconds, seconds, utc_offset_minutes: 60,
+    });
+    const res = await app.request('/api/v1/stats/sessions', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        device_id: 'x4',
+        items: [
+          session('s1', Date.parse('2026-10-23T09:00:00Z') / 1000, 300), // less than the snapshot's 600
+          session('s2', Date.parse('2026-10-25T09:00:00Z') / 1000, 900), // a day only sessions know
+        ],
+      }),
+    });
+    expect(res.status).toBe(200);
+    const { body } = await get(`/api/v1/stats/books/${A}/activity`);
+    expect(body.days).toEqual([
+      expect.objectContaining({ day: '2026-10-23', seconds: 600 }),
+      expect.objectContaining({ day: '2026-10-25', seconds: 900 }),
+    ]);
+    expect(body.reading_days).toEqual(['2026-10-23', '2026-10-25']);
+  });
+
   it('buckets syncs in the client timezone', async () => {
     const { progress, get } = await setup();
     await progress(A, 0.1, 'boox', 1779663600); // 2026-05-24T23:00:00Z

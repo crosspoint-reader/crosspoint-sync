@@ -317,6 +317,15 @@ export function bookActivity(db: DB, userId: number, tz: number, document: strin
   for (const d of [...timed, ...readBookorbitStats(db, userId, statsDocs).daily]) {
     seconds.set(d.date, (seconds.get(d.date) ?? 0) + Number(d.seconds));
   }
+  // Sessions measure the same reading as the snapshots: per day the larger, as the overview counts it.
+  const sessions = new Map<string, number>();
+  for (const s of db
+    .prepare(`SELECT started_at, utc_offset_minutes, seconds FROM reading_sessions WHERE user_id = ? AND document IN (${marks})`)
+    .all(userId, ...statsDocs) as { started_at: number; utc_offset_minutes: number; seconds: number }[]) {
+    const date = new Date((Number(s.started_at) + Number(s.utc_offset_minutes) * 60) * 1000).toISOString().slice(0, 10);
+    sessions.set(date, (sessions.get(date) ?? 0) + Number(s.seconds));
+  }
+  for (const [date, s] of sessions) seconds.set(date, Math.max(seconds.get(date) ?? 0, s));
   const book = activity.books.find((b) => b.document === canonical);
   if (!book && seconds.size === 0) return null;
 
