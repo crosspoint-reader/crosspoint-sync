@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { getCurrent, onOpenUrl } from '@tauri-apps/plugin-deep-link'
+import { widgetRoute } from './widgetLinks.js'
 import { ChartColumn, CloudOff, Compass, MessageSquareQuote, Eye, EyeOff, LibraryBig, Loader2, Lock, Send as SendIcon, Server, Settings as SettingsIcon, User } from 'lucide-react'
 import { useTheme } from './theme.js'
 import { DEFAULT_SERVER, syncShortcutsCache, api, hostedServer, isApp, lastServer, loadSession, login, logout, offline, cached, register, saveSession } from './api.js'
@@ -322,6 +324,14 @@ function Sidebar({ route, session }) {
 }
 
 function Home({ session, onSession, onLogout, theme }) {
+  useEffect(() => {
+    if (!isApp) return
+    let live = true, stop
+    const receive = urls => { if (live) for (const url of urls ?? []) { const route = widgetRoute(url); if (route) location.hash = route } }
+    onOpenUrl(receive).then(fn => { if (live) stop = fn; else fn() }).catch(() => {})
+    getCurrent().then(receive).catch(() => {})
+    return () => { live = false; stop?.() }
+  }, [])
   useEffect(() => { syncShortcutsCache(session) }, [session])
   const [parts, from] = useHash()
   // Offline: api.js serves the last saved copy and says so; show a slim notice until the network is back.
@@ -340,13 +350,25 @@ function Home({ session, onSession, onLogout, theme }) {
   // Start from the saved copies so launch paints the library at once, then refresh.
   const [books, error, reloadBooks, booksLoading] = useLoad(() => api.books(session), [session], undefined, () => cached.books(session))
   const [summary, , reloadSummary] = useLoad(() => api.summary(session), [session], undefined, () => cached.summary(session))
+  const [goals, , reloadGoals] = useLoad(() => api.readingGoals(session), [session], undefined, () => cached.readingGoals(session))
+  useEffect(() => {
+    const refresh = () => reloadGoals()
+    window.addEventListener('crosspoint-goals-changed', refresh)
+    return () => window.removeEventListener('crosspoint-goals-changed', refresh)
+  })
   const [activity, activityError, reloadActivity, activityLoading, activityUpdatedAt] = useLoad(
     () => api.activity(session), [session], undefined, () => cached.activity(session),
     { retries: 2, reportRefreshErrors: true, initialUpdatedAt: () => cached.activityUpdatedAt(session) }
   )
   useEffect(() => {
-    updateWidget({ session, books, summary, activity })
-  }, [session, books, summary, activity])
+    updateWidget({ session, books, summary, activity, goals })
+  }, [session, books, summary, activity, goals])
+  useEffect(() => {
+    const now = new Date(), midnight = new Date(now)
+    midnight.setHours(24, 0, 0, 0)
+    const timer = setTimeout(() => { reloadSummary(); reloadActivity(); reloadGoals() }, midnight - now + 100)
+    return () => clearTimeout(timer)
+  })
 
   useEffect(() => {
     if (error?.status === 401 || activityError?.status === 401) onLogout()
@@ -357,6 +379,7 @@ function Home({ session, onSession, onLogout, theme }) {
         reloadBooks()
         reloadSummary()
         reloadActivity()
+        reloadGoals()
       }
     }
     document.addEventListener('visibilitychange', on)
@@ -374,6 +397,7 @@ function Home({ session, onSession, onLogout, theme }) {
       reloadBooks()
       reloadSummary()
       reloadActivity()
+      reloadGoals()
     }
     addEventListener('crosspoint-refresh', on)
     return () => removeEventListener('crosspoint-refresh', on)
@@ -395,14 +419,14 @@ function Home({ session, onSession, onLogout, theme }) {
   }, [pulling])
 
   let page
-  if (route === 'settings') page = id ? <Matches session={session} id={id} /> : <Settings session={session} theme={theme} onSession={onSession} onLogout={onLogout} />
+  if (route === 'settings') page = id && id !== 'goals' ? <Matches session={session} id={id} /> : <Settings session={session} theme={theme} onSession={onSession} onLogout={onLogout} focusGoals={id === 'goals'} />
   else if (route === 'send' && isApp) page = id === 'wallpaper' ? <Wallpaper /> : <Send />
   else if (route === 'browse' && isApp) page = <Browse parts={parts} />
   else if (error) page = <ErrorNote error={error} />
   else if (!books) page = <PageSkeleton route={route} />
   else if (route === 'clippings') page = <Clippings session={session} books={books} />
   else if (route === 'stats') page = (
-    <Stats session={session} tab={id} summary={summary} activity={activity} books={books}
+    <Stats session={session} tab={id} summary={summary} activity={activity} books={books} goals={goals}
       activityError={activityError} activityLoading={activityLoading} activityUpdatedAt={activityUpdatedAt} onRetryActivity={reloadActivity} />
   )
   else if (route === 'book') page = (
@@ -415,6 +439,7 @@ function Home({ session, onSession, onLogout, theme }) {
         onChange={() => {
           reloadBooks()
           reloadActivity()
+          reloadGoals()
         }}
       />
     )

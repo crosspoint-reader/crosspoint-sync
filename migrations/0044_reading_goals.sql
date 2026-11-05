@@ -1,0 +1,6 @@
+CREATE TABLE reading_goals (
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  year INTEGER NOT NULL CHECK(year BETWEEN 2000 AND 9999),
+  target INTEGER NOT NULL CHECK(target BETWEEN 1 AND 10000),
+  PRIMARY KEY (user_id, year)
+);

@@ -27,6 +27,17 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+it('leaves Stats unchanged without a current-year goal and adds progress only after opt-in', () => {
+  const { container, rerender, getByText } = render(<Stats session={{}} books={[]} activity={activity} />)
+  const original = container.innerHTML
+  rerender(<Stats session={{}} books={[]} activity={activity} goals={{ goals: [] }} />)
+  expect(container.innerHTML).toBe(original)
+  rerender(<Stats session={{}} books={[]} activity={activity} goals={{ goals: [{ year: 2026, target: 12, completed: 4 }] }} />)
+  expect(getByText('4 of 12 books')).toBeTruthy()
+  rerender(<Stats session={{}} books={[]} activity={activity} goals={{ goals: [] }} />)
+  expect(container.innerHTML).toBe(original)
+})
+
 describe('timeline start dates', () => {
   const unix = (s) => day(s) / 1000 + 12 * 3600
   const book = { document: 'a', title: 'Old book', percentage: 0.15 }

@@ -29,6 +29,22 @@ beforeEach(async () => {
   invoke.mockClear()
   http.mockReset()
 })
+it.each(['iPad OS 27_0', 'Macintosh'])('includes imported finished books through pagination and offline cache on %s', async (agent) => {
+  vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(agent)
+  const synced = Array.from({ length: 4 }, (_, n) => ({ ...book, document: `synced-${n}`, title: `Synced ${n}` }))
+  const imported = Array.from({ length: 2 }, (_, n) => ({ document: `imported-${n}`, title: `Imported ${n}`, status: 'finished', percentage: null, history_only: true }))
+  http.mockImplementation(async raw => {
+    const query = new URL(raw).searchParams
+    if (query.get('include_history') !== '1') return response({ items: synced, next: null })
+    return response(query.has('cursor') ? { items: imported, next: null } : { items: synced, next: '100:one' })
+  })
+  const books = await api.books(session)
+  expect(books.filter(b => b.status === 'finished')).toHaveLength(6)
+  expect(books.filter(b => b.history_only).map(b => b.title)).toEqual(['Imported 0', 'Imported 1'])
+  expect(apiModule.cached.books(session)).toEqual(books)
+  http.mockRejectedValue(new Error('offline'))
+  expect(await api.books(session)).toEqual(books)
+})
 it('publishes a complete library with normalized progress, fetch time and no credentials', async () => {
   http.mockResolvedValueOnce(response({ items: [book], next: 'next' }))
     .mockResolvedValueOnce(response({ items: [{ document: 'two', filename: 'Two', status: 'reading', percentage: 0.2, timestamp: 110 }], next: null }))

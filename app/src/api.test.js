@@ -19,6 +19,55 @@ beforeEach(async () => {
   fetchMock.mockReset()
 })
 
+it('keeps saved goals offline and rejects a late read after removal', async () => {
+  const s = session('reader')
+  const year = new Date().getFullYear()
+  const original = { year, goals: [{ year, target: 24, completed: 3 }] }
+  fetchMock.mockResolvedValueOnce(response(original))
+  expect(await api.readingGoals(s)).toEqual(original)
+  fetchMock.mockRejectedValueOnce(new TypeError('offline'))
+  expect(await api.readingGoals(s)).toEqual(original)
+  let finish
+  fetchMock.mockReturnValueOnce(new Promise(r => { finish = r }))
+  const oldRead = api.readingGoals(s)
+  fetchMock.mockResolvedValueOnce(response({ year, goals: [] }))
+  await api.removeReadingGoal(s, year)
+  finish(response(original))
+  await expect(oldRead).rejects.toMatchObject({ stale: true })
+  expect(cached.readingGoals(s)).toEqual({ year, goals: [] })
+})
+
+it('does not cache goal writes completed after sign-out', async () => {
+  const s = session('reader')
+  let finish
+  fetchMock.mockReturnValueOnce(new Promise(r => { finish = r }))
+  const pending = api.setReadingGoal(s, 2026, 24)
+  await logout()
+  finish(response({ year: 2026, goals: [{ year: 2026, target: 24, completed: 0 }] }))
+  await expect(pending).rejects.toMatchObject({ stale: true })
+  expect(cached.readingGoals(s)).toBeNull()
+})
+
+it('retains explicitly saved yearly targets offline after a timezone change', async () => {
+  const s = session('reader')
+  const offset = vi.spyOn(Date.prototype, 'getTimezoneOffset').mockReturnValue(0)
+  const saved = { year: 2026, goals: [{ year: 2026, target: 12, completed: 4 }, { year: 2027, target: 24, completed: 0 }] }
+  try {
+    fetchMock.mockResolvedValueOnce(response(saved))
+    await api.readingGoals(s)
+    offset.mockReturnValue(300)
+    expect(cached.readingGoals(s)).toEqual(saved)
+    fetchMock.mockRejectedValueOnce(new TypeError('Offline'))
+    expect(await api.readingGoals(s)).toEqual(saved)
+    fetchMock.mockResolvedValueOnce(response({ year: 2026, goals: [] }))
+    await api.removeReadingGoal(s, 2026)
+    offset.mockReturnValue(0)
+    expect(cached.readingGoals(s)).toEqual({ year: 2026, goals: [] })
+    fetchMock.mockRejectedValueOnce(new TypeError('Offline'))
+    expect(await api.readingGoals(s)).toEqual({ year: 2026, goals: [] })
+  } finally { offset.mockRestore() }
+})
+
 it('serializes the explicit clippings recreation destination choice', async () => {
   fetchMock.mockResolvedValue(response({ queued: true }))
   await api.recreateMicroblogPost(session('reader'), 'book', 'current')

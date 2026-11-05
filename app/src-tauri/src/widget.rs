@@ -8,14 +8,30 @@ pub fn update_widget(json: String, cover: String) -> Result<(), String> {
   #[cfg(target_os = "ios")]
   {
     use base64::{engine::general_purpose::STANDARD, Engine};
+    use std::os::fd::AsRawFd;
     let dir = group_dir().ok_or("App Group container unavailable")?;
-    std::fs::write(dir.join("widget.json"), json).map_err(|e| e.to_string())?;
+    // Shared with the extension. Its refresh checks the old snapshot under this
+    // lock before publishing, so a request finishing after logout cannot revive it.
+    extern "C" { fn flock(fd: i32, operation: i32) -> i32; }
+    struct Lock(std::fs::File);
+    impl Drop for Lock {
+      fn drop(&mut self) { unsafe { flock(self.0.as_raw_fd(), 8); } }
+    }
+    let file = std::fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(dir.join("widget.lock")).map_err(|e| e.to_string())?;
+    if unsafe { flock(file.as_raw_fd(), 2) } != 0 { return Err("Widget snapshot lock unavailable".into()); }
+    let guard = Lock(file);
     let cover_path = dir.join("cover.png");
     if cover.is_empty() {
       let _ = std::fs::remove_file(cover_path);
     } else {
-      std::fs::write(cover_path, STANDARD.decode(cover).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+      let temp = dir.join("cover.tmp");
+      std::fs::write(&temp, STANDARD.decode(cover).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+      std::fs::rename(temp, cover_path).map_err(|e| e.to_string())?;
     }
+    let temp = dir.join("widget.tmp");
+    std::fs::write(&temp, json).map_err(|e| e.to_string())?;
+    std::fs::rename(temp, dir.join("widget.json")).map_err(|e| e.to_string())?;
+    drop(guard);
     // Redraw now rather than at the widget's next scheduled refresh.
     unsafe { crosspoint_reload_widgets() };
   }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import HistoryImport from './HistoryImport.jsx'
 import MicroblogPosting from './MicroblogPosting.jsx'
+import ReadingGoals from './ReadingGoals.jsx'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { onOpenUrl } from '@tauri-apps/plugin-deep-link'
 import { ArrowLeft, ChevronRight, Copy, KeyRound, ListChecks, Loader2, LogOut, Monitor, Moon, RefreshCw, Search, Server, Sun, Trash2, UserX } from 'lucide-react'
@@ -959,8 +960,9 @@ function Account({ session, onSession, onLogout }) {
   )
 }
 
-export default function Settings({ session, theme, onSession, onLogout }) {
+export default function Settings({ session, theme, onSession, onLogout, focusGoals = false }) {
   useNativeBack('#/')
+  useEffect(() => { if (focusGoals) document.getElementById('reading-goals')?.scrollIntoView?.({ block: 'start' }) }, [focusGoals])
   const host = new URL(session.server).host
   const section = 'mt-8 font-display text-xl font-semibold text-stone-900'
   return (
@@ -1003,6 +1005,9 @@ export default function Settings({ session, theme, onSession, onLogout }) {
       <h2 className={section}>Reading</h2>
       <p className="mt-1 text-sm text-stone-500">Books with no new progress for this long are marked Paused. Syncing a new position un-pauses them.</p>
       <AutoPause session={session} />
+
+      <h2 id="reading-goals" className={section}>Reading goals</h2>
+      <ReadingGoals session={session} />
 
       <h2 className={section}>Connected services</h2>
       <p className="mt-1 text-sm text-stone-500">Your reading syncs out to these as you go.</p>

@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B76F867D23C7519BB0310001 /* PreviewCover.jpg in Resources */ = {isa = PBXBuildFile; fileRef = B76F867D23C7519BB0310002 /* PreviewCover.jpg */; };
+		A65E756C12B6408AA9200001 /* ReadingMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65E756C12B6408AA9200002 /* ReadingMetrics.swift */; };
 		05558E78087CE893FD133EED /* WidgetReload.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0FDA312FF333FEE325F3784 /* WidgetReload.swift */; };
 		07E120DC37D4E3BA35660834 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1C1D61425D6C89B023A68699 /* WebKit.framework */; };
 		0D22C69FE6169D6661235690 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BECC0ABE484B2047607C4F0A /* SwiftUI.framework */; };
@@ -56,6 +58,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		B76F867D23C7519BB0310002 /* PreviewCover.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = PreviewCover.jpg; sourceTree = "<group>"; };
+		A65E756C12B6408AA9200002 /* ReadingMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingMetrics.swift; sourceTree = "<group>"; };
 		06400398C81B2BCE0778BAED /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		0AC18FF775756AF567A89A26 /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
 		0ADABAFF8038D69A13E988F1 /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
@@ -177,6 +181,8 @@
 			children = (
 				1CFA2E0FA07D12CBE7461BDD /* CrossPointWidget.entitlements */,
 				1922371C0F5CFC459D6C1332 /* CrossPointWidget.swift */,
+				A65E756C12B6408AA9200002 /* ReadingMetrics.swift */,
+				B76F867D23C7519BB0310002 /* PreviewCover.jpg */,
 				A4B09C10DA0C22B267D90C67 /* Info.plist */,
 			);
 			path = CrossPointWidget;
@@ -298,6 +304,7 @@
 			buildPhases = (
 				36872BCCE8F9498B1B14F50F /* Sources */,
 				CA7DD26AC76DAD316832DDF6 /* Frameworks */,
+				B76F867D23C7519BB0310003 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -346,6 +353,14 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		B76F867D23C7519BB0310003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B76F867D23C7519BB0310001 /* PreviewCover.jpg in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		0568CD3DDCAA36B6D367D74F /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -389,6 +404,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				2D845AD7D500CAD58A0C283F /* CrossPointWidget.swift in Sources */,
+				A65E756C12B6408AA9200001 /* ReadingMetrics.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

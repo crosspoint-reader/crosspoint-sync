@@ -8,6 +8,7 @@ import { deleteKosyncUserData } from '../account.js';
 import { readTrackerCsv, trackerPreview, importTracker } from '../../models/tracker-import.js';
 import { MAX_HISTORY_FILE, readHistoryFile, prepareHistory, historyPreview, importHistory } from '../../models/koinsight-import.js';
 import { autoPauseDays, setAutoPauseDays } from '../../models/pause.js';
+import { goalTarget, goalYear, goalTimezone, readingGoals } from '../../models/reading-goals.js';
 
 /**
  * The signed-in sync account, for the app (which signs in with the sync
@@ -16,6 +17,24 @@ import { autoPauseDays, setAutoPauseDays } from '../../models/pause.js';
  */
 export function meRoutes(db: DB): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
+
+  app.get('/account/reading-goals', (c) => c.json(readingGoals(db, c.get('user').id, goalTimezone(c.req.query('tz')))));
+  app.put('/account/reading-goals/:year', async (c) => {
+    const raw = c.req.param('year');
+    const year = Number(raw);
+    let target: unknown;
+    try { target = (await c.req.json())?.target; } catch { /* validated below */ }
+    if (!/^\d{4}$/.test(raw) || !goalYear(year) || !goalTarget(target)) return c.json({ message: 'Choose a year from 2000–9999 and a goal of 1–10,000 books.' }, 400);
+    db.prepare('INSERT INTO reading_goals (user_id,year,target) VALUES (?,?,?) ON CONFLICT(user_id,year) DO UPDATE SET target=excluded.target').run(c.get('user').id, year, target);
+    return c.json(readingGoals(db, c.get('user').id, goalTimezone(c.req.query('tz'))));
+  });
+  app.delete('/account/reading-goals/:year', (c) => {
+    const raw = c.req.param('year');
+    const year = Number(raw);
+    if (!/^\d{4}$/.test(raw) || !goalYear(year)) return c.json({ message: 'Choose a year from 2000–9999.' }, 400);
+    db.prepare('DELETE FROM reading_goals WHERE user_id=? AND year=?').run(c.get('user').id, year);
+    return c.json(readingGoals(db, c.get('user').id, goalTimezone(c.req.query('tz'))));
+  });
 
   app.get('/account/export', (c) => {
     c.header('Cache-Control', 'no-store');

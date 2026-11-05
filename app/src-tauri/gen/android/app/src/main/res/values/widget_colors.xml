@@ -9,4 +9,7 @@
     <color name="widget_brand_text">#FF3D6652</color>
     <color name="widget_track">#FFE7E5E4</color>
     <color name="widget_fill">#FF4A7A62</color>
+    <color name="widget_day_empty">#E7E5E4</color>
+    <color name="widget_day_fill">#4A7A62</color>
+    <color name="widget_day_text">#FAFAF9</color>
 </resources>

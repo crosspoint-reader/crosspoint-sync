@@ -2,12 +2,14 @@ import crypto from 'node:crypto';
 import { withTransaction, type DB } from '../db/db.js';
 import { isValidDocument } from '../routes/kosync.js';
 import { nextChangeSeq } from './changes.js';
+import { goalTarget, goalYear } from './reading-goals.js';
 
 // Only portable reading data belongs here; never authentication, secrets, queues or caches.
 export const ACCOUNT_TABLES = [
   'documents', 'document_aliases', 'progress', 'progress_samples', 'progress_log',
   'bookmarks', 'clippings', 'stats_device_global', 'stats_device_book',
   'stats_device_day', 'stats_device_book_day', 'reading_sessions',
+  'reading_goals',
 ] as const;
 const localColumns = new Set(['user_id', 'change_seq', 'server_change_seq', 'revision']);
 type Row = Record<string, string | number | null>;
@@ -38,7 +40,9 @@ export function importAccountData(db: DB, userId: number, input: unknown, replac
   if (!object(input) || input.format !== 'crosspoint-sync-account' || input.version !== 1 || !object(input.data) || !object(input.profile)) {
     return invalid('Not a supported CrossPoint Sync account export (version 1 required).');
   }
-  const { data, profile } = input;
+  // Optional in older version-1 archives. Replacement removes any old targets.
+  const data: Record<string, unknown> = { ...input.data, reading_goals: input.data.reading_goals === undefined ? [] : input.data.reading_goals };
+  const { profile } = input;
   const days = profile.auto_pause_days;
   if (!(days === null || (Number.isInteger(days) && Number(days) >= 0 && Number(days) <= 365)) || typeof profile.public_profile !== 'boolean') {
     return invalid('Invalid account preferences.');
@@ -69,6 +73,7 @@ export function importAccountData(db: DB, userId: number, input: unknown, replac
         if (key in row && !isValidDocument(row[key])) return invalid(`Invalid ${table}.${key}.`);
       }
       if ('percentage' in row && (Number(row.percentage) < 0 || Number(row.percentage) > 1)) return invalid(`Invalid percentage in ${table}.`);
+      if (table === 'reading_goals' && (!goalYear(row.year) || !goalTarget(row.target))) return invalid('Invalid reading goal.');
       if ('seconds' in row && (Number(row.seconds) < 0 || Number(row.seconds) > 4294967295)) return invalid(`Invalid seconds in ${table}.`);
       if ('date' in row && (typeof row.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(row.date) || !Number.isFinite(Date.parse(row.date)) || new Date(row.date).toISOString().slice(0, 10) !== row.date)) return invalid(`Invalid date in ${table}.`);
       if (table === 'reading_sessions' && (Number(row.ended_at) < Number(row.started_at) || Number(row.seconds) > Number(row.ended_at) - Number(row.started_at))) return invalid('Invalid reading session duration.');

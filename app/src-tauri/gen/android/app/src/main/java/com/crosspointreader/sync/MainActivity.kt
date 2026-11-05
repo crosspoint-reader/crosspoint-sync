@@ -192,10 +192,7 @@ class MainActivity : TauriActivity() {
   inner class WidgetBridge {
     @JavascriptInterface
     fun update(json: String, coverBase64: String) {
-      getSharedPreferences(ReadingWidget.PREFS, MODE_PRIVATE).edit().putString("data", json).apply()
-      val cover = File(filesDir, ReadingWidget.COVER)
-      if (coverBase64.isEmpty()) cover.delete() else cover.writeBytes(Base64.decode(coverBase64, Base64.DEFAULT))
-      ReadingWidget.refresh(this@MainActivity)
+      ReadingWidget.saveFromApp(this@MainActivity, json, coverBase64)
     }
   }
 
