@@ -415,7 +415,8 @@ function ReadingCalendar({ byDay, view, days = [], books = [], pages }) {
     const lv = (d) => {
       if (!shown(d)) return null
       const key = localDay(d)
-      return view.unknown && byDay.has(key) && byDay.get(key) === undefined ? 'unknown' : level(key)
+      const untimed = byDay.has(key) && byDay.get(key) === undefined
+      return untimed && (view.unknown || syncedPages(key) > 0) ? 'unknown' : level(key)
     }
     const day = (monday, r) => new Date(monday.getTime() + r * DAY_MS)
     const strip = (ws) => ({

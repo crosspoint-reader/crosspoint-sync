@@ -246,6 +246,8 @@ describe('reading grids', () => {
       ...(hasDaily ? [['time read', '1h 10m']] : []),
       ['day streak', 2],
     ])
+    // Days shaded by synced pages are outlined on the card, which shows no pages measure.
+    expect(renderCalendarCard.mock.lastCall[0].blocks.flatMap((b) => b.grid.flat())).toContain('unknown')
     // Readers without device stats still get their original sync-page calendar.
     rerender(<Stats {...props} activity={synced} summary={null} />)
     expect(getByLabelText('Wed, Sep 30: 5 pages')).toBeTruthy()
