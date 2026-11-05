@@ -115,6 +115,16 @@ describe('GET /api/v1/stats/books/:document/activity', () => {
     expect(body.reading_days).toEqual(['2026-10-23', '2026-10-25']);
   });
 
+  it('starts a book finished by hand, never synced, on its first recorded day', async () => {
+    const { app, headers, stats, get } = await setup();
+    await stats('x4', [book(A, { daily: [{ date: '2026-10-23', seconds: 600 }] })]);
+    const status = await app.request(`/api/v1/documents/${A}/status`, { method: 'PUT', headers, body: JSON.stringify({ status: 'finished' }) });
+    expect(status.status).toBe(200);
+    const { body } = await get(`/api/v1/stats/books/${A}/activity`);
+    expect(body.completed).toBe(true);
+    expect(body.started_at).toBe(Date.parse('2026-10-23T12:00:00Z') / 1000);
+  });
+
   it('buckets syncs in the client timezone', async () => {
     const { progress, get } = await setup();
     await progress(A, 0.1, 'boox', 1779663600); // 2026-05-24T23:00:00Z

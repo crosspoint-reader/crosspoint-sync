@@ -359,6 +359,8 @@ export function bookActivity(db: DB, userId: number, tz: number, document: strin
       finish_manual: false,
     }),
     document: canonical,
+    // An entry with no start (finished by hand, never synced) still started on its first recorded day.
+    ...(book && book.started_at === 0 && timedStart > 0 ? { started_at: timedStart } : {}),
     reading_days: [...readingDays].sort(),
     days: [...days.values()].sort((a, b) => (a.day < b.day ? -1 : 1)),
   };
