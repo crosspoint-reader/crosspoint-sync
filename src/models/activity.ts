@@ -163,10 +163,15 @@ export function computeActivity(
     const completed = info?.status === 'finished' || finished !== null;
     const pagesRead = pageCount ? (list.length ? Math.round(max * pageCount) : completed ? pageCount : null) : null;
     pagesTotal += pagesRead ?? 0;
-    // A start date the user set, else CrossInk's: a book is often read before it ever syncs.
+    // A start date the user set, else CrossInk's when it comes before the first sync: a book is often
+    // read before it ever syncs. A device that started later (another device opened it first) did not
+    // start the book; the first sync did.
     const manualStart = localNoon(info?.start_date ?? undefined);
-    const datedStart = manualStart ?? localNoon(startDates.get(document));
-    const started = datedStart ?? list[0]?.at ?? 0;
+    const deviceStart = localNoon(startDates.get(document));
+    const firstSync = list[0]?.at;
+    const datedStart =
+      manualStart ?? (deviceStart !== null && (firstSync === undefined || deviceStart <= firstSync) ? deviceStart : null);
+    const started = datedStart ?? firstSync ?? 0;
     if (datedStart !== null) {
       const key = dayKey(datedStart);
       let d = days.get(key);

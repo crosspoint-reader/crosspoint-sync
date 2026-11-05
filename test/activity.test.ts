@@ -145,6 +145,13 @@ describe('computeActivity', () => {
     expect(by.b.started_at).toBe(T);
   });
 
+  it('keeps the first sync when a device reports a later start (another device opened it first)', () => {
+    const later = T + 30 * 86400; // this device started reading a month after the first sync elsewhere
+    const a = computeActivity([{ document: 'a', percentage: 0.1, at: T }], new Map([['a', doc(100)]]), 0, new Map(), new Map([['a', later]]));
+    expect(a.books[0].started_at).toBe(T);
+    expect(a.books[0].start_manual).toBe(false);
+  });
+
   it('counts days to finish inclusively, and only when the start is known', () => {
     const aug = (d: number) => Date.UTC(2026, 7, d) / 1000;
     const a = computeActivity(
