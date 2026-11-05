@@ -11,6 +11,7 @@ import {
   type AppEnv,
 } from '../auth/middleware.js';
 import { hashKey, looksLikeMd5, md5Hex } from '../auth/password.js';
+import { claimMasterAccount } from './auth.js';
 import { parsePosition } from '../models/position.js';
 import { adoptFilenameTwin, resolveDocument } from '../models/merge.js';
 import { nowSeconds } from '../models/sync.js';
@@ -428,11 +429,13 @@ export function kosyncRoutes(db: DB, config: Config, refreshProgress: ProgressRe
     // so the stored hash matches later x-auth-key logins from either kind of
     // client (auth also accepts raw keys by hashing them, see authMiddleware).
     const md5Key = looksLikeMd5(password) ? password : md5Hex(password);
-    db.prepare('INSERT INTO users (username, key_hash, created_at) VALUES (?, ?, ?)').run(
+    const info = db.prepare('INSERT INTO users (username, key_hash, created_at) VALUES (?, ?, ?)').run(
       username,
       hashKey(md5Key),
       nowSeconds()
     );
+    // Every sync account gets a master account, whose token is its recovery token.
+    claimMasterAccount(db, { id: Number(info.lastInsertRowid), username, account_id: null });
     invalidateAuthCache(username);
     return c.json({ username }, 201);
   });

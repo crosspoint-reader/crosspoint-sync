@@ -131,10 +131,13 @@ export function accountRoutes(db: DB, config: Config): Hono<AppEnv> {
     if (!row) {
       return c.json({ error: 'Invalid sync account credentials' }, 401);
     }
-    if (row.account_id && row.account_id !== account.id) {
-      return c.json({ error: 'That sync account is linked to another login' }, 409);
-    }
+    // Every sync account has a master account; proving its password moves it
+    // here (that password signs into the old one anyway), and the old one,
+    // left empty, is removed along with its token.
     db.prepare('UPDATE users SET account_id = ? WHERE id = ?').run(account.id, row.id);
+    if (row.account_id && row.account_id !== account.id) {
+      db.prepare('DELETE FROM accounts WHERE id = ?').run(row.account_id);
+    }
     return c.json({ linked: true, username });
   });
 

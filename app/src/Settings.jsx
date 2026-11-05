@@ -3,7 +3,7 @@ import HistoryImport from './HistoryImport.jsx'
 import MicroblogPosting from './MicroblogPosting.jsx'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { onOpenUrl } from '@tauri-apps/plugin-deep-link'
-import { ArrowLeft, ChevronRight, Copy, KeyRound, ListChecks, Loader2, LogOut, Monitor, Moon, RefreshCw, Search, Server, Sun, Trash2, UserX } from 'lucide-react'
+import { ArrowLeft, ChevronRight, Copy, KeyRound, ListChecks, Loader2, LogOut, Monitor, Moon, RefreshCw, Search, Server, ShieldCheck, Sun, Trash2, UserX } from 'lucide-react'
 import SparkMD5 from 'spark-md5'
 import { api, isApp, setShowUntitled, showUntitled } from './api.js'
 import { ActionSheet, Bone, Card, EmptyState, notify, Toggle, useLoad } from './ui.jsx'
@@ -849,6 +849,75 @@ export function AccountTransfer({ session }) {
   )
 }
 
+// The recovery token resets the password from the sign-in screen if it's forgotten.
+function RecoveryToken({ session }) {
+  const [token, setToken] = useState()
+  const [busy, setBusy] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  useEffect(() => {
+    api.recoveryToken(session).then((r) => setToken(r.token), () => setToken(null))
+  }, [session])
+  const create = async () => {
+    setBusy(true)
+    try {
+      setToken((await api.newRecoveryToken(session)).token)
+    } catch (e) {
+      notify({ error: true, title: "That didn't work", detail: e.message })
+    } finally {
+      setBusy(false)
+    }
+  }
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(token)
+      notify({ title: 'Recovery token copied' })
+    } catch {
+      notify({ error: true, title: "Couldn't copy", detail: 'Select the text and copy it instead.' })
+    }
+  }
+  const button = 'flex h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-stone-100 text-sm font-semibold text-stone-800 active:bg-stone-200 disabled:opacity-50'
+  return (
+    <div className="space-y-2 px-4 py-3">
+      <p className="flex items-center gap-3 text-sm font-medium text-stone-800">
+        <ShieldCheck className="size-4 text-stone-400" /> Recovery token
+      </p>
+      <p className="text-xs/5 text-stone-500">Forgot your password? Use this on the sign-in screen under Recover account to set a new one. Keep it somewhere safe.</p>
+      {token === undefined ? (
+        <Loader2 className="size-4 animate-spin text-stone-400" />
+      ) : token ? (
+        <>
+          <code className="block select-all break-all rounded-xl bg-stone-100 px-3 py-2 font-mono text-xs text-stone-800">{token}</code>
+          <div className="flex gap-2">
+            <button type="button" onClick={copy} className={button}><Copy className="size-4" /> Copy</button>
+            <button type="button" disabled={busy} onClick={() => setConfirming(true)} className={button}>
+              {busy ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />} Replace
+            </button>
+          </div>
+          {confirming && (
+            <ActionSheet
+              title="Replace recovery token?"
+              actionLabel="Replace token"
+              pendingLabel="Replacing…"
+              danger
+              onClose={() => setConfirming(false)}
+              onConfirm={async () => {
+                await create()
+                setConfirming(false)
+              }}
+            >
+              The current token stops working. Save the new one somewhere safe.
+            </ActionSheet>
+          )}
+        </>
+      ) : (
+        <button type="button" disabled={busy} onClick={create} className={`${button} w-full`}>
+          {busy ? <Loader2 className="size-4 animate-spin" /> : 'Create recovery token'}
+        </button>
+      )}
+    </div>
+  )
+}
+
 // Password, clear data, delete: what the website's account page did.
 function Account({ session, onSession, onLogout }) {
   const [action, setAction] = useState(null)
@@ -885,6 +954,7 @@ function Account({ session, onSession, onLogout }) {
 
   return (
     <Card className="mt-3 divide-y divide-stone-100">
+      <RecoveryToken session={session} />
       <button type="button" disabled={!!busy || !!action} onClick={() => setEditing(!editing)} className={`${row} text-stone-800`}>
         <KeyRound className="size-4 text-stone-400" />
         <span className="flex-1">Change sync password</span>

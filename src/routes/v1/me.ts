@@ -8,6 +8,8 @@ import { deleteKosyncUserData } from '../account.js';
 import { readTrackerCsv, trackerPreview, importTracker } from '../../models/tracker-import.js';
 import { MAX_HISTORY_FILE, readHistoryFile, prepareHistory, historyPreview, importHistory } from '../../models/koinsight-import.js';
 import { autoPauseDays, setAutoPauseDays } from '../../models/pause.js';
+import { claimMasterAccount, issueMasterToken } from '../auth.js';
+import { decryptSecret } from '../../crypto/secrets.js';
 
 /**
  * The signed-in sync account, for the app (which signs in with the sync
@@ -85,6 +87,27 @@ export function meRoutes(db: DB): Hono<AppEnv> {
     db.prepare('UPDATE users SET key_hash = ? WHERE id = ?').run(hashKey(key.toLowerCase()), user.id);
     invalidateAuthCache(user.username);
     return c.json({ username: user.username });
+  });
+
+  const syncUser = (id: number) =>
+    db.prepare('SELECT id, username, account_id FROM users WHERE id = ?').get(id) as { id: number; username: string; account_id: number | null };
+
+  // The recovery token (master login token) that resets this account's password
+  // from the sign-in screen. null when it can't be shown: issued before tokens
+  // were stored encrypted, or TOKEN_ENC_KEY is unset.
+  app.get('/account/recovery-token', (c) => {
+    c.header('Cache-Control', 'no-store');
+    const accountId = claimMasterAccount(db, syncUser(c.get('user').id));
+    const row = db.prepare('SELECT token_enc FROM accounts WHERE id = ?').get(accountId) as { token_enc: string | null };
+    let token: string | null = null;
+    try { token = row.token_enc ? decryptSecret(row.token_enc) : null; } catch { /* key changed: issue a new one */ }
+    return c.json({ token });
+  });
+
+  // Issue a new recovery token, revoking the old one.
+  app.post('/account/recovery-token', (c) => {
+    c.header('Cache-Control', 'no-store');
+    return c.json({ token: issueMasterToken(db, claimMasterAccount(db, syncUser(c.get('user').id))) });
   });
 
   // Days without progress before a book in progress is paused (0 = never).

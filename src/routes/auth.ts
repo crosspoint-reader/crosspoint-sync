@@ -5,7 +5,7 @@ import type { DB } from '../db/db.js';
 import type { Config } from '../config.js';
 import type { AppEnv } from '../auth/middleware.js';
 import { hashKey, verifyKey } from '../auth/password.js';
-import { rateLimiter, USERS_BY_NAME_SQL } from '../auth/middleware.js';
+import { invalidateAuthCache, rateLimiter, USERS_BY_NAME_SQL } from '../auth/middleware.js';
 import {
   SESSION_COOKIE,
   SESSION_TTL_SECONDS,
@@ -14,6 +14,7 @@ import {
 } from '../auth/session.js';
 import { nowSeconds } from '../models/sync.js';
 import { USERNAME_RE } from './kosync.js';
+import { encryptSecret, secretsEnabled } from '../crypto/secrets.js';
 
 /**
  * Master ("general login") accounts. This is the website identity, kept separate
@@ -32,8 +33,50 @@ function md5(s: string): string {
   return crypto.createHash('md5').update(s).digest('hex');
 }
 
-function masterToken(accountId: number): string {
-  return `xp1_${accountId}_${crypto.randomBytes(16).toString('hex')}`;
+/** Issue a new master token for the account (revoking the old one) and return it. */
+export function issueMasterToken(db: DB, accountId: number): string {
+  const token = `xp1_${accountId}_${crypto.randomBytes(16).toString('hex')}`;
+  db.prepare('UPDATE accounts SET token_hash = ?, token_enc = ? WHERE id = ?')
+    .run(hashKey(md5(token)), secretsEnabled() ? encryptSecret(token) : null, accountId);
+  return token;
+}
+
+/** The master account owning this sync account, creating and linking one if it has none. */
+export function claimMasterAccount(db: DB, user: { id: number; username: string; account_id: number | null }): number {
+  if (user.account_id) return user.account_id;
+  let handle = user.username;
+  if (!USERNAME_RE.test(handle) || db.prepare('SELECT 1 FROM accounts WHERE handle = ?').get(handle)) {
+    const base = (handle.replace(/[^A-Za-z0-9._@+-]/g, '').slice(0, 56) || 'user');
+    handle = `${base}-${crypto.randomBytes(2).toString('hex')}`;
+  }
+  const info = db
+    .prepare('INSERT INTO accounts (handle, token_hash, created_at) VALUES (?, ?, ?)')
+    .run(handle, '', nowSeconds());
+  const accountId = Number(info.lastInsertRowid);
+  issueMasterToken(db, accountId);
+  db.prepare('UPDATE users SET account_id = ? WHERE id = ?').run(accountId, user.id);
+  return accountId;
+}
+
+/** Give every sync account without one a master account (and so a recovery token). Idempotent. */
+export function backfillMasterAccounts(db: DB): number {
+  const orphans = db.prepare('SELECT id, username, account_id FROM users WHERE account_id IS NULL').all() as {
+    id: number; username: string; account_id: null;
+  }[];
+  // ponytail: no wrapping transaction so syncing devices can write between claims; an
+  // interrupted run just leaves an unlinked accounts row and resumes next boot.
+  for (const u of orphans) claimMasterAccount(db, u);
+  return orphans.length;
+}
+
+/** The master account id a well-formed, valid token belongs to, else null. */
+function tokenAccount(db: DB, token: string | null): number | null {
+  const parsed = token?.match(TOKEN_RE);
+  if (!token || !parsed) return null;
+  const row = db
+    .prepare('SELECT token_hash FROM accounts WHERE id = ?')
+    .get(Number(parsed[1])) as { token_hash: string } | undefined;
+  return row && verifyKey(md5(token), row.token_hash) ? Number(parsed[1]) : null;
 }
 
 function setSessionCookie(c: Context<AppEnv>, accountId: number, basePath: string) {
@@ -69,13 +112,11 @@ export function authRoutes(db: DB, config: Config): Hono<AppEnv> {
     if (db.prepare('SELECT 1 FROM accounts WHERE handle = ?').get(handle)) {
       return c.json({ error: 'Handle is already taken' }, 409);
     }
-    const secret = crypto.randomBytes(16).toString('hex');
     const info = db
       .prepare('INSERT INTO accounts (handle, token_hash, created_at) VALUES (?, ?, ?)')
       .run(handle, '', nowSeconds());
     const accountId = Number(info.lastInsertRowid);
-    const token = `xp1_${accountId}_${secret}`;
-    db.prepare('UPDATE accounts SET token_hash = ? WHERE id = ?').run(hashKey(md5(token)), accountId);
+    const token = issueMasterToken(db, accountId);
     setSessionCookie(c, accountId, config.basePath);
     return c.json({ handle, token });
   });
@@ -89,17 +130,36 @@ export function authRoutes(db: DB, config: Config): Hono<AppEnv> {
     } catch {
       /* validation below */
     }
-    const parsed = token?.match(TOKEN_RE);
-    if (!token || !parsed) return c.json({ error: 'Invalid token' }, 401);
-    const accountId = Number(parsed[1]);
-    const row = db
-      .prepare('SELECT token_hash FROM accounts WHERE id = ?')
-      .get(accountId) as { token_hash: string } | undefined;
-    if (!row || !verifyKey(md5(token), row.token_hash)) {
-      return c.json({ error: 'Invalid token' }, 401);
-    }
+    const accountId = tokenAccount(db, token);
+    if (!accountId) return c.json({ error: 'Invalid token' }, 401);
     setSessionCookie(c, accountId, config.basePath);
     return c.json({ ok: true });
+  });
+
+  // App account recovery: a valid master token sets a new password (as its MD5
+  // key, like a reader sends) on the linked sync account.
+  app.post('/recover', rateLimiter(config.authRateLimitPerMinute), async (c) => {
+    let token: string | null = null;
+    let key: unknown;
+    try {
+      const body = (await c.req.json()) as Record<string, unknown>;
+      token = typeof body.token === 'string' ? body.token.trim() : null;
+      key = body.key;
+    } catch {
+      /* validation below */
+    }
+    if (typeof key !== 'string' || !/^[0-9a-f]{32}$/i.test(key)) {
+      return c.json({ error: 'Send the new password as its MD5 (key)' }, 400);
+    }
+    const accountId = tokenAccount(db, token);
+    if (!accountId) return c.json({ error: 'Invalid recovery token' }, 401);
+    const user = db
+      .prepare('SELECT id, username FROM users WHERE account_id = ?')
+      .get(accountId) as { id: number; username: string } | undefined;
+    if (!user) return c.json({ error: 'No sync account is linked to this token' }, 404);
+    db.prepare('UPDATE users SET key_hash = ? WHERE id = ?').run(hashKey(key.toLowerCase()), user.id);
+    invalidateAuthCache(user.username);
+    return c.json({ username: user.username });
   });
 
   // Sign in with the kosync sync account (username + password). This is the
@@ -120,28 +180,12 @@ export function authRoutes(db: DB, config: Config): Hono<AppEnv> {
     if (!username || !password) {
       return c.json({ error: 'Username and password required' }, 400);
     }
-    const rows = db.prepare(USERS_BY_NAME_SQL).all(username, username) as { id: number; account_id: number | null; key_hash: string }[];
+    const rows = db.prepare(USERS_BY_NAME_SQL).all(username, username) as { id: number; username: string; account_id: number | null; key_hash: string }[];
     const row = rows.find((r) => verifyKey(md5(password!), r.key_hash));
     if (!row) {
       return c.json({ error: 'Invalid sync account credentials' }, 401);
     }
-    let accountId = row.account_id;
-    if (!accountId) {
-      // Claim: create a master account for this sync identity and link it.
-      let handle = username;
-      if (!USERNAME_RE.test(handle) || db.prepare('SELECT 1 FROM accounts WHERE handle = ?').get(handle)) {
-        const base = (handle.replace(/[^A-Za-z0-9._@+-]/g, '').slice(0, 56) || 'user');
-        handle = `${base}-${crypto.randomBytes(2).toString('hex')}`;
-      }
-      const info = db
-        .prepare('INSERT INTO accounts (handle, token_hash, created_at) VALUES (?, ?, ?)')
-        .run(handle, '', nowSeconds());
-      accountId = Number(info.lastInsertRowid);
-      const token = `xp1_${accountId}_${crypto.randomBytes(16).toString('hex')}`;
-      db.prepare('UPDATE accounts SET token_hash = ? WHERE id = ?').run(hashKey(md5(token)), accountId);
-      db.prepare('UPDATE users SET account_id = ? WHERE id = ?').run(accountId, row.id);
-    }
-    setSessionCookie(c, accountId, config.basePath);
+    setSessionCookie(c, claimMasterAccount(db, row), config.basePath);
     return c.json({ ok: true });
   });
 
@@ -167,12 +211,7 @@ export function authRoutes(db: DB, config: Config): Hono<AppEnv> {
     if (!db.prepare('SELECT 1 FROM accounts WHERE id = ?').get(session.uid)) {
       return c.json({ error: 'Not signed in' }, 401);
     }
-    const token = masterToken(session.uid);
-    db.prepare('UPDATE accounts SET token_hash = ? WHERE id = ?').run(
-      hashKey(md5(token)),
-      session.uid
-    );
-    return c.json({ token });
+    return c.json({ token: issueMasterToken(db, session.uid) });
   });
 
   return app;

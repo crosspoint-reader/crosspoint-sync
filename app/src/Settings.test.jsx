@@ -7,7 +7,7 @@ vi.mock('./api.js', () => ({
   get isApp() { return env.isApp },
   showUntitled: vi.fn(() => false),
   setShowUntitled: vi.fn(),
-  api: { exportAccount: vi.fn(), importAccount: vi.fn(), oauthBegin: vi.fn(), oauthComplete: vi.fn(), connectors: vi.fn(), linkConnector: vi.fn(), setClientId: vi.fn(), removeClientId: vi.fn(), syncConnector: vi.fn(), unlinkConnector: vi.fn(), clearData: vi.fn(), deleteAccount: vi.fn(), autoPause: vi.fn(), setAutoPause: vi.fn() },
+  api: { exportAccount: vi.fn(), importAccount: vi.fn(), oauthBegin: vi.fn(), oauthComplete: vi.fn(), connectors: vi.fn(), linkConnector: vi.fn(), setClientId: vi.fn(), removeClientId: vi.fn(), syncConnector: vi.fn(), unlinkConnector: vi.fn(), clearData: vi.fn(), deleteAccount: vi.fn(), autoPause: vi.fn(), setAutoPause: vi.fn(), recoveryToken: vi.fn(() => Promise.resolve({ token: null })), newRecoveryToken: vi.fn() },
 }))
 vi.mock('./shareCard.js', () => ({ saveFile: vi.fn() }))
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }))
@@ -191,6 +191,19 @@ it('Settings provides a Library back destination for both native and HTML naviga
   expect(screen.getByRole('link', { name: 'Back to Library' }).getAttribute('href')).toBe('#/')
   expect(useNativeBack).toHaveBeenCalledWith('#/')
   await waitFor(() => expect(api.connectors).toHaveBeenCalled())
+})
+
+it('shows the recovery token and can create one', async () => {
+  api.connectors.mockResolvedValue({ connectors: [] })
+  api.newRecoveryToken.mockResolvedValue({ token: 'xp1_7_new' })
+  render(<Settings session={{ ...session, username: 'reader' }} theme={['system', vi.fn()]} onSession={vi.fn()} onLogout={vi.fn()} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Create recovery token' }))
+  expect(await screen.findByText('xp1_7_new')).toBeTruthy()
+  api.newRecoveryToken.mockResolvedValue({ token: 'xp1_7_newer' })
+  fireEvent.click(screen.getByRole('button', { name: 'Replace' }))
+  expect(api.newRecoveryToken).toHaveBeenCalledTimes(1)
+  fireEvent.click(await screen.findByRole('button', { name: 'Replace token' }))
+  expect(await screen.findByText('xp1_7_newer')).toBeTruthy()
 })
 
 it('toggles Show books without metadata on this device', async () => {
