@@ -411,7 +411,12 @@ function ReadingCalendar({ byDay, view, days = [], books = [], pages }) {
       run = byDay.has(key) ? run + 1 : 0
       streak = Math.max(streak, run)
     }
-    const lv = (d) => (shown(d) ? level(localDay(d)) : null)
+    // The card shades by time only: a day without recorded time is outlined, not shaded by pages.
+    const lv = (d) => {
+      if (!shown(d)) return null
+      const key = localDay(d)
+      return view.unknown && byDay.has(key) && byDay.get(key) === undefined ? 'unknown' : level(key)
+    }
     const day = (monday, r) => new Date(monday.getTime() + r * DAY_MS)
     const strip = (ws) => ({
       grid: WEEKDAYS.map((_, r) => ws.map((m) => lv(day(m, r)))),

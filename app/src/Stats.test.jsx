@@ -258,12 +258,19 @@ describe('reading grids', () => {
       books: [], pages_total: 32, reading_days: ['2026-09-20', '2026-09-24', '2026-09-30'],
       days: [{ day: '2026-09-20', syncs: 2, pages: 12 }, { day: '2026-09-24', syncs: 1, pages: 0 }, { day: '2026-09-30', syncs: 1, pages: 20 }],
     }
-    const { getByLabelText, getByText } = render(<Stats session={{}} books={[]} summary={summary} activity={history} />)
+    const { getByLabelText, getByText, getByRole } = render(<Stats session={{}} books={[]} summary={summary} activity={history} />)
     expect(getByLabelText('Wed, Sep 30: 1h 10m reading time')).toBeTruthy()
     expect(getByLabelText('Sun, Sep 20: 12 pages')).toBeTruthy()
     expect(getByLabelText('Thu, Sep 24: read, no time recorded')).toBeTruthy()
     expect(getByText('read, no time recorded')).toBeTruthy()
     expect(getByText('Reading time recorded by your reader; synced pages where no time was recorded')).toBeTruthy()
+    // The shared card shades by time only, so both days without recorded time are outlined there.
+    fireEvent.click(getByRole('button', { name: 'Share your reading days' }))
+    fireEvent.click(getByRole('button', { name: 'Render calendar share' }))
+    const cells = renderCalendarCard.mock.lastCall[0].blocks.flatMap((b) => b.grid.flat())
+    const untimed = [...document.querySelectorAll('[data-tip]')].filter((el) => / pages$|no time recorded$/.test(el.dataset.tip))
+    expect(untimed.length).toBeGreaterThanOrEqual(2)
+    expect(cells.filter((c) => c === 'unknown')).toHaveLength(untimed.length)
   })
 
   it('shows synced pages older than the device history window', () => {
