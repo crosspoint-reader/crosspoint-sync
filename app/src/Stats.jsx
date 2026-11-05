@@ -10,17 +10,27 @@ export { decodeHistory } from './readingHistory.js'
 
 // Shades for the reading calendar, light to dark; levels 1-4 are relative to your median day.
 const SHADES = ['bg-stone-100', 'bg-brand-200', 'bg-brand-300', 'bg-brand-400', 'bg-brand-500']
+// A day the reader marked read but recorded no amount for (before daily time existed): outlined, not shaded.
+const UNKNOWN_SHADE = 'bg-stone-100 ring-1 ring-inset ring-brand-400'
 const FALLBACK_SECONDS = 30 * 60 // median assumed until there is enough history
 const FALLBACK_PAGES = 20
 
-function ShadeLegend() {
+function ShadeLegend({ unknown }) {
   return (
-    <div className="flex items-center gap-1 font-mono text-[0.65rem] text-stone-400">
-      Less
-      {SHADES.map((c) => (
-        <span key={c} aria-hidden="true" className={`size-2.5 rounded-[2px] ${c}`} />
-      ))}
-      More
+    <div className="font-mono text-[0.65rem] text-stone-400">
+      <div className="flex items-center gap-1">
+        Less
+        {SHADES.map((c) => (
+          <span key={c} aria-hidden="true" className={`size-2.5 rounded-[2px] ${c}`} />
+        ))}
+        More
+      </div>
+      {unknown && (
+        <div className="mt-1 flex items-center gap-1">
+          <span aria-hidden="true" className={`size-2.5 rounded-[2px] ${UNKNOWN_SHADE}`} />
+          {unknown}
+        </div>
+      )}
     </div>
   )
 }
@@ -340,6 +350,7 @@ const TIME_VIEW = {
   fallback: FALLBACK_SECONDS,
   tip: (seconds) => (seconds === undefined ? 'read' : `${duration(seconds)} reading time`),
   total: ['time read', duration],
+  unknown: 'read, no time recorded',
 }
 // Older firmware sends read-day flags without daily time counters.
 const DAYS_VIEW = {
@@ -359,13 +370,20 @@ function ReadingCalendar({ byDay, view, days = [], books = [], pages }) {
   const syncedPages = (day) => (byDay.get(day) === undefined ? pages?.get(day) ?? 0 : 0)
   const level = (day) => (!byDay.has(day) ? 0 : syncedPages(day) > 0 ? pageLevel(syncedPages(day)) : amountLevel(byDay.get(day)))
   const usesPages = [...byDay.keys()].some((day) => syncedPages(day) > 0)
-  const tipFor = (day) => (syncedPages(day) > 0 ? PAGES_VIEW.tip(syncedPages(day)) : view.tip(byDay.get(day)))
+  // Read, but with neither recorded time nor synced pages: nothing to measure it by.
+  const unmeasured = (day) => !!view.unknown && byDay.has(day) && byDay.get(day) === undefined && !(syncedPages(day) > 0)
+  const tipFor = (day) =>
+    unmeasured(day) ? view.unknown : syncedPages(day) > 0 ? PAGES_VIEW.tip(syncedPages(day)) : view.tip(byDay.get(day))
   const today = new Date()
   today.setHours(12, 0, 0, 0)
   const { weeks, first, last, label } = calendarRange(scale, back, today)
   const shown = (d) => d >= first && d <= last && d <= today
   let count = 0
-  for (let d = first; d <= last && d <= today; d = new Date(d.getTime() + DAY_MS)) if (byDay.has(localDay(d))) count++
+  let anyUnmeasured = false
+  for (let d = first; d <= last && d <= today; d = new Date(d.getTime() + DAY_MS)) {
+    if (byDay.has(localDay(d))) count++
+    if (unmeasured(localDay(d))) anyUnmeasured = true
+  }
   const month = scale === 'month'
   const year = scale === 'year'
   // The newest weeks sit on the right; start the (phone-scrollable) year there.
@@ -380,7 +398,7 @@ function ReadingCalendar({ byDay, view, days = [], books = [], pages }) {
     if (!shown(d)) return <div key={d.getTime()} className="aspect-square" />
     const key = localDay(d)
     const tip = `${fmt(d, { weekday: 'short', month: 'short', day: 'numeric' })}: ${byDay.has(key) ? tipFor(key) : 'no reading'}`
-    return <div key={d.getTime()} data-tip={tip} aria-label={tip} className={`aspect-square ${round} ${SHADES[level(key)]}`} />
+    return <div key={d.getTime()} data-tip={tip} aria-label={tip} className={`aspect-square ${round} ${unmeasured(key) ? UNKNOWN_SHADE : SHADES[level(key)]}`} />
   }
   // Share the visible period, reading days, available page/time totals and longest streak.
   const share = () => {
@@ -533,7 +551,7 @@ function ReadingCalendar({ byDay, view, days = [], books = [], pages }) {
           </div>
         )}
       </div>
-      {view.total && <div className="mt-3"><ShadeLegend /></div>}
+      {view.total && <div className="mt-3"><ShadeLegend unknown={anyUnmeasured ? view.unknown : null} /></div>}
     </Card>
   )
 }
