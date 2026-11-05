@@ -771,6 +771,34 @@ existed is backfilled from progress samples (migration 0013). `started_at` is Cr
 both included (a one-day read is 1); it is null when unfinished, finished only by a manual status, or
 already finished on the first sync with no CrossInk start date. This never estimates reading time.
 
+#### GET /api/v1/stats/books/{document}/activity?tz=
+
+One book's whole reading history, for a reader that wants it without the account's. Any hash the book
+is known by works (an alias resolves to its book; the answer's `document` is the canonical hash), and
+merged copies are folded in as `GET /stats/books/{document}` combines them. `tz` as above.
+
+```json
+{"document": "a1b2...", "started_at": 1779616800, "last_at": 1782900000, "percentage": 0.3,
+ "finished_at": null, "completed": false, "page_count": 400, "pages_read": 120, "days_to_finish": null,
+ "start_manual": false, "finish_manual": false,
+ "reading_days": ["2026-05-24", "2026-07-01", "2026-10-23"],
+ "days": [{"day": "2026-05-24", "syncs": 1, "pages": 0, "seconds": 0, "from": 0.05, "to": 0.05},
+          {"day": "2026-10-23", "syncs": 0, "pages": 0, "seconds": 600, "from": 0, "to": 0}]}
+```
+
+The dates, pages and finish are the book's entry in `/stats/activity`, worked out the same way. Each day
+adds `seconds`: the time every device's stats recorded for the book that day (BookOrbit imports
+included), so a position-only reader (kosync) and a stats reader (CrossInk) combine into one history.
+`reading_days` holds every day with a sync, recorded time, or a chosen start or finish. `404` when the
+server knows nothing about the book.
+
+#### GET /api/v1/stats/activity/books?documents=&tz=
+
+The same for several books in one request (`documents` comma-separated, at most 50), e.g. a reader's
+whole library: `{"books": [ ...as above, plus "requested": ["<hash>", ...] ]}`. `requested` lists the
+query's hashes that name each book, so a reader can match its own keys to the canonical hash. Unknown
+books are left out.
+
 ### Connectors (master sync hub)
 
 Pair external services (Hardcover, Readwise, …) to the account; reading activity fans out to them

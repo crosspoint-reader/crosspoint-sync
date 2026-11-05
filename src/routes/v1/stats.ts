@@ -13,7 +13,7 @@ import {
   type DailyReading,
   type GlobalStatsSnapshot,
 } from '../../models/stats.js';
-import { readingActivity } from '../../models/activity.js';
+import { bookActivity, readingActivity } from '../../models/activity.js';
 import { documentInfo, pagesCheckedSince } from '../../models/cover.js';
 import { resolveDocument, statsAliases, statsDocuments } from '../../models/merge.js';
 import type { HttpTransport } from '../../connectors/types.js';
@@ -24,6 +24,8 @@ import { combineReadingStreak } from '../../models/reading-streak.js';
 import { importBookorbitStats } from '../../connectors/bookorbit-stats.js';
 
 const MAX_BOOK_BATCH = 20;
+// Books per GET /stats/activity/books request.
+const MAX_ACTIVITY_BOOKS = 50;
 const DEFAULT_BOOK_PAGE = 50;
 const MAX_BOOK_PAGE = 200;
 const MAX_INFO_LOOKUPS = 25;
@@ -423,6 +425,38 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
   // Pages/books activity from the progress history (print pages), for readers
   // that don't send stats. ?tz= is the client's Date#getTimezoneOffset().
   app.get('/stats/activity', async (c) => c.json(await activityFor(c.get('user').id, tzFrom(c.req.query('tz')))));
+
+  // One book's activity across every device and merged copy: dates, and per day its syncs, print pages and
+  // recorded seconds (see bookActivity). Any hash the book is known by works. ?tz= as above.
+  app.get('/stats/books/:document/activity', (c) => {
+    const document = c.req.param('document');
+    if (!isValidDocument(document)) return kosyncError(c, 403, 2004, "Field 'document' not provided.");
+    const book = bookActivity(db, c.get('user').id, tzFrom(c.req.query('tz')), document);
+    return book ? c.json(book) : c.json({ code: 2003, message: 'Unknown document' }, 404);
+  });
+
+  // The same for several books at once (?documents=a,b,..., at most 50): one request for a reader's whole
+  // library. Unknown documents are left out. Each item's `document` is the book's canonical hash and
+  // `requested` the hashes from the query that name it, so a reader can match its own keys.
+  app.get('/stats/activity/books', (c) => {
+    const documents = [...new Set((c.req.query('documents') ?? '').split(',').filter((d) => d.length > 0))];
+    if (!documents.length || documents.length > MAX_ACTIVITY_BOOKS || !documents.every(isValidDocument)) {
+      return kosyncError(c, 403, 2004, "Field 'documents' not provided.");
+    }
+    const user = c.get('user');
+    const tz = tzFrom(c.req.query('tz'));
+    const books = new Map<string, NonNullable<ReturnType<typeof bookActivity>> & { requested: string[] }>();
+    for (const d of documents) {
+      const known = books.get(resolveDocument(db, user.id, d));
+      if (known) {
+        known.requested.push(d);
+        continue;
+      }
+      const book = bookActivity(db, user.id, tz, d);
+      if (book) books.set(book.document, { ...book, requested: [d] });
+    }
+    return c.json({ books: [...books.values()] });
+  });
 
   // A device-sized digest of what the Stats page shows: the same finished counts, pages and streaks,
   // and reading days from every source. Counts cover all history; only the reading-day bitmap is
