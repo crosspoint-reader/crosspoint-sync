@@ -72,6 +72,23 @@ describe('GET /api/v1/stats/books/:document/activity', () => {
     expect(body.reading_days).toEqual(['2026-05-24', '2026-10-23']);
   });
 
+  it('dates a book known only from stats by its stats, else by its first recorded day', async () => {
+    const { stats, get } = await setup();
+    await stats('x4', [book(A, { daily: [{ date: '2026-10-23', seconds: 600 }] })]);
+    const timed = (await get(`/api/v1/stats/books/${A}/activity`)).body;
+    expect(timed.started_at).toBe(Date.parse('2026-10-23T12:00:00Z') / 1000);
+    expect(timed.reading_days).toEqual(['2026-10-23']);
+
+    const start = Date.parse('2026-10-01T00:00:00Z') / 1000;
+    const finish = Date.parse('2026-10-24T00:00:00Z') / 1000;
+    await stats('kobo', [book(B, { start_date: start, finished_date: finish, completed: true, daily: [{ date: '2026-10-23', seconds: 60 }] })]);
+    const dated = (await get(`/api/v1/stats/books/${B}/activity`)).body;
+    expect(dated.started_at).toBe(start + 12 * 3600);
+    expect(dated.finished_at).toBe(finish + 12 * 3600);
+    expect(dated.completed).toBe(true);
+    expect(dated.days_to_finish).toBe(24);
+  });
+
   it('buckets syncs in the client timezone', async () => {
     const { progress, get } = await setup();
     await progress(A, 0.1, 'boox', 1779663600); // 2026-05-24T23:00:00Z

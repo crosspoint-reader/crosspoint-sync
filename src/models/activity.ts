@@ -301,7 +301,9 @@ export function bookActivity(db: DB, userId: number, tz: number, document: strin
     if (combined.completed && combined.finished_date > 0) finishedDates.set(canonical, combined.finished_date);
     if (combined.start_date > 0) startDates.set(canonical, combined.start_date);
   }
-  const activity = computeActivity(rows, new Map(info ? [[canonical, info]] : []), tz, finishedDates, startDates);
+  // Always this book: with no documents row, device-reported dates alone still make an entry.
+  const docInfo: DocInfo = info ?? { page_count: null, status: null, status_at: null };
+  const activity = computeActivity(rows, new Map([[canonical, docInfo]]), tz, finishedDates, startDates);
 
   const seconds = new Map<string, number>();
   const timed = db
@@ -325,10 +327,13 @@ export function bookActivity(db: DB, userId: number, tz: number, document: strin
   }
   const readingDays = new Set(activity.reading_days);
   for (const [day, s] of seconds) if (s > 0) readingDays.add(day);
+  // Known only from recorded time: it started on the first day with any (local noon, as device dates are).
+  const firstTimed = [...seconds.keys()].sort()[0];
+  const timedStart = firstTimed ? Date.parse(`${firstTimed}T12:00:00Z`) / 1000 + tz * 60 : 0;
   return {
     ...(book ?? {
       document: canonical,
-      started_at: 0,
+      started_at: timedStart,
       last_at: 0,
       percentage: 0,
       finished_at: null,
