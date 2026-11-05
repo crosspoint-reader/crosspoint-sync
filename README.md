@@ -298,8 +298,14 @@ time. Counters are monotonic history, independent of resettable global totals.
 `GET /api/v1/stats/summary` includes date-sorted `daily` rows with `date`, summed
 `seconds`, and fractional `minutes`. The reader has already applied its timezone;
 these dates are never converted using the server or browser timezone. Absent daily
-history means unknown, not historical zero. Account data deletion removes the new
-data; book merges/unmerges/deletion do not change device/day counters.
+history means unknown, not historical zero. The reading calendar preserves
+progress-derived page estimates alongside recorded daily time, including when
+CrossInk uploads only read-day flags. One calendar shows both measurements
+together in each day's tooltip. Shading uses page counts when available, otherwise
+recorded time; days without either metric retain a generic read marker.
+Share cards keep page and time totals separate. Durations are never inferred
+from read-day flags.
+Account data deletion removes the new data; book merges/unmerges/deletion do not change device/day counters.
 
 
 Regression checks: `npm test`, `npm run build`; after building the CrossInk

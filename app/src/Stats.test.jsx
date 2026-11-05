@@ -187,22 +187,24 @@ describe('reading grids', () => {
     days: [{ day: '2026-09-30', syncs: 1, pages: 5 }, { day: '2026-09-28', syncs: 1, pages: 20 }],
   }
 
-  it.each([undefined, null, []])('uses reading days before daily time history exists: %s', (daily) => {
-    const { queryByText, getByRole, getByLabelText } = render(
+  it.each([undefined, null, []])('preserves pages before daily time history exists: %s', (daily) => {
+    const { queryByText, getByText, getByRole, getByLabelText } = render(
       <Stats session={{}} books={[]} summary={{ ...summary, daily }} activity={synced} />,
     )
-    expect(queryByText('Reading time recorded by your reader')).toBeNull()
     expect(queryByText('Today')).toBeNull()
     expect(queryByText('7-day average')).toBeNull()
-    expect(queryByText('Less')).toBeNull()
-    expect(getByLabelText('Wed, Sep 30: read')).toBeTruthy()
+    expect(getByText(/Less/)).toBeTruthy()
+    expect(getByLabelText('Wed, Sep 30: 5 pages')).toBeTruthy()
+    expect(getByLabelText('Mon, Sep 28: 20 pages')).toBeTruthy()
     expect(getByLabelText('Tue, Sep 29: read')).toBeTruthy()
     fireEvent.click(getByRole('button', { name: 'Share your reading days' }))
     fireEvent.click(getByRole('button', { name: 'Render calendar share' }))
-    expect(renderCalendarCard.mock.lastCall[0].tiles).toEqual([['reading days', 3], ['day streak', 2]])
+    expect(renderCalendarCard.mock.lastCall[0].tiles).toEqual([
+      ['reading days', 4], ['pages read', '25'], ['day streak', 4],
+    ])
   })
 
-  it.each([0, 4200])('reveals daily time labels with the first record of %s seconds and keeps the selected range', (seconds) => {
+  it.each([0, 4200])('preserves pages and the selected range when daily time arrives: %s', (seconds) => {
     const props = { session: {}, books: [], activity: synced }
     const { getByRole, getByText, getByLabelText, rerender } = render(
       <Stats {...props} summary={{ ...summary, daily: [] }} />,
@@ -210,44 +212,51 @@ describe('reading grids', () => {
     fireEvent.click(getByRole('button', { name: 'Month' }))
     fireEvent.click(getByRole('button', { name: 'Earlier' }))
     rerender(<Stats {...props} summary={{ ...summary, daily: [{ date: '2026-09-30', seconds }] }} />)
-    expect(getByText('Reading time recorded by your reader')).toBeTruthy()
     expect(getByText('August 2026')).toBeTruthy()
     expect(getByText('Today')).toBeTruthy()
     expect(getByText('7-day average')).toBeTruthy()
     fireEvent.click(getByRole('button', { name: 'Later' }))
-    expect(getByLabelText(`Wed, Sep 30: ${seconds ? '1h 10m' : '0m'} reading time`)).toBeTruthy()
+    expect(getByLabelText(`Wed, Sep 30: 5 pages · ${seconds ? '1h 10m' : '0m'} reading time`)).toBeTruthy()
   })
 
-  it('keeps time available with daily history outside the visible period', () => {
+  it('keeps old time details available outside the visible period', () => {
     const daily = [{ date: '2025-08-01', seconds: 600 }]
-    const { getByText, getByLabelText } = render(<Stats session={{}} books={[]} activity={synced} summary={{ ...summary, daily }} />)
-    expect(getByText('Reading time recorded by your reader')).toBeTruthy()
-    expect(getByLabelText('Wed, Sep 30: read')).toBeTruthy()
-    expect(getByText('Today').nextElementSibling.textContent).toBe('0m')
+    const { getByRole, getByLabelText } = render(<Stats session={{}} books={[]} activity={synced} summary={{ ...summary, daily }} />)
+    expect(getByLabelText('Wed, Sep 30: 5 pages')).toBeTruthy()
+    fireEvent.click(getByRole('button', { name: 'Earlier' }))
+    expect(getByLabelText('Fri, Aug 1: 10m reading time')).toBeTruthy()
   })
 
-  it.each([false, true])('uses the device calendar with sync activity present and daily history: %s', (hasDaily) => {
+  it.each([false, true])('keeps all dates and both measures with daily history: %s', (hasDaily) => {
     const props = { session: {}, books: [], summary: { ...summary, daily: hasDaily ? summary.daily : [] } }
-    const { queryByRole, getByRole, getByLabelText, rerender } = render(<Stats {...props} />)
-    const tip = `Wed, Sep 30: ${hasDaily ? '1h 10m reading time' : 'read'}`
-    expect(getByLabelText(tip)).toBeTruthy()
+    const { getByRole, queryByRole, getByLabelText, rerender } = render(<Stats {...props} />)
     rerender(<Stats {...props} activity={synced} />)
     expect(queryByRole('group', { name: 'Reading calendar measure' })).toBeNull()
     expect(queryByRole('button', { name: 'Pages read' })).toBeNull()
-    expect(getByLabelText(tip)).toBeTruthy()
-    // The reader says Sep 29 was read; sync progress has pages only on Sep 28 and Sep 30.
+    expect(queryByRole('button', { name: 'Reading time' })).toBeNull()
+    expect(getByLabelText(`Wed, Sep 30: 5 pages${hasDaily ? ' · 1h 10m reading time' : ''}`)).toBeTruthy()
     expect(getByLabelText('Tue, Sep 29: read')).toBeTruthy()
-    expect(getByLabelText('Mon, Sep 28: no reading')).toBeTruthy()
+    expect(getByLabelText('Mon, Sep 28: 20 pages')).toBeTruthy()
     fireEvent.click(getByRole('button', { name: 'Share your reading days' }))
     fireEvent.click(getByRole('button', { name: 'Render calendar share' }))
     expect(renderCalendarCard.mock.lastCall[0].tiles).toEqual([
-      ['reading days', 3],
-      ...(hasDaily ? [['time read', '1h 10m']] : []),
-      ['day streak', 2],
+      ['reading days', 4], ['pages read', '25'],
+      ...(hasDaily ? [['time read', '1h 10m']] : []), ['day streak', 4],
     ])
-    // Readers without device stats still get their original sync-page calendar.
     rerender(<Stats {...props} activity={synced} summary={null} />)
     expect(getByLabelText('Wed, Sep 30: 5 pages')).toBeTruthy()
+  })
+
+  it('preserves page shading and range across the first CrossInk stats upload', () => {
+    const props = { session: {}, books: [], activity: synced }
+    const { getByRole, getByLabelText, rerender } = render(<Stats {...props} />)
+    fireEvent.click(getByRole('button', { name: 'Month' }))
+    const before = getByLabelText('Wed, Sep 30: 5 pages').className
+    rerender(<Stats {...props} summary={summary} />)
+    expect(getByRole('button', { name: 'Month' }).className).toContain('bg-raised')
+    expect(getByLabelText('Wed, Sep 30: 5 pages · 1h 10m reading time').className).toBe(before)
+    rerender(<Stats {...props} summary={{ ...summary }} />)
+    expect(getByLabelText('Wed, Sep 30: 5 pages · 1h 10m reading time').className).toBe(before)
   })
 
   it('updates both streaks from the same dates that fill the grid', () => {
