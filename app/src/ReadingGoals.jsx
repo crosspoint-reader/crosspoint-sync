@@ -37,6 +37,11 @@ function GoalEditor({ session }) {
   const data = saved ?? loaded
   const goal = data?.goals?.find(g => g.year === Number(year))
   useEffect(() => { setSaved(null) }, [loaded])
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') reload() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  })
   const send = async (remove = false) => {
     setBusy(true)
     setFailure('')

@@ -72,6 +72,8 @@ export const offline = new EventTarget()
 let sessionVersion = 0
 let readingVersion = 0
 let goalsVersion = 0
+let goalReadSequence = 0
+const latestGoalReads = new Map()
 let logoutPending = null
 let libraryReadSequence = 0
 let latestLibraryRead = 0
@@ -99,6 +101,7 @@ function assertReadingVersion(session, reading) {
 const offlineCopies = new WeakSet()
 
 function clearOffline(session) {
+  latestGoalReads.clear()
   latestLibraryRead = 0
   latestClippingRead = latestHubRead = 0
   latestBookReads.clear()
@@ -553,6 +556,8 @@ export const cached = {
 export const api = {
   readingGoals: async (s) => {
     const version = sessionVersion, revision = goalsVersion
+    const sequence = ++goalReadSequence
+    const account = JSON.stringify([s.server, s.username])
     let result
     try { result = await call(s, goalsPath(), {}, true, { store: false, offlineFallback: false }) }
     catch (error) {
@@ -565,7 +570,10 @@ export const api = {
       result = fallback
     }
     if (version !== sessionVersion || revision !== goalsVersion) throw Object.assign(new Error('Reading goals changed while loading'), { stale: true })
-    if (!offlineCopies.has(result)) {
+    // A delayed response must not replace a newer successful account snapshot.
+    // Failed reads and offline copies leave pending online refreshes eligible.
+    if (!offlineCopies.has(result) && sequence > (latestGoalReads.get(account) ?? 0)) {
+      latestGoalReads.set(account, sequence)
       keep(`${OFFLINE}${s.username}@${s.server}${goalsPath()}`, result)
       keep(`${OFFLINE}${s.username}@${s.server}${GOALS_CACHE}`, result)
     }

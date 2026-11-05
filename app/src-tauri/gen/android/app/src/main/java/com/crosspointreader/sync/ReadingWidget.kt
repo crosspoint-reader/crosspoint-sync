@@ -143,7 +143,7 @@ open class ReadingWidget : AppWidgetProvider() {
           data.put("label", if (current == null) "CROSSPOINT SYNC" else "CONTINUE READING")
             .put("title", current?.let { title(it) } ?: "Nothing in progress")
             .put("author", current?.takeUnless { it.isNull("author") }?.optString("author") ?: "")
-            .put("percent", current?.let { (it.optDouble("percentage") * 100).roundToInt().coerceIn(0, 100) } ?: -1)
+            .put("percent", current?.let { ((it.optDouble("percentage", 0.0).takeIf { value -> value.isFinite() } ?: 0.0).coerceIn(0.0, 1.0) * 100).roundToInt() } ?: -1)
             .put("book_document", current?.optString("document") ?: JSONObject.NULL)
           val url = current?.takeUnless { it.isNull("cover_url") }?.optString("cover_url")
           val old = data.takeUnless { it.isNull("cover_url") }?.optString("cover_url")
