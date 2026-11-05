@@ -336,6 +336,8 @@ function timeByDay(summary, activity) {
     byDay.set(key, seconds.get(key))
   }
   for (const [key, s] of seconds) if (s > 0 && !byDay.has(key)) byDay.set(key, s)
+  // Synced days older than the device history window.
+  for (const day of activity?.reading_days ?? []) if (!byDay.has(day)) byDay.set(day, undefined)
   return byDay
 }
 

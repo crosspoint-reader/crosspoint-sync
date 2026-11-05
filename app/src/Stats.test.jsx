@@ -266,6 +266,14 @@ describe('reading grids', () => {
     expect(getByText('Reading time recorded by your reader; synced pages where no time was recorded')).toBeTruthy()
   })
 
+  it('shows synced pages older than the device history window', () => {
+    const history = { books: [], pages_total: 9, reading_days: ['2024-03-12'], days: [{ day: '2024-03-12', syncs: 1, pages: 9 }] }
+    const { getByLabelText, getByRole } = render(<Stats session={{}} books={[]} summary={summary} activity={history} />)
+    fireEvent.click(getByRole('button', { name: 'Earlier' }))
+    fireEvent.click(getByRole('button', { name: 'Earlier' }))
+    expect(getByLabelText('Tue, Mar 12: 9 pages')).toBeTruthy()
+  })
+
   it('updates both streaks from the same dates that fill the grid', () => {
     const summary = {
       devices: [{ device: 'CrossInk' }], current_streak: 8, streak: 12,
