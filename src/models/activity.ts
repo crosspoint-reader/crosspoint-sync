@@ -223,7 +223,7 @@ export function computeActivity(
 
 /** A user's activity from the database: progress history, plus finish and start
  *  dates from device stats and reading days from a BookOrbit import. */
-export function readingActivity(db: DB, userId: number, tz: number): Activity {
+export function readingActivity(db: DB, userId: number, tz: number, options: { includeStatsOnly?: boolean } = {}): Activity {
   const rows = db
     .prepare('SELECT document, percentage, at FROM progress_log WHERE user_id = ?')
     .all(userId) as unknown as LogRow[];
@@ -249,7 +249,11 @@ export function readingActivity(db: DB, userId: number, tz: number): Activity {
   const startDates = new Map<string, number>();
   for (const [document, snapshots] of snapshotsByDoc) {
     const combined = combineBookStats(snapshots);
-    if (combined.completed && combined.finished_date > 0) finishedDates.set(document, combined.finished_date);
+    if (combined.completed && combined.finished_date > 0) {
+      finishedDates.set(document, combined.finished_date);
+      // Goals include device-only completions through the same date/status rules.
+      if (options.includeStatsOnly && !docs.has(document)) docs.set(document, { document, page_count: null, status: null, status_at: null });
+    }
     if (combined.start_date > 0) startDates.set(document, combined.start_date);
   }
   const activity = computeActivity(rows, docs, tz, finishedDates, startDates);

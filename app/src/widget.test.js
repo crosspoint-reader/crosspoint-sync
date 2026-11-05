@@ -32,6 +32,16 @@ describe('widget account data', () => {
     expect(data()).not.toHaveProperty('goal')
     expect(data()).not.toHaveProperty('history_days')
   })
+  it.each([0, 180])('publishes the larger of the dated longest streak and the all-time record %s', async (record) => {
+    const days = [0, 1, 2].map(offset => {
+      const date = new Date()
+      date.setDate(date.getDate() - offset)
+      return localDay(date)
+    })
+    await updateWidget({ books: [book], summary: { streak: record }, activity: { books: [], reading_days: days } })
+    expect(data().longest_streak).toBe(Math.max(3, record))
+  })
+
   it('uses the grid-derived streak and republishes when dated history arrives', async () => {
     const summary = { devices: [{ device: 'CrossInk' }], current_streak: 8, seconds: 3600 }
     await updateWidget({ books: [book], summary })

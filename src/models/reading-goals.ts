@@ -18,7 +18,7 @@ export function readingGoals(db: DB, userId: number, tz: number) {
   const aliases = new Set([...aliasesByDocument(db, userId).values()].flat());
   const counts = new Map<number, number>();
   const recent: { document: string; at: number }[] = [];
-  for (const b of readingActivity(db, userId, tz).books) {
+  for (const b of readingActivity(db, userId, tz, { includeStatsOnly: true }).books) {
     if (!b.finished_at || aliases.has(b.document)) continue;
     const day = new Date((b.finished_at - tz * 60) * 1000).toISOString().slice(0, 10);
     if (day > today) continue;

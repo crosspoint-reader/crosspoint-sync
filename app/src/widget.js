@@ -60,7 +60,7 @@ export async function updateWidget({ session, books, summary, activity, goals })
   data.history_days = [...dates].filter(d => d <= today).sort()
   data.history_known = Array.isArray(activity?.reading_days) || (summary?.anchor_day > 0 && !!summary.history_b64) || Number.isFinite(summary?.current_streak)
   data.current_streak = readingStreak(summary, activity)
-  data.longest_streak = longestReadingStreak(summary, activity)
+  data.longest_streak = Math.max(summary?.streak ?? 0, longestReadingStreak(summary, activity))
   data.goal = goals?.goals?.find(g => g.year === year) ?? null
   data.goals = goals?.goals ?? []
   data.recent_finished = data.goal ? goals?.recent_finished ?? [] : []
