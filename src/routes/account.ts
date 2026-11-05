@@ -17,6 +17,7 @@ export function deleteKosyncUserData(db: DB, userId: number, username: string, {
   const links = revocations(db, userId);
   withTransaction(db, () => {
     for (const table of [
+      'reading_goals',
       'microblog_clipping_selections',
       'microblog_clipping_posts',
       'bookorbit_session_exports',

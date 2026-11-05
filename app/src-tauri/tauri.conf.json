@@ -48,6 +48,7 @@
   "plugins": {
     "deep-link": {
       "mobile": [
+        { "scheme": ["crosspointsync"] },
         {
           "scheme": [
             "https"

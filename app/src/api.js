@@ -71,6 +71,9 @@ const OFFLINE = `${OFFLINE_PREFIX}v2:`
 export const offline = new EventTarget()
 let sessionVersion = 0
 let readingVersion = 0
+let goalsVersion = 0
+let goalReadSequence = 0
+const latestGoalReads = new Map()
 let logoutPending = null
 let libraryReadSequence = 0
 let latestLibraryRead = 0
@@ -98,6 +101,7 @@ function assertReadingVersion(session, reading) {
 const offlineCopies = new WeakSet()
 
 function clearOffline(session) {
+  latestGoalReads.clear()
   latestLibraryRead = 0
   latestClippingRead = latestHubRead = 0
   latestBookReads.clear()
@@ -522,7 +526,20 @@ export function syncShortcutsCache(session) {
   })
 }
 
+const goalsPath = () => `/api/v1/account/reading-goals?tz=${new Date().getTimezoneOffset()}`
+const GOALS_CACHE = '/api/v1/account/reading-goals'
+async function changeReadingGoal(s, year, init) {
+  const version = sessionVersion, revision = ++goalsVersion
+  const result = await call(s, `/api/v1/account/reading-goals/${year}?tz=${new Date().getTimezoneOffset()}`, init, false)
+  if (version !== sessionVersion || revision !== goalsVersion) throw Object.assign(new Error('Reading goals changed while saving'), { stale: true })
+  keep(`${OFFLINE}${s.username}@${s.server}${goalsPath()}`, result)
+  keep(`${OFFLINE}${s.username}@${s.server}${GOALS_CACHE}`, result)
+  window.dispatchEvent(new Event('crosspoint-goals-changed'))
+  return result
+}
+
 export const cached = {
+  readingGoals: (s) => saved(s, GOALS_CACHE) ?? saved(s, goalsPath()),
   books: (s) => {
     const r = saved(s, PROGRESS)
     return r ? bookList(r) : null
@@ -537,6 +554,33 @@ export const cached = {
 }
 
 export const api = {
+  readingGoals: async (s) => {
+    const version = sessionVersion, revision = goalsVersion
+    const sequence = ++goalReadSequence
+    const account = JSON.stringify([s.server, s.username])
+    let result
+    try { result = await call(s, goalsPath(), {}, true, { store: false, offlineFallback: false }) }
+    catch (error) {
+      // Targets survive DST/travel. These completion counts remain the last
+      // saved snapshot until a successful read in the new timezone.
+      const fallback = !error.status && saved(s, GOALS_CACHE)
+      if (!fallback) throw error
+      offline.dispatchEvent(new Event('offline'))
+      offlineCopies.add(fallback)
+      result = fallback
+    }
+    if (version !== sessionVersion || revision !== goalsVersion) throw Object.assign(new Error('Reading goals changed while loading'), { stale: true })
+    // A delayed response must not replace a newer successful account snapshot.
+    // Failed reads and offline copies leave pending online refreshes eligible.
+    if (!offlineCopies.has(result) && sequence > (latestGoalReads.get(account) ?? 0)) {
+      latestGoalReads.set(account, sequence)
+      keep(`${OFFLINE}${s.username}@${s.server}${goalsPath()}`, result)
+      keep(`${OFFLINE}${s.username}@${s.server}${GOALS_CACHE}`, result)
+    }
+    return result
+  },
+  setReadingGoal: (s, year, target) => changeReadingGoal(s, year, { method: 'PUT', body: JSON.stringify({ target }) }),
+  removeReadingGoal: (s, year) => changeReadingGoal(s, year, { method: 'DELETE' }),
   // Books a device synced without any metadata are hidden unless showUntitled().
   books: (s) => allProgress(s).then((r) => bookList(r)),
   // The hidden ones, so they can be merged into the book they really are.

@@ -58,6 +58,9 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         CFBundleShortVersionString: 0.1.1
         CFBundleVersion: "16"
+        CFBundleURLTypes:
+          - CFBundleURLName: Reading widgets
+            CFBundleURLSchemes: [crosspointsync]
         # iOS 27 refuses to launch SDK-27 apps on the legacy app-delegate
         # lifecycle; tao (>= 0.37) switches to its scene delegate when this is set.
         UIApplicationSceneManifest:

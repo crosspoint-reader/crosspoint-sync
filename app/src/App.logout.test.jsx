@@ -10,8 +10,8 @@ vi.mock('./api.js', () => ({
   loadSession: vi.fn(), lastServer: vi.fn(() => 'https://sync.test'),
   login: vi.fn(), register: vi.fn(), logout: vi.fn(), saveSession: vi.fn(), syncShortcutsCache: vi.fn(),
   offline: new EventTarget(),
-  api: { books: vi.fn(), summary: vi.fn(), activity: vi.fn() },
-  cached: { books: () => [], summary: () => null, activity: () => null, activityUpdatedAt: () => null },
+  api: { books: vi.fn(), summary: vi.fn(), activity: vi.fn(), readingGoals: vi.fn() },
+  cached: { books: () => [], summary: () => null, activity: () => null, activityUpdatedAt: () => null, readingGoals: () => null },
 }))
 vi.mock('./theme.js', () => ({ useTheme: () => ['system', vi.fn()] }))
 vi.mock('./widget.js', () => ({ clearWidget: vi.fn(), updateWidget: vi.fn() }))
@@ -22,7 +22,7 @@ vi.mock('./Settings.jsx', () => ({ default: ({ onLogout, onSession }) => {
   return <button onClick={onLogout}>Sign out</button>
 }, Matches: () => null }))
 vi.mock('./Library.jsx', () => ({ default: () => null }))
-vi.mock('./Book.jsx', () => ({ default: () => null }))
+vi.mock('./Book.jsx', () => ({ default: ({ onChange }) => <button onClick={onChange}>Update book</button> }))
 vi.mock('./Stats.jsx', () => ({ default: () => null }))
 vi.mock('./Send.jsx', () => ({ default: () => null }))
 vi.mock('./Wallpaper.jsx', () => ({ default: () => null }))
@@ -134,4 +134,18 @@ it('shares startup cleanup across StrictMode effect replays', async () => {
   expect(screen.queryByRole('heading', { name: 'Sign in' })).toBeNull()
   await act(async () => { finish() })
   expect(screen.getByRole('heading', { name: 'Sign in' })).toBeTruthy()
+})
+
+it('refreshes annual goal progress for Stats and widgets after a book changes', async () => {
+  location.hash = '#/book/imported.101'
+  api.activity.mockResolvedValue({ books: [] })
+  const year = new Date().getFullYear()
+  api.readingGoals.mockReset().mockResolvedValue({ year, goals: [{ year, target: 12, completed: 1 }] })
+  const { updateWidget } = await import('./widget.js')
+  updateWidget.mockClear()
+  render(<App />)
+  await waitFor(() => expect(updateWidget.mock.calls.some(([data]) => data.goals?.goals[0]?.completed === 1)).toBe(true))
+  api.readingGoals.mockResolvedValue({ year, goals: [{ year, target: 12, completed: 2 }] })
+  fireEvent.click(screen.getByRole('button', { name: 'Update book' }))
+  await waitFor(() => expect(updateWidget.mock.calls.some(([data]) => data.goals?.goals[0]?.completed === 2)).toBe(true))
 })

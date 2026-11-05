@@ -2,4 +2,9 @@
     <string name="app_name">CrossPoint Sync</string>
     <string name="main_activity_title">CrossPoint Sync</string>
     <string name="widget_description">Your current book and reading totals</string>
+    <string name="streak_widget_name">Reading Streak</string>
+    <string name="reading_widget_name">Continue Reading</string>
+    <string name="goal_widget_name">Yearly Goal</string>
+    <string name="streak_widget_description">Your reading streak and recent reading days.</string>
+    <string name="goal_widget_description">Progress towards your optional yearly reading goal.</string>
 </resources>

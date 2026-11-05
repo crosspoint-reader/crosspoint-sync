@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { BookOpen, CalendarDays, ChevronLeft, ChevronRight, CircleCheck } from 'lucide-react'
 import ShareSheet from './ShareSheet.jsx'
+import { ReadingGoalCard } from './ReadingGoals.jsx'
 import { renderCalendarCard, renderStatsCard } from './shareCard.js'
 import { Card, Cover, EmptyState, ProgressBar, ShareIcon, ViaHardcover, duration, pct } from './ui.jsx'
 import { isPace, moodEmoji } from './moods.js'
@@ -859,7 +860,7 @@ function Timeline({ session, activity, books }) {
   )
 }
 
-export default function Stats({ session, tab = '', summary, activity, books, activityError, activityLoading, activityUpdatedAt, onRetryActivity }) {
+export default function Stats({ session, tab = '', summary, activity, books, goals, activityError, activityLoading, activityUpdatedAt, onRetryActivity }) {
   const hasTime = hasReadingTime(summary)
   // Reveal daily tiles and calendar time labels together after any history, even a zero counter.
   const daily = summary?.daily?.length ? dailyReading(summary.daily) : null
@@ -895,6 +896,7 @@ export default function Stats({ session, tab = '', summary, activity, books, act
     <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
       {header}
       {sharing && <StatsShare summary={summary} activity={activity} books={books} onClose={() => setSharing(false)} />}
+      <ReadingGoalCard goals={goals} />
 
       {/* Share sits right of the title, as on Reading days. */}
       <div className="mt-8 flex items-center">
