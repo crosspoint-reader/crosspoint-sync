@@ -18,7 +18,7 @@ describe('recovery token', () => {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ token, key: md5('new password') }),
     });
-    expect((await recover(shown.token.slice(0, -1) + '0')).status).toBe(401);
+    expect((await recover(shown.token.slice(0, -1) + (shown.token.endsWith('0') ? '1' : '0'))).status).toBe(401);
     const res = await recover(shown.token);
     expect(await res.json()).toEqual({ username });
     const auth = (key: string) => app.request('/users/auth', { headers: { ...headers, 'x-auth-key': key } });

@@ -419,7 +419,7 @@ export async function renderStatsCard({ heading, tiles, covers, chart, moods = [
 const DAY_SHADES = ['#e7e5df', '#b3cfc2', '#8fb9a6', '#69917d', '#4a7a62']
 export async function renderCalendarCard({ eyebrow, heading, subtitle, tiles, blocks, moods = [] }) {
   const logo = await loadImage(`${import.meta.env.BASE_URL}logo.png`, false)
-  const { canvas, ctx, bottom: tilesBottom } = await statsBase(heading, tiles, tiles.length, 440, eyebrow)
+  const { canvas, ctx, bottom: tilesBottom } = await statsBase(heading, tiles, tiles.length === 4 ? 2 : tiles.length, 440, eyebrow)
   ctx.fillStyle = C.soft
   ctx.font = '400 28px "Geist Mono"'
   ctx.fillText(subtitle, PAD, 310)

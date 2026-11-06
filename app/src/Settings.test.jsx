@@ -7,6 +7,7 @@ vi.mock('./api.js', () => ({
   get isApp() { return env.isApp },
   showUntitled: vi.fn(() => false),
   setShowUntitled: vi.fn(),
+  cached: { readingGoals: () => null },
   api: { exportAccount: vi.fn(), importAccount: vi.fn(), oauthBegin: vi.fn(), oauthComplete: vi.fn(), connectors: vi.fn(), linkConnector: vi.fn(), setClientId: vi.fn(), removeClientId: vi.fn(), syncConnector: vi.fn(), unlinkConnector: vi.fn(), clearData: vi.fn(), deleteAccount: vi.fn(), autoPause: vi.fn(), setAutoPause: vi.fn(), profile: vi.fn(), setProfile: vi.fn(), setDisplayName: vi.fn(), recoveryToken: vi.fn(() => Promise.resolve({ token: null })), newRecoveryToken: vi.fn() },
 }))
 vi.mock('./shareCard.js', () => ({ saveFile: vi.fn() }))

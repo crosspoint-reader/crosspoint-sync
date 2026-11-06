@@ -19,6 +19,7 @@ async function seed(s: Awaited<ReturnType<typeof fixture>>) {
   s.db.prepare('INSERT INTO reading_sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(s.id, 'reader', 'session', DOC, 10, 20, 10, 0, 20);
   s.db.prepare('INSERT INTO document_aliases VALUES (?, ?, ?, ?, ?)').run(s.id, 'opaque-id', DOC, 12, 1);
   s.db.prepare('UPDATE users SET auto_pause_days = 7, profile_slug = ?, display_name = ? WHERE id = ?').run('source-profile', 'Jane Reader', s.id);
+  s.db.prepare('INSERT INTO reading_goals (user_id,year,target) VALUES (?,2026,24)').run(s.id);
 }
 const archiveOf = async (s: Awaited<ReturnType<typeof fixture>>) => (await s.app.request('/api/v1/account/export', { headers: s.headers })).json();
 const restore = (s: Awaited<ReturnType<typeof fixture>>, archive: unknown, mode = 'empty') => s.app.request('/api/v1/account/import', { method: 'POST', headers: s.headers, body: JSON.stringify({ archive, mode }) });

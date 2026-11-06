@@ -36,6 +36,42 @@ npm run tauri android init && npm run tauri android dev
 npm run tauri build                  # release desktop bundle
 ```
 
+## Reading widgets and optional goals
+
+The widget gallery offers **Continue Reading**, **Reading Streak**, and **Yearly Goal**.
+Apple widgets support small, medium, and large layouts, plus extra-large on iPad.
+The iPhone widgets can also appear on your Mac through Apple's Continuity widget support;
+they use the iPhone's saved account, rather than the native Mac app's account.
+Android offers the same three choices, with details adapting to launcher resizing.
+Streaks use recorded reading days, including readers that do not report reading time.
+Gallery book samples use *Eternity’s Tomb* by Dan Moren, with the cover bundled from
+[the author's book page](https://dmoren.com/writing/eternitys-tomb/).
+
+Choose an optional books-finished target in **Settings → Reading goals**. Each calendar
+year has its own target, synced with your account. A target adds a progress card to Stats
+and populates the goal widget; removing it removes the Stats card. Unset years have no
+target or goal prompts in Stats or the other widgets, and targets never carry forward
+automatically. You can explicitly choose a future year's target in advance.
+Goals require an updated server with migration `0048_reading_goals.sql`.
+
+Widgets keep saved data offline and clear it on sign-out. The OS controls background
+refresh timing. Saved yearly targets remain available offline across year/timezone
+changes; completion counts update on the next successful sync. Apple widget taps use
+the `crosspointsync://widget/…` app links. On Mac, iPhone-widget interactions follow
+the system's Continuity behavior.
+
+Native widget date/compatibility checks (no simulator needed):
+
+```sh
+swiftc -module-cache-path /tmp/crosspoint-swift-cache \
+  src-tauri/gen/apple/CrossPointWidget/ReadingMetrics.swift \
+  scripts/widget-tests/main.swift -o /tmp/crosspoint-widget-tests
+/tmp/crosspoint-widget-tests
+```
+
+Before release, check the widget gallery and destination links on a signed device,
+including iPad extra-large, Mac Continuity, Android resizing, offline reads, and logout.
+
 ## iOS Shortcuts (iOS 16+)
 
 The iOS build provides three read-only actions in Shortcuts under **CrossPoint Sync**:

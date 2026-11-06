@@ -1,4 +1,4 @@
-import { hasReadingTime, readingStreak } from './readingHistory.js'
+import { decodeHistory, hasReadingTime, localDay, longestReadingStreak, readingStreak } from './readingHistory.js'
 import { invoke } from '@tauri-apps/api/core'
 import { http, isApp } from './api.js'
 
@@ -38,7 +38,7 @@ async function coverBase64(url) {
 
 // The session goes along so the widget can refresh from the server on its own
 // (CrossPointWidget.swift, ReadingWidget.kt); signing out clears it.
-export async function updateWidget({ session, books, summary, activity }) {
+export async function updateWidget({ session, books, summary, activity, goals }) {
   if (!books || !(window.CrossPointWidget || isApp)) return
   const current = books.find((b) => b.status === 'reading')
   const year = new Date().getFullYear()
@@ -51,6 +51,26 @@ export async function updateWidget({ session, books, summary, activity }) {
   const data = current
     ? { label: 'CONTINUE READING', title: current.title || current.filename || 'Untitled book', author: current.author ?? '', percent: Math.round(current.percentage * 100), stats }
     : { label: 'CROSSPOINT SYNC', title: 'Nothing in progress', author: '', percent: -1, stats }
+  const today = localDay(new Date())
+  const dates = new Set(activity?.reading_days ?? [])
+  if (summary?.anchor_day > 0 && summary.history_b64) {
+    const { read, anchor, length } = decodeHistory(summary.history_b64, summary.anchor_day)
+    for (let n = 0; n < length; n++) if (read(n)) dates.add(new Date(anchor.getTime() - n * 86400000).toISOString().slice(0, 10))
+  }
+  data.history_days = [...dates].filter(d => d <= today).sort()
+  data.history_known = Array.isArray(activity?.reading_days) || (summary?.anchor_day > 0 && !!summary.history_b64) || Number.isFinite(summary?.current_streak)
+  data.current_streak = readingStreak(summary, activity)
+  data.longest_streak = Math.max(summary?.streak ?? 0, longestReadingStreak(summary, activity))
+  data.goal = goals?.goals?.find(g => g.year === year) ?? null
+  data.goals = goals?.goals ?? []
+  data.recent_finished = data.goal ? goals?.recent_finished ?? [] : []
+  data.recent_finished_year = goals?.year ?? null
+  data.goal_supported = goals ? true : null
+  data.book_document = current?.document ?? null
+  data.pages_read = pages
+  data.finished_this_year = finished
+  // Stable through duplicate app renders; native providers use it for freshness.
+  data.snapshot_day = today
   if (session) data.session = { server: session.server, username: session.username, key: session.key }
   data.cover_url = current?.cover_url ?? null
   const key = JSON.stringify(data)

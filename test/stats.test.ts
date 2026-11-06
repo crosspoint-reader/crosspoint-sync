@@ -207,6 +207,32 @@ describe('daily reading counters', () => {
     const other = await (await app.request('/api/v1/stats/summary', { headers: secondUser.headers })).json();
     expect(other.daily).toEqual([]);
   });
+  it('keeps page history and daily minutes when overlapping read flags arrive (#63)', async () => {
+    const { app, db } = makeTestApp();
+    const { headers, username } = await registerUser(app);
+    const user = db.prepare('SELECT id FROM users WHERE username = ?').get(username) as { id: number };
+    db.prepare('INSERT INTO documents (user_id, document, page_count, updated_at) VALUES (?, ?, 200, 0)')
+      .run(user.id, DOC);
+    const log = db.prepare('INSERT INTO progress_log (user_id, document, device_id, percentage, at) VALUES (?, ?, ?, ?, ?)');
+    log.run(user.id, DOC, 'legacy', 0.1, Date.parse('2026-09-29T12:00:00Z') / 1000);
+    log.run(user.id, DOC, 'legacy', 0.2, Date.parse('2026-09-30T12:00:00Z') / 1000);
+    const put = (payload: unknown) => app.request('/api/v1/stats/global', {
+      method: 'PUT', headers, body: JSON.stringify(payload),
+    });
+    expect((await put(body('crossink', [{ date: '2026-09-30', seconds: 600 }]))).status).toBe(200);
+    const before = await (await app.request('/api/v1/stats/activity?tz=0', { headers })).json();
+    expect(before.days.find((d: any) => d.day === '2026-09-30').pages).toBe(20);
+    const anchor = (Date.parse('2026-09-30T00:00:00Z') - Date.UTC(2000, 0, 1)) / 86400000;
+    for (const daily of [undefined, [], [{ date: '2026-09-30', seconds: 0 }]]) {
+      const payload = { ...body('crossink', daily), anchor_day: anchor, history_b64: historyFromDays([0, 1, 2]) };
+      expect((await put(payload)).status).toBe(200);
+      expect((await put(payload)).status).toBe(200); // repeated sync must not accumulate time
+      const summary = await (await app.request('/api/v1/stats/summary', { headers })).json();
+      expect(summary.daily).toEqual([{ date: '2026-09-30', seconds: 600, minutes: 10 }]);
+      expect(await (await app.request('/api/v1/stats/activity?tz=0', { headers })).json()).toEqual(before);
+    }
+  });
+
   it('rejects malformed/duplicate/oversized daily data atomically', async () => {
     const { app, db } = makeTestApp();
     const { headers } = await registerUser(app);

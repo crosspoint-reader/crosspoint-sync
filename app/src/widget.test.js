@@ -18,6 +18,30 @@ beforeEach(async () => {
 afterEach(() => { delete window.CrossPointWidget })
 
 describe('widget account data', () => {
+  it('publishes streaks without measured time and only an explicitly selected current-year goal', async () => {
+    const year = new Date().getFullYear()
+    await updateWidget({ books: [book], activity: { books: [], reading_days: [localDay(new Date())] }, goals: { goals: [{ year, target: 12, completed: 4 }] } })
+    expect(data()).toMatchObject({ history_known: true, current_streak: 1, longest_streak: 1, goal: { year, target: 12, completed: 4 } })
+    expect(data().history_days).toContain(localDay(new Date()))
+    expect(data()).not.toHaveProperty('updated_at')
+    expect(data().goals).toEqual([{ year, target: 12, completed: 4 }])
+    await updateWidget({ books: [book], goals: { goals: [{ year: year - 1, target: 12, completed: 4 }] } })
+    expect(data().goal).toBeNull()
+    expect(data().history_known).toBe(false)
+    await clearWidget()
+    expect(data()).not.toHaveProperty('goal')
+    expect(data()).not.toHaveProperty('history_days')
+  })
+  it.each([0, 180])('publishes the larger of the dated longest streak and the all-time record %s', async (record) => {
+    const days = [0, 1, 2].map(offset => {
+      const date = new Date()
+      date.setDate(date.getDate() - offset)
+      return localDay(date)
+    })
+    await updateWidget({ books: [book], summary: { streak: record }, activity: { books: [], reading_days: days } })
+    expect(data().longest_streak).toBe(Math.max(3, record))
+  })
+
   it('uses the grid-derived streak and republishes when dated history arrives', async () => {
     const summary = { devices: [{ device: 'CrossInk' }], current_streak: 8, seconds: 3600 }
     await updateWidget({ books: [book], summary })

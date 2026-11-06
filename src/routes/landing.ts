@@ -5,7 +5,7 @@
  * are the real app, captured with a seeded demo account.
  */
 const GITHUB = 'https://github.com/crosspoint-reader/crosspoint-sync';
-const IOS = 'https://testflight.apple.com/join/XP7hh3y4';
+const IOS = 'https://apps.apple.com/us/app/crosspoint-sync-stats/id6824581923';
 const ANDROID = 'https://play.google.com/store/apps/details?id=com.crosspointreader.sync';
 
 // Store badges in the stores' black-pill style, logos from simple-icons.
