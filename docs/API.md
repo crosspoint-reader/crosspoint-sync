@@ -985,3 +985,17 @@ progress. These rows have `history_only: true`, null `percentage`, `progress`,
 or metadata. Pagination works across current and historical books. The app uses
 this option for its Library. Without this option, the endpoint continues to return
 only synced progress; the KOReader sync and progress change endpoints are unchanged.
+
+### Sleep-image plugin support
+
+Authenticated with the usual session or `x-auth-user` / `x-auth-key` headers.
+These routes require a server version including migration `0049_sleep_backgrounds.sql`.
+
+- `GET /api/v1/stats/sleep-image/status` → `{ "version": 1, "background": false }`.
+- `GET /api/v1/stats/sleep-image?mode=overlay&width=480&height=800&timezone=America%2FNew_York&placement=bottom&metrics=books,goal,current,streak` → transparent PNG. `mode=custom` returns a full 4-bit grayscale BMP using the account background, or white when none exists. Dimensions are integers 240–1600, at most 2,000,000 pixels; encoded output is below 1 MB. Top/bottom placement and the listed metric names are supported. Unknown options values return 400.
+- `X-Sleep-Percent: 42` supplies the current visible-page percentage (0–100). Missing, unresolved, or invalid values omit that metric. This does not write progress, finish books, or trust a queued event as a new completion. Account totals reflect already-synced history; annual goals reuse the existing account goal.
+- `PUT /api/v1/stats/sleep-image/background`, `Content-Type: image/png`: normalized PNG upload, at most 8 MB, 1600 pixels per axis and 2,000,000 decoded pixels. The app/plugin should resize and convert JPEG/other artwork to PNG before uploading. Invalid uploads preserve the previous background.
+- `GET /api/v1/stats/sleep-image/background` → the signed-in account's PNG (404 when absent).
+- `DELETE /api/v1/stats/sleep-image/background` → `{ "background": false }`.
+
+All image/background responses are private and not cached. Backgrounds belong to one account, are cleared when its reading data/account is deleted, and are presentation data outside reading-history exports. No external image URL fetching is performed. IANA timezone rules are evaluated on each render, including seasonal offsets. These routes work under `BASE_PATH` using the same prefix as all other APIs.
