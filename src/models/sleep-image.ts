@@ -17,6 +17,7 @@ export interface SleepOptions {
   placement: 'top' | 'bottom';
   timezone: string;
   metrics: SleepMetric[];
+  preview?: boolean;
 }
 export interface SleepMetrics {
   year: number;
@@ -55,7 +56,8 @@ export function parseSleepOptions(query: Record<string, string | undefined>): Sl
   const timezone = query.timezone ?? 'UTC';
   if (timezone.length > 100) throw new SleepImageError('Invalid timezone.');
   timezoneOffset(timezone);
-  return { width, height, mode, placement, timezone, metrics: metrics as SleepMetric[] };
+  if (query.preview !== undefined && query.preview !== '0' && query.preview !== '1') throw new SleepImageError('Preview must be 0 or 1.');
+  return { width, height, mode, placement, timezone, metrics: metrics as SleepMetric[], preview: query.preview === '1' };
 }
 
 export function sleepMetrics(db: DB, userId: number, timezone: string, percent?: string): SleepMetrics {

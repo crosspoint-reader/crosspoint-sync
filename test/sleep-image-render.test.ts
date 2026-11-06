@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PNG } from 'pngjs';
+import { deflateSync } from 'node:zlib';
+import zlib from 'node:zlib';
 import { normalizeBackground, panelLines, renderSleepImage } from '../src/render/sleep-image.js';
 import { parseSleepOptions } from '../src/models/sleep-image.js';
 
@@ -28,7 +30,7 @@ describe('sleep image rendering', () => {
     expect(panelLines(stats, parseSleepOptions({ metrics: 'streak' })).map(l => l.text).join(' ')).not.toMatch(/BOOKS|CURRENT|GOAL/);
   });
 
-  it('encodes padded 4-bit BMPs below the firmware cap even with noisy backgrounds', () => {
+  it('encodes screen-ready 2-bit BMPs below the firmware cap even with noisy backgrounds', () => {
     const background = new PNG({ width: 480, height: 800 });
     for (let i = 0; i < background.data.length; i += 4) {
       const n = ((i * 1664525 + (i >>> 5) * 1013904223) >>> 8) & 255;
@@ -40,11 +42,18 @@ describe('sleep image rendering', () => {
       expect(result.bytes.toString('ascii', 0, 2)).toBe('BM');
       expect(result.bytes.readUInt32LE(18)).toBe(width);
       expect(result.bytes.readUInt32LE(22)).toBe(height);
-      expect(result.bytes.readUInt16LE(28)).toBe(4);
-      expect(result.bytes.length).toBe(118 + Math.ceil(width / 8) * 4 * height);
+      expect(result.bytes.readUInt16LE(28)).toBe(2);
+      expect(result.bytes.length).toBe(70 + Math.ceil(width / 16) * 4 * height);
       expect(result.bytes.length).toBeLessThan(1048576);
       expect(result.bytes.readUInt32LE(2)).toBe(result.bytes.length);
+      expect([0,1,2,3].map(index => result.bytes[54 + index * 4])).toEqual([0,85,170,255]);
     }
+  });
+
+  it('provides a browser-compatible PNG preview for custom wallpapers', () => {
+    const preview = renderSleepImage(stats, parseSleepOptions({ mode: 'custom', preview: '1' }));
+    expect(preview.contentType).toBe('image/png');
+    expect(PNG.sync.read(preview.bytes).data[3]).toBe(255);
   });
 
   it('rejects invalid and oversized decoded backgrounds before allocation', () => {
@@ -54,5 +63,50 @@ describe('sleep image rendering', () => {
     expect(() => normalizeBackground(large)).toThrow(/dimension|pixel/i);
     const valid = PNG.sync.write(new PNG({ width: 240, height: 240 }));
     expect(PNG.sync.read(normalizeBackground(valid)).width).toBe(240);
+  });
+
+  it('keeps the entire panel inside short landscape screens', () => {
+    const png = PNG.sync.read(renderSleepImage(stats, parseSleepOptions({ width: '1200', height: '240' })).bytes);
+    for (let x = 0; x < png.width; x++) {
+      expect(png.data[x * 4 + 3]).toBe(0);
+      expect(png.data[((png.height - 1) * png.width + x) * 4 + 3]).toBe(0);
+    }
+  });
+
+  it('rejects a second IHDR before the decoder can replace validated dimensions', () => {
+    const first = PNG.sync.write(new PNG({ width: 1, height: 1 }));
+    const oversized = PNG.sync.write(new PNG({ width: 1601, height: 1 }));
+    const attack = Buffer.concat([first.subarray(0, 33), oversized.subarray(8)]);
+    expect(() => normalizeBackground(attack)).toThrow(/PNG|header|IHDR/i);
+  });
+
+  it('bounds IDAT decompression even for interlaced images with tiny headers', () => {
+    // A valid CRC lets the real decoder reach the allocation that must be bounded.
+    const chunk = (type: string, data: Buffer) => {
+      const body = Buffer.concat([Buffer.from(type), data]);
+      let crc = 0xffffffff;
+      for (const byte of body) {
+        crc ^= byte;
+        for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+      }
+      const out = Buffer.alloc(data.length + 12);
+      out.writeUInt32BE(data.length); body.copy(out, 4); out.writeUInt32BE((crc ^ 0xffffffff) >>> 0, out.length - 4);
+      return out;
+    };
+    const ihdr = Buffer.from([0,0,0,1, 0,0,0,1, 8,6,0,0,1]);
+    const attack = Buffer.concat([
+      Buffer.from([137,80,78,71,13,10,26,10]), chunk('IHDR', ihdr),
+      chunk('IDAT', deflateSync(Buffer.alloc(10000))), chunk('IEND', Buffer.alloc(0)),
+    ]);
+    const inflate = vi.spyOn(zlib, 'inflateSync');
+    try {
+      expect(() => normalizeBackground(attack)).toThrow();
+      expect(inflate).toHaveBeenCalledWith(expect.any(Buffer), expect.objectContaining({ maxOutputLength: 5 }));
+    } finally { inflate.mockRestore(); }
+    const valid = Buffer.concat([
+      Buffer.from([137,80,78,71,13,10,26,10]), chunk('IHDR', ihdr),
+      chunk('IDAT', deflateSync(Buffer.from([0,0,0,0,255]))), chunk('IEND', Buffer.alloc(0)),
+    ]);
+    expect([...PNG.sync.read(normalizeBackground(valid)).data]).toEqual([0,0,0,255]);
   });
 });

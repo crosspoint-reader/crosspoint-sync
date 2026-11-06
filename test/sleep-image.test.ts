@@ -75,6 +75,9 @@ describe('authenticated sleep image API', () => {
       expect(await status(first)).toMatchObject({ background: true });
       expect(await status(second)).toMatchObject({ background: false });
       expect((await s.app.request(base + '/background', { headers: second })).status).toBe(404);
+      const tiny = PNG.sync.write(new PNG({ width: 1, height: 1 }));
+      const oversized = PNG.sync.write(new PNG({ width: 1601, height: 1 }));
+      expect((await put(Buffer.concat([tiny.subarray(0, 33), oversized.subarray(8)]))).status).toBe(400);
       expect((await put(Buffer.from('bad'))).status).toBe(400);
       const saved = await s.app.request(base + '/background', { headers: first });
       expect(PNG.sync.read(Buffer.from(await saved.arrayBuffer())).width).toBe(240);
