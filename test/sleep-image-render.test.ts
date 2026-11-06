@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { PNG } from 'pngjs';
 import { deflateSync } from 'node:zlib';
 import zlib from 'node:zlib';
-import { normalizeBackground, panelLines, renderSleepImage } from '../src/render/sleep-image.js';
+import { normalizeBackground, renderSleepImage } from '../src/render/sleep-image.js';
+import { journalLayout } from '../src/render/sleep-journal.js';
 import { parseSleepOptions } from '../src/models/sleep-image.js';
 
 const stats = { year: 2026, finished: 12, target: 24, currentPercent: 42, streak: 3 };
@@ -16,18 +17,19 @@ describe('sleep image rendering', () => {
     const alpha = (x: number, y: number) => png.data[(y * png.width + x) * 4 + 3];
     expect(alpha(30, 770)).toBe(255);
     const top = PNG.sync.read(renderSleepImage(stats, parseSleepOptions({ placement: 'top' })).bytes);
-    expect(top.data[(30 * 480 + 30) * 4 + 3]).toBe(255);
+    expect(top.data[(200 * 480 + 240) * 4 + 3]).toBe(255);
     expect(top.data[(770 * 480 + 30) * 4 + 3]).toBe(0);
   });
 
   it('celebrates reached and exceeded goals and hides absent values', () => {
     const options = parseSleepOptions({});
-    expect(panelLines(stats, options).map(l => l.text).join(' ')).toContain('12 / 24');
-    expect(panelLines({ ...stats, target: 12 }, options).some(l => l.text.includes('GOAL REACHED'))).toBe(true);
-    expect(panelLines({ ...stats, target: 10 }, options).map(l => l.text).join(' ')).toContain('12 / 10');
-    const absent = panelLines({ ...stats, target: null, currentPercent: null }, options).map(l => l.text).join(' ');
-    expect(absent).not.toMatch(/GOAL|CURRENT/);
-    expect(panelLines(stats, parseSleepOptions({ metrics: 'streak' })).map(l => l.text).join(' ')).not.toMatch(/BOOKS|CURRENT|GOAL/);
+    expect(journalLayout(stats, options).seal!.count).toBe('12 / 24');
+    expect(journalLayout({ ...stats, target: 12 }, options).seal!.reached).toBe(true);
+    expect(journalLayout({ ...stats, target: 10 }, options).seal!.count).toBe('12 / 10');
+    const absent = journalLayout({ ...stats, target: null, currentPercent: null }, options);
+    expect(absent.seal).toBeUndefined();
+    expect(absent.cells.map(c => c.label)).not.toContain('current book');
+    expect(journalLayout(stats, parseSleepOptions({ metrics: 'streak' })).cells.map(c => c.label)).toEqual(['day streak']);
   });
 
   it('encodes screen-ready 2-bit BMPs below the firmware cap even with noisy backgrounds', () => {

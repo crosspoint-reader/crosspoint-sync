@@ -999,3 +999,5 @@ These routes require a server version including migration `0049_sleep_background
 - `DELETE /api/v1/stats/sleep-image/background` → `{ "background": false }`.
 
 All image/background responses are private and not cached. Backgrounds belong to one account, are cleared when its reading data/account is deleted, and are presentation data outside reading-history exports. No external image URL fetching is performed. IANA timezone rules are evaluated on each render, including seasonal offsets. These routes work under `BASE_PATH` using the same prefix as all other APIs.
+
+The sleep images use a reading-journal design: a compact transparent bookplate with serif type and an annual-goal seal tilted approximately ten degrees, or a full-page Custom composition with framed account artwork. Without artwork, Custom draws an original open-book illustration. Top/bottom placement and metric omission work in both modes; short landscape screens use the compact composition. Fonts (Lora regular/semibold) and their SIL OFL license are bundled under `assets/fonts/sleep-journal`; rendering uses pure JavaScript and no runtime downloads or native graphics libraries.
