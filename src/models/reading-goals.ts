@@ -15,6 +15,14 @@ export function readingGoals(db: DB, userId: number, tz: number) {
   const year = Number(today.slice(0, 4));
   const targets = db.prepare('SELECT year, target FROM reading_goals WHERE user_id=? ORDER BY year').all(userId) as { year: number; target: number }[];
   if (!targets.length) return { year, goals: [] };
+  const { counts, recent_finished } = readingYearSummary(db, userId, tz);
+  return { year, goals: targets.map(g => ({ ...g, completed: counts.get(g.year) ?? 0 })), recent_finished };
+}
+
+/** Shared canonical completion calendar, including books with only uploaded stats. */
+export function readingYearSummary(db: DB, userId: number, tz: number) {
+  const today = new Date(Date.now() - tz * 60000).toISOString().slice(0, 10);
+  const year = Number(today.slice(0, 4));
   const aliases = new Set([...aliasesByDocument(db, userId).values()].flat());
   const counts = new Map<number, number>();
   const recent: { document: string; at: number }[] = [];
@@ -31,5 +39,5 @@ export function readingGoals(db: DB, userId: number, tz: number) {
     const info = title.get(userId, b.document);
     return { document: b.document, title: String(info?.title || info?.filename || 'Untitled book') };
   });
-  return { year, goals: targets.map(g => ({ ...g, completed: counts.get(g.year) ?? 0 })), recent_finished };
+  return { year, counts, recent_finished };
 }
