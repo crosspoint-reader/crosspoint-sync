@@ -46,6 +46,26 @@ html { color-scheme: light; }
    bg-transparent select drops a see-through list over the page. */
 option { background-color: var(--color-surface); color: var(--color-stone-900); }
 
+/* Native controls get a hand cursor when interactive. Kept in the base layer so
+   utilities like cursor-grab (drag handles) still override it. Text fields stay
+   on their I-beam cursor, and disabled controls stay on the default arrow. */
+@layer base {
+  button:not(:disabled):not([aria-disabled="true"]),
+  summary:not([aria-disabled="true"]),
+  [role="button"]:not(:disabled):not([aria-disabled="true"]),
+  label[for]:not([aria-disabled="true"]),
+  select:not(:disabled):not([aria-disabled="true"]),
+  input[type="checkbox"]:not(:disabled):not([aria-disabled="true"]),
+  input[type="radio"]:not(:disabled):not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [aria-disabled="true"] {
+    cursor: default;
+  }
+}
+
 /* Dark mode: the same utilities, remapped. Stone flips so text-stone-900 stays the
    strongest text and bg-stone-50 the page; brand keeps its mid tones for buttons
    and lightens where it is used as text. Set by theme.js (and index.html, pre-paint). */
