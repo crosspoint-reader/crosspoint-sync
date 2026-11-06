@@ -56,7 +56,21 @@ export function migrate(db: DB, migrationsDir: string = DEFAULT_MIGRATIONS_DIR):
       // Newer installs already have the column, so the repair must accept both.
       const hasBookorbitAttempt = file === '0032_bookorbit_stats_attempted_at.sql' &&
         db.prepare('PRAGMA table_info(bookorbit_stats_sync)').all().some((column) => column.name === 'attempted_at');
-      if (!hasBookorbitAttempt) db.exec(sql);
+      // Development installs recorded this identical migration as 0044 before
+      // upstream assigned 0048. Adopt only that known history and exact schema;
+      // never drop goals or silently accept an unrelated existing table.
+      let hasLegacyReadingGoals = false;
+      if (file === '0048_reading_goals.sql' && applied.has('0044_reading_goals.sql')) {
+        const table = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='reading_goals'").get();
+        if (table) {
+          const normalized = (value: string) => value.trim().replace(/;$/, '').replace(/\s+/g, ' ').toLowerCase();
+          if (normalized(String(table.sql)) !== normalized(sql)) {
+            throw new Error('Cannot reconcile legacy reading_goals migration: existing table has an unexpected schema.');
+          }
+          hasLegacyReadingGoals = true;
+        }
+      }
+      if (!hasBookorbitAttempt && !hasLegacyReadingGoals) db.exec(sql);
       db.prepare('INSERT INTO migrations (name, applied_at) VALUES (?, ?)').run(
         file,
         Math.floor(Date.now() / 1000)
