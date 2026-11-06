@@ -765,11 +765,21 @@ const shortDate = (d) =>
 // What happened to one book on one day, in words.
 function dayEvent(entry, act, day) {
   const on = (unix) => unix && localDay(new Date(unix * 1000)) === day
-  if (on(act?.finished_at)) return { icon: CircleCheck, text: 'Finished' }
-  if (entry.started || (on(act?.started_at) && entry.from <= 0.02)) return { icon: BookOpen, text: 'Started reading' }
+  const finished = on(act?.finished_at)
+  const started = entry.started || (on(act?.started_at) && entry.from <= 0.02)
   const span = entry.to > entry.from ? `${pct(entry.from)} to ${pct(entry.to)}` : `at ${pct(entry.to)}`
-  if (entry.pages > 0) return { icon: BookOpen, text: `Read ${entry.pages} page${entry.pages === 1 ? '' : 's'} · ${span}` }
-  return { icon: BookOpen, text: entry.to > entry.from ? `Read ${span}` : `Opened ${span}` }
+  const progress = entry.pages > 0
+    ? `Read ${entry.pages} page${entry.pages === 1 ? '' : 's'} · ${span}`
+    : entry.to > entry.from ? `Read ${span}` : `Opened ${span}`
+  // Milestones and measured movement can share a day. The first uploaded
+  // position remains the baseline, even when a chosen start date is earlier.
+  if (started || finished) return {
+    icon: finished ? CircleCheck : BookOpen,
+    text: [started && 'Started reading', finished && 'Finished'].filter(Boolean).join(' · '),
+    detail: entry.pages > 0 || entry.to > entry.from ? progress : null,
+    finished,
+  }
+  return { icon: BookOpen, text: progress }
 }
 
 // A finished book that only got opened again (no pages, no movement): a reader
@@ -861,10 +871,11 @@ function Timeline({ session, activity, books }) {
                         <Cover session={session} book={b} tiny className="w-11" />
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-semibold text-stone-900">{b.title || b.filename || 'Untitled book'}</p>
-                          <p className={`mt-1 flex items-center gap-1.5 text-xs ${ev.text === 'Finished' ? 'font-medium text-brand-600' : 'text-stone-500'}`}>
+                          <p className={`mt-1 flex items-center gap-1.5 text-xs ${ev.finished ? 'font-medium text-brand-600' : 'text-stone-500'}`}>
                             <ev.icon className="size-3.5 shrink-0" strokeWidth={2} />
-                            <span className="truncate">{ev.text}</span>
+                            <span>{ev.text}</span>
                           </p>
+                          {ev.detail && <p className="mt-1 text-xs text-stone-500">{ev.detail}</p>}
                         </div>
                         <ChevronRight className="size-4 shrink-0 text-stone-400" />
                       </a>

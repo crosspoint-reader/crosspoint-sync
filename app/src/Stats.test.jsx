@@ -94,6 +94,69 @@ describe('timeline start dates', () => {
   })
 })
 
+describe('timeline milestone progress', () => {
+  const date = '2026-09-29'
+  const unix = Date.parse(`${date}T12:00:00Z`) / 1000
+  const book = { document: 'a', title: 'Timeline regression' }
+  const show = (entry, act = {}) => render(<Stats session={{}} tab="timeline" books={[book]} activity={{
+    books: [{ document: 'a', started_at: unix, ...act }],
+    days: [{ day: date, books: [{ document: 'a', pages: 0, syncs: 3, ...entry }] }],
+  }} />)
+
+  it('shows all recorded first-day movement alongside the start marker', () => {
+    const { getByText } = show({ from: 0, to: 0.09, pages: 18 })
+    expect(getByText('Started reading')).toBeTruthy()
+    expect(getByText('Read 18 pages · 0% to 9%')).toBeTruthy()
+  })
+
+  it('preserves a nonzero first-upload baseline on a chosen start day', () => {
+    const { getByText, queryByText } = show({ from: 0.09, to: 0.15, started: true })
+    expect(getByText('Started reading')).toBeTruthy()
+    expect(getByText('Read 9% to 15%')).toBeTruthy()
+    expect(queryByText(/0% to/)).toBeNull()
+  })
+
+  it('shows finish-day movement and keeps the finish styling', () => {
+    const { getByText } = show({ from: 0.9, to: 0.99, pages: 18 }, { started_at: unix - 86400, finished_at: unix })
+    expect(getByText('Finished').parentElement.className).toContain('text-brand-600')
+    expect(getByText('Read 18 pages · 90% to 99%')).toBeTruthy()
+  })
+
+  it('keeps both milestones and progress for a one-day read', () => {
+    const { getByText } = show({ from: 0.01, to: 0.99 }, { finished_at: unix })
+    expect(getByText('Started reading · Finished')).toBeTruthy()
+    expect(getByText('Read 1% to 99%')).toBeTruthy()
+  })
+
+  it.each([
+    [{ from: 0.09, to: 0.09, started: true }, {}, 'Started reading'],
+    [{ from: 0.99, to: 0.99 }, { started_at: unix - 86400, finished_at: unix }, 'Finished'],
+  ])('does not invent movement for an idle milestone', (entry, act, marker) => {
+    const { getByText, queryByText } = show(entry, act)
+    expect(getByText(marker)).toBeTruthy()
+    expect(queryByText(/^(Read |Opened )/)).toBeNull()
+  })
+
+  it('preserves page-only activity without inventing a percentage range', () => {
+    const { getByText } = show({ from: 0.01, to: 0.01, pages: 1 })
+    expect(getByText('Started reading')).toBeTruthy()
+    expect(getByText('Read 1 page · at 1%')).toBeTruthy()
+  })
+
+  it('matches milestones to the browser local day around midnight', () => {
+    // 23:30Z is the next day in UTC+2, the same day in UTC and UTC-7.
+    const at = Date.parse('2026-09-29T23:30:00Z') / 1000
+    const d = new Date(at * 1000)
+    const local = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const { getByText } = render(<Stats session={{}} tab="timeline" books={[book]} activity={{
+      books: [{ document: 'a', started_at: at, finished_at: at + 60 }],
+      days: [{ day: local, books: [{ document: 'a', from: 0.01, to: 0.99, pages: 0, syncs: 2 }] }],
+    }} />)
+    expect(getByText('Started reading · Finished')).toBeTruthy()
+    expect(getByText('Read 1% to 99%')).toBeTruthy()
+  })
+})
+
 describe('timeline refresh failures', () => {
   it('labels saved activity as stale and offers a working retry', () => {
     const retry = vi.fn()
