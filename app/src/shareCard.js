@@ -413,7 +413,8 @@ export async function renderStatsCard({ heading, tiles, covers, chart, moods = [
 }
 
 // Reading-days calendar card. `blocks` are stacked calendars, each with `grid`
-// rows of shade levels (0-4, null = outside the period) and optional `top`
+// rows of shade levels (0-4, 'unknown' = read with no amount, null = outside
+// the period) and optional `top`
 // (column), `left` (row) and `bottom` (column) labels.
 const DAY_SHADES = ['#e7e5df', '#b3cfc2', '#8fb9a6', '#69917d', '#4a7a62']
 export async function renderCalendarCard({ eyebrow, heading, subtitle, tiles, blocks, moods = [] }) {
@@ -455,10 +456,16 @@ export async function renderCalendarCard({ eyebrow, heading, subtitle, tiles, bl
     grid.forEach((row, r) =>
       row.forEach((lv, c) => {
         if (lv == null) return
-        ctx.fillStyle = DAY_SHADES[lv]
+        const unknown = lv === 'unknown'
+        ctx.fillStyle = DAY_SHADES[unknown ? 0 : lv]
         ctx.beginPath()
         ctx.roundRect(x0 + c * step, y0 + r * step, size, size, radius)
         ctx.fill()
+        if (unknown) {
+          ctx.strokeStyle = DAY_SHADES[3]
+          ctx.lineWidth = Math.max(2, size * 0.08)
+          ctx.stroke()
+        }
       })
     )
     y = y0 + gridH + bottomH + blockGap

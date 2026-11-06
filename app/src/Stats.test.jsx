@@ -246,7 +246,7 @@ describe('reading grids', () => {
     expect(queryByRole('button', { name: 'Pages read' })).toBeNull()
     expect(queryByRole('button', { name: 'Reading time' })).toBeNull()
     expect(getByLabelText(`Wed, Sep 30: 5 pages${hasDaily ? ' · 1h 10m reading time' : ''}`)).toBeTruthy()
-    expect(getByLabelText('Tue, Sep 29: read')).toBeTruthy()
+    expect(getByLabelText(hasDaily ? 'Tue, Sep 29: read, no time recorded' : 'Tue, Sep 29: read')).toBeTruthy()
     expect(getByLabelText('Mon, Sep 28: 20 pages')).toBeTruthy()
     fireEvent.click(getByRole('button', { name: 'Share your reading days' }))
     fireEvent.click(getByRole('button', { name: 'Render calendar share' }))
@@ -312,7 +312,7 @@ describe('reading grids', () => {
     pointer(cell('Tue, Sep 29'), 'pointerover', 'mouse')
     expect(getByRole('tooltip').textContent).toBe('Tue, Sep 29: 0m reading time')
     pointer(cell('Mon, Sep 28'), 'pointerover', 'mouse')
-    expect(getByRole('tooltip').textContent).toBe('Mon, Sep 28: read')
+    expect(getByRole('tooltip').textContent).toBe('Mon, Sep 28: read, no time recorded')
     pointer(cell('Sun, Sep 27'), 'pointerover', 'mouse')
     expect(getByRole('tooltip').textContent).toBe('Sun, Sep 27: no reading')
     pointer(cell('Wed, Sep 30'), 'pointerdown', 'touch')
@@ -366,7 +366,7 @@ describe('reading grids', () => {
     expect(queryByText('Time read')).toBeNull()
   })
 
-  it('shades device calendar days against the median day and gives unknown time the median shade', () => {
+  it('shades device calendar days against the median day and outlines days with no recorded time', () => {
     const summary = {
       devices: [{ device: 'CrossInk' }], history_b64: btoa(String.fromCharCode(15)),
       anchor_day: anchorDay('2026-09-30'), seconds: 9600, pages: 0, sessions: 0, completed: 0,
@@ -378,7 +378,7 @@ describe('reading grids', () => {
     expect(cls('Wed, Sep 30')).toContain('bg-brand-200')
     expect(cls('Tue, Sep 29')).toContain('bg-brand-300')
     expect(cls('Mon, Sep 28')).toContain('bg-brand-500')
-    expect(cls('Sun, Sep 27')).toContain('bg-brand-300')
+    expect(cls('Sun, Sep 27')).toContain('ring-brand-400')
     expect(cls('Sat, Sep 26')).toContain('bg-stone-100')
     expect(container.querySelectorAll('[aria-hidden="true"]').length).toBeGreaterThanOrEqual(5)
   })
@@ -396,7 +396,7 @@ describe('reading grids', () => {
     fireEvent.click(getByText('Month'))
     const tips = [...container.querySelectorAll('[data-tip]')].map((el) => el.dataset.tip)
     expect(tips).toContain('Wed, Sep 30: 1h 10m reading time')
-    expect(tips).toContain('Tue, Sep 29: read')
+    expect(tips).toContain('Tue, Sep 29: read, no time recorded')
     expect(tips).toContain('Mon, Sep 28: no reading')
     expect(tips.length).toBe(30)
   })

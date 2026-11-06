@@ -13,15 +13,26 @@ export { decodeHistory } from './readingHistory.js'
 const SHADES = ['bg-stone-100', 'bg-brand-200', 'bg-brand-300', 'bg-brand-400', 'bg-brand-500']
 const FALLBACK_SECONDS = 30 * 60 // median assumed until there is enough history
 const FALLBACK_PAGES = 20
+// A day the reader marked read but recorded no amount for: outlined, not shaded.
+const UNKNOWN_SHADE = 'bg-stone-100 ring-1 ring-inset ring-brand-400'
+const UNMEASURED = 'read, no time recorded'
 
-function ShadeLegend() {
+function ShadeLegend({ unknown }) {
   return (
-    <div className="flex items-center gap-1 font-mono text-[0.65rem] text-stone-400">
-      Less
-      {SHADES.map((c) => (
-        <span key={c} aria-hidden="true" className={`size-2.5 rounded-[2px] ${c}`} />
-      ))}
-      More
+    <div className="font-mono text-[0.65rem] text-stone-400">
+      <div className="flex items-center gap-1">
+        Less
+        {SHADES.map((c) => (
+          <span key={c} aria-hidden="true" className={`size-2.5 rounded-[2px] ${c}`} />
+        ))}
+        More
+      </div>
+      {unknown && (
+        <div className="mt-1 flex items-center gap-1">
+          <span aria-hidden="true" className={`size-2.5 rounded-[2px] ${UNKNOWN_SHADE}`} />
+          {unknown}
+        </div>
+      )}
     </div>
   )
 }
@@ -357,7 +368,10 @@ function ReadingCalendar({ summary, activity, books = [] }) {
     if (time.get(day) !== undefined) return timeLevel(time.get(day))
     return 2
   }
+  // Read, but with neither recorded time nor synced pages: nothing to measure it by (#63).
+  const unmeasured = (day) => hasDaily && byDay.has(day) && !(pages.get(day) > 0) && time.get(day) === undefined
   const tipFor = (day) => {
+    if (unmeasured(day)) return UNMEASURED
     const labels = [
       pages.get(day) > 0 ? PAGES_VIEW.tip(pages.get(day)) : null,
       time.get(day) !== undefined ? TIME_VIEW.tip(time.get(day)) : null,
@@ -369,7 +383,11 @@ function ReadingCalendar({ summary, activity, books = [] }) {
   const { weeks, first, last, label } = calendarRange(scale, back, today)
   const shown = (d) => d >= first && d <= last && d <= today
   let count = 0
-  for (let d = first; d <= last && d <= today; d = new Date(d.getTime() + DAY_MS)) if (byDay.has(localDay(d))) count++
+  let anyUnmeasured = false
+  for (let d = first; d <= last && d <= today; d = new Date(d.getTime() + DAY_MS)) {
+    if (byDay.has(localDay(d))) count++
+    if (unmeasured(localDay(d))) anyUnmeasured = true
+  }
   const month = scale === 'month'
   const year = scale === 'year'
   // The newest weeks sit on the right; start the (phone-scrollable) year there.
@@ -384,7 +402,7 @@ function ReadingCalendar({ summary, activity, books = [] }) {
     if (!shown(d)) return <div key={d.getTime()} className="aspect-square" />
     const key = localDay(d)
     const tip = `${fmt(d, { weekday: 'short', month: 'short', day: 'numeric' })}: ${byDay.has(key) ? tipFor(key) : 'no reading'}`
-    return <div key={d.getTime()} data-tip={tip} aria-label={tip} className={`aspect-square ${round} ${SHADES[level(key)]}`} />
+    return <div key={d.getTime()} data-tip={tip} aria-label={tip} className={`aspect-square ${round} ${unmeasured(key) ? UNKNOWN_SHADE : SHADES[level(key)]}`} />
   }
   // Share the visible period, reading days, available page/time totals and longest streak.
   const share = () => {
@@ -396,7 +414,7 @@ function ReadingCalendar({ summary, activity, books = [] }) {
       run = byDay.has(key) ? run + 1 : 0
       streak = Math.max(streak, run)
     }
-    const lv = (d) => (shown(d) ? level(localDay(d)) : null)
+    const lv = (d) => (!shown(d) ? null : unmeasured(localDay(d)) ? 'unknown' : level(localDay(d)))
     const day = (monday, r) => new Date(monday.getTime() + r * DAY_MS)
     const strip = (ws) => ({
       grid: WEEKDAYS.map((_, r) => ws.map((m) => lv(day(m, r)))),
@@ -548,7 +566,7 @@ function ReadingCalendar({ summary, activity, books = [] }) {
           </div>
         )}
       </div>
-      {(hasPages || hasDaily) && <div className="mt-3"><ShadeLegend /></div>}
+      {(hasPages || hasDaily) && <div className="mt-3"><ShadeLegend unknown={anyUnmeasured ? UNMEASURED : null} /></div>}
     </Card>
   )
 }
