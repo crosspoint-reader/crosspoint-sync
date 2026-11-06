@@ -67,6 +67,7 @@ jobs:
             latest=false
           tags: |
             type=ref,event=branch
+            type=sha
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
       - uses: docker/build-push-action@v6
