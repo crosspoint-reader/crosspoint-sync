@@ -13,6 +13,7 @@ import { progressRoutes } from './routes/v1/progress.js';
 import { bookmarkRoutes } from './routes/v1/bookmarks.js';
 import { clippingRoutes } from './routes/v1/clippings.js';
 import { statsRoutes } from './routes/v1/stats.js';
+import { sleepImageRoutes } from './routes/v1/sleep-image.js';
 import { documentRoutes } from './routes/v1/documents.js';
 import { connectorRoutes, oauthCallbackRoutes } from './routes/v1/connectors.js';
 import { profileSettingsRoutes, publicProfileRoutes } from './routes/profile.js';
@@ -40,7 +41,7 @@ export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<A
   const apiCors = cors({
     origin: config.corsOrigins === '*' ? '*' : config.corsOrigins,
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Accept', 'x-auth-user', 'x-auth-key'],
+    allowHeaders: ['Content-Type', 'Accept', 'x-auth-user', 'x-auth-key', 'X-Sleep-Percent'],
     maxAge: 86400,
   });
   app.use('/users/*', apiCors);
@@ -88,6 +89,7 @@ export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<A
   v1.route('/', bookmarkRoutes(db));
   v1.route('/', clippingRoutes(db));
   v1.route('/', statsRoutes(db, opts.connectorTransport));
+  v1.route('/', sleepImageRoutes(db));
   v1.route('/', documentRoutes(db, opts.connectorTransport));
   v1.route('/', connectorRoutes(db, opts.connectorTransport, config.trustProxy, basePath, config.allowHttpLocalhost));
   v1.route('/', meRoutes(db));
