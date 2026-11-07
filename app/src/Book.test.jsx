@@ -113,7 +113,7 @@ it.each(['Cancel', 'Close'])('cancels book actions with %s without requests', (d
     if (action === 'Merge a duplicate') fireEvent.click(screen.getByText('Other copy'))
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: dismiss }))
     if (action === 'Merge a duplicate') {
-      expect(screen.getByRole('dialog', { name: 'Merge a duplicate into this book' })).toBeTruthy()
+      expect(screen.getByRole('dialog', { name: 'Merge duplicate books' })).toBeTruthy()
       fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     }
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -132,7 +132,9 @@ it('preserves the selected merge and stats choice across a failure and retry', a
   fireEvent.click(screen.getByRole('checkbox', { name: /Combine reading stats/ }))
   fireEvent.click(screen.getByText('Other copy'))
   const dialog = screen.getByRole('dialog')
-  expect(dialog.textContent).toContain('Its progress and clippings move here')
+  expect(dialog.textContent).toContain('The farthest-along reading position from either copy is kept.')
+  expect(dialog.textContent).toContain('Clippings and service matches are combined.')
+  expect(dialog.textContent).toContain('Reading stats are not combined.')
   fireEvent.click(within(dialog).getByRole('button', { name: 'Merge', exact: true }))
   expect((await within(dialog).findByRole('alert')).textContent).toBe('Merge failed')
   expect(onChange).not.toHaveBeenCalled()
