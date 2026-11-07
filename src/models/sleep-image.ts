@@ -27,17 +27,26 @@ export interface SleepMetrics {
   streak: number;
 }
 
-/** JS getTimezoneOffset sign, recalculated at render time for seasonal changes. */
-export function timezoneOffset(timezone: string, date = new Date()): number {
+/** Reuse one IANA formatter per render, resolving the offset at each instant. */
+function timezoneResolver(timezone: string): (date: Date) => number {
+  let formatter: Intl.DateTimeFormat;
   try {
-    const parts = new Intl.DateTimeFormat('en-US', {
+    formatter = new Intl.DateTimeFormat('en-US', {
       timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
       hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
-    }).formatToParts(date);
+    });
+  } catch { throw new SleepImageError('Choose a valid IANA timezone.'); }
+  return date => {
+    const parts = formatter.formatToParts(date);
     const get = (key: string) => Number(parts.find(p => p.type === key)!.value);
     const local = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second'));
     return Math.round((Math.floor(date.getTime() / 1000) * 1000 - local) / 60000);
-  } catch { throw new SleepImageError('Choose a valid IANA timezone.'); }
+  };
+}
+
+/** JS getTimezoneOffset sign for a specific instant, including historical DST. */
+export function timezoneOffset(timezone: string, date = new Date()): number {
+  return timezoneResolver(timezone)(date);
 }
 
 export function parseSleepOptions(query: Record<string, string | undefined>): SleepOptions {
@@ -61,10 +70,12 @@ export function parseSleepOptions(query: Record<string, string | undefined>): Sl
 }
 
 export function sleepMetrics(db: DB, userId: number, timezone: string, percent?: string): SleepMetrics {
-  const tz = timezoneOffset(timezone);
-  const { year, counts } = readingYearSummary(db, userId, tz);
+  const offset = timezoneResolver(timezone);
+  const tz = offset(new Date());
+  const historicalOffset = (at: number) => offset(new Date(at * 1000));
+  const { year, counts } = readingYearSummary(db, userId, historicalOffset);
   const goal = db.prepare('SELECT target FROM reading_goals WHERE user_id=? AND year=?').get(userId, year);
-  const activity = readingActivity(db, userId, tz);
+  const activity = readingActivity(db, userId, historicalOffset);
   const snapshots = db.prepare('SELECT payload FROM stats_device_global WHERE user_id=?').all(userId)
     .map(r => JSON.parse(r.payload as string) as GlobalStatsSnapshot);
   const imported = readBookorbitStats(db, userId);

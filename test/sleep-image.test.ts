@@ -24,6 +24,40 @@ describe('sleep image data', () => {
     } finally { s.db.close(); }
   });
 
+  it('keeps winter completions in their historical local year when rendered in summer', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2027-01-10T12:00:00Z'));
+    const s = makeTestApp();
+    try {
+      const u = await registerUser(s.app);
+      const id = Number(s.db.prepare('SELECT id FROM users WHERE username=?').get(u.username)!.id);
+      s.db.prepare('INSERT INTO progress_log (user_id,document,device_id,percentage,at) VALUES (?,?,?,1,?)')
+        .run(id, DOC, 'reader', Date.parse('2027-01-01T04:30:00Z') / 1000);
+      // A chosen calendar date must remain Jan 1 rather than being re-zoned as an instant.
+      s.db.prepare('INSERT INTO documents (user_id,document,status,finished_date,updated_at) VALUES (?,?,?,?,?)')
+        .run(id, 'manual-finish', 'finished', Date.parse('2027-01-01T00:00:00Z') / 1000, Date.now() / 1000);
+      expect(sleepMetrics(s.db, id, 'America/New_York').finished).toBe(1);
+      vi.setSystemTime(new Date('2027-07-01T12:00:00Z'));
+      expect(sleepMetrics(s.db, id, 'America/New_York').finished).toBe(1);
+    } finally { s.db.close(); }
+  });
+
+  it.each([
+    ['2027-03-14T12:00:00Z', '2027-03-13T04:30:00Z', 0],
+    ['2026-11-02T12:00:00Z', '2026-11-01T04:30:00Z', 1],
+  ])('keeps near-midnight streak days on their historical side of DST (%s)', async (now, event, expected) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(now));
+    const s = makeTestApp();
+    try {
+      const u = await registerUser(s.app);
+      const id = Number(s.db.prepare('SELECT id FROM users WHERE username=?').get(u.username)!.id);
+      s.db.prepare('INSERT INTO progress_log (user_id,document,device_id,percentage,at) VALUES (?,?,?,.5,?)')
+        .run(id, DOC, 'reader', Date.parse(event) / 1000);
+      expect(sleepMetrics(s.db, id, 'America/New_York').streak).toBe(expected);
+    } finally { s.db.close(); }
+  });
+
   it.each([undefined, '', '{event.percent}', '-1', '101', 'NaN', 'Infinity', '4x'])('omits unavailable percentage %s', async value => {
     const s = makeTestApp();
     try {

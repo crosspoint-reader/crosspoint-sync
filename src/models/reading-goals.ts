@@ -1,5 +1,5 @@
 import type { DB } from '../db/db.js';
-import { readingActivity } from './activity.js';
+import { readingActivity, activityOffset, type ActivityTimezone } from './activity.js';
 import { aliasesByDocument } from './merge.js';
 
 export const goalYear = (value: unknown): value is number => Number.isInteger(value) && Number(value) >= 2000 && Number(value) <= 9999;
@@ -20,15 +20,16 @@ export function readingGoals(db: DB, userId: number, tz: number) {
 }
 
 /** Shared canonical completion calendar, including books with only uploaded stats. */
-export function readingYearSummary(db: DB, userId: number, tz: number) {
-  const today = new Date(Date.now() - tz * 60000).toISOString().slice(0, 10);
+export function readingYearSummary(db: DB, userId: number, tz: ActivityTimezone) {
+  const now = Date.now();
+  const today = new Date(now - activityOffset(tz, now / 1000) * 60000).toISOString().slice(0, 10);
   const year = Number(today.slice(0, 4));
   const aliases = new Set([...aliasesByDocument(db, userId).values()].flat());
   const counts = new Map<number, number>();
   const recent: { document: string; at: number }[] = [];
   for (const b of readingActivity(db, userId, tz, { includeStatsOnly: true }).books) {
     if (!b.finished_at || aliases.has(b.document)) continue;
-    const day = new Date((b.finished_at - tz * 60) * 1000).toISOString().slice(0, 10);
+    const day = new Date((b.finished_at - activityOffset(tz, b.finished_at) * 60) * 1000).toISOString().slice(0, 10);
     if (day > today) continue;
     const finishedYear = Number(day.slice(0, 4));
     counts.set(finishedYear, (counts.get(finishedYear) ?? 0) + 1);
