@@ -359,20 +359,20 @@ function MergePicker({ session, book, books, onDone, onClose }) {
   const q = norm(query)
   const shown = q ? others.filter((b) => [b.title, b.author, b.filename].some((v) => norm(v).includes(q))) : others
   if (selected) {
-    const what = selected.stats ? 'progress, clippings and reading stats' : 'progress and clippings'
     return (
-      <ActionSheet title={`Merge "${selected.book.title || selected.book.filename || 'Untitled book'}" into this book?`} actionLabel="Merge" pendingLabel="Merging…" onClose={() => setSelected(null)} onConfirm={async () => {
+      <ActionSheet title={`Merge with "${selected.book.title || selected.book.filename || 'Untitled book'}"?`} actionLabel="Merge" pendingLabel="Merging…" onClose={() => setSelected(null)} onConfirm={async () => {
         await api.merge(session, selected.book.document, book.document, selected.stats)
         onDone()
       }}>
-        Its {what} move here, and future syncs of it land here too.
+        <span className="block">The farthest-along reading position from either copy is kept. Clippings and service matches are combined.</span>
+        <span className="mt-2 block">{selected.stats ? 'Reading stats are combined too.' : 'Reading stats are not combined.'} Future syncs from either copy update this book.</span>
       </ActionSheet>
     )
   }
   return (
-    <Sheet title="Merge a duplicate into this book" onClose={onClose}>
+    <Sheet title="Merge duplicate books" onClose={onClose}>
       <p className="mt-2 text-sm/6 text-stone-500">
-        When two readers identify the same book differently, it shows up twice. Pick the copy to fold into this one.
+        Choose another copy of this book to merge. The farthest-along reading position is kept, whichever copy it comes from. Clippings and service matches are combined.
       </p>
       <label className="mt-3 flex items-center gap-2 text-sm text-stone-600">
         <input type="checkbox" checked={stats} onChange={(e) => setStats(e.target.checked)} className="size-4 accent-brand-500" />
