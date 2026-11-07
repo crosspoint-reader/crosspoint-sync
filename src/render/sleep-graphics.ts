@@ -5,7 +5,7 @@ import { PNG } from 'pngjs';
 type Point = { x: number; y: number };
 type Rotate = { cx: number; cy: number; angle: number };
 const fonts = new Map<string, Font>();
-function fontFor(weight: 'regular' | 'semibold'): Font {
+function fontFor(weight: 'regular' | 'semibold' | 'bold'): Font {
   if (!fonts.has(weight)) {
     const bytes = fs.readFileSync(new URL(`../../assets/fonts/sleep-journal/lora-${weight}.woff`, import.meta.url));
     fonts.set(weight, opentype.parse(new Uint8Array(bytes).buffer));
@@ -78,7 +78,7 @@ export class SleepGraphics {
       this.roundRect(x+border,y+border,width-2*border,height-2*border,Math.max(0,radius-border),gray);
     } else this.fill([points], gray);
   }
-  text(text: string, x: number, baseline: number, size: number, options: { weight?: 'regular' | 'semibold'; align?: 'left' | 'center' | 'right'; maxWidth?: number; tracking?: number; gray?: number; rotate?: Rotate } = {}) {
+  text(text: string, x: number, baseline: number, size: number, options: { weight?: 'regular' | 'semibold' | 'bold'; align?: 'left' | 'center' | 'right'; maxWidth?: number; tracking?: number; gray?: number; rotate?: Rotate } = {}) {
     const font = fontFor(options.weight ?? 'regular');
     const settings = { kerning: true, tracking: options.tracking ?? 0 };
     const measured = font.getAdvanceWidth(text, size, settings);

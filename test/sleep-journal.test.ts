@@ -41,6 +41,39 @@ describe('reading journal composition', () => {
     expect(reached.seal!.count).toBe('30 / 24');
   });
 
+  it('makes the headline and goal ring reflect the remaining books', () => {
+    const options = parseSleepOptions({});
+    const progress = journalLayout({ ...stats, finished: 4, target: 6 }, options);
+    expect(progress.headline).toBe('2 books to go.');
+    expect(progress.seal!.fraction).toBeCloseTo(2 / 3);
+    expect(progress.card.height).toBeLessThan(190);
+    expect(journalLayout({ ...stats, finished: 5, target: 6 }, options).headline).toBe('1 book to go.');
+    const exceeded = journalLayout({ ...stats, finished: 7, target: 6 }, options);
+    expect(exceeded.headline).toBe('You did it!');
+    expect(exceeded.seal!.fraction).toBe(1);
+    expect(journalLayout(stats, parseSleepOptions({ metrics: 'books,current' })).headline).toBe('Between chapters');
+    expect(journalLayout({ ...stats, target: null }, options).headline).toBe('Between chapters');
+  });
+
+  it('keeps a clear band of paper between goal text and the inner ring', () => {
+    const sample = { ...stats, finished: 4, target: 6 };
+    const options = parseSleepOptions({});
+    const { seal, scale } = journalLayout(sample, options);
+    const png = PNG.sync.read(renderSleepImage(sample, options).bytes);
+    const innerEdge = seal!.radius - 9.5 * scale;
+    let ink = 0;
+    for (let y = Math.floor(seal!.cy - seal!.radius); y <= seal!.cy + seal!.radius; y++) {
+      for (let x = Math.floor(seal!.cx - seal!.radius); x <= seal!.cx + seal!.radius; x++) {
+        const distance = Math.hypot(x + .5 - seal!.cx, y + .5 - seal!.cy);
+        if (distance >= innerEdge - 4 * scale && distance <= innerEdge - scale) {
+          const p = (y * png.width + x) * 4;
+          if (png.data[p+3] > 0 && png.data[p] < 170) ink++;
+        }
+      }
+    }
+    expect(ink).toBe(0);
+  });
+
   it('keeps cards and stamps in bounds at supported sizes and placements', () => {
     for (const [width, height] of [[240,320], [480,800], [1200,1600], [1200,240]]) {
       for (const mode of ['overlay','custom']) for (const placement of ['top','bottom']) {
