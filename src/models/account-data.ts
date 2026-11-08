@@ -4,6 +4,8 @@ import { isValidDocument } from '../routes/kosync.js';
 import { nextChangeSeq } from './changes.js';
 import { goalTarget, goalYear } from './reading-goals.js';
 import { cleanDisplayName } from '../routes/profile.js';
+import { seedStatsCounters } from './stats-counters.js';
+import { parseCounterId } from './stats.js';
 
 // Only portable reading data belongs here; never authentication, secrets, queues or caches.
 export const ACCOUNT_TABLES = [
@@ -11,6 +13,7 @@ export const ACCOUNT_TABLES = [
   'bookmarks', 'clippings', 'stats_device_global', 'stats_device_book',
   'stats_device_day', 'stats_device_book_day', 'reading_sessions',
   'reading_goals',
+  'stats_counter_snapshots', 'stats_counter_days',
 ] as const;
 const localColumns = new Set(['user_id', 'change_seq', 'server_change_seq', 'revision']);
 type Row = Record<string, string | number | null>;
@@ -42,7 +45,9 @@ export function importAccountData(db: DB, userId: number, input: unknown, replac
     return invalid('Not a supported CrossPoint Sync account export (version 1 required).');
   }
   // Optional in older version-1 archives. Replacement removes any old targets.
-  const data: Record<string, unknown> = { ...input.data, reading_goals: input.data.reading_goals === undefined ? [] : input.data.reading_goals };
+  const data: Record<string, unknown> = { ...input.data, reading_goals: input.data.reading_goals === undefined ? [] : input.data.reading_goals,
+    stats_counter_snapshots: input.data.stats_counter_snapshots === undefined ? [] : input.data.stats_counter_snapshots,
+    stats_counter_days: input.data.stats_counter_days === undefined ? [] : input.data.stats_counter_days };
   const { profile } = input;
   const days = profile.auto_pause_days;
   // Older archives have no display name; the destination keeps its own then.
@@ -73,8 +78,10 @@ export function importAccountData(db: DB, userId: number, input: unknown, replac
         }
       }
       for (const key of ['document', 'alias']) {
-        if (key in row && !isValidDocument(row[key])) return invalid(`Invalid ${table}.${key}.`);
+        const globalCounters = key === 'document' && row[key] === '' && (table === 'stats_counter_snapshots' || table === 'stats_counter_days');
+        if (key in row && !globalCounters && !isValidDocument(row[key])) return invalid(`Invalid ${table}.${key}.`);
       }
+      if ('counter_id' in row && parseCounterId(row.counter_id) === null) return invalid(`Invalid ${table}.counter_id.`);
       if ('percentage' in row && (Number(row.percentage) < 0 || Number(row.percentage) > 1)) return invalid(`Invalid percentage in ${table}.`);
       if (table === 'reading_goals' && (!goalYear(row.year) || !goalTarget(row.target))) return invalid('Invalid reading goal.');
       if ('seconds' in row && (Number(row.seconds) < 0 || Number(row.seconds) > 4294967295)) return invalid(`Invalid seconds in ${table}.`);
@@ -122,6 +129,7 @@ export function importAccountData(db: DB, userId: number, input: unknown, replac
     } catch {
       throw new AccountImportError('Archive contains duplicate records or invalid data. Nothing was imported.');
     }
+    seedStatsCounters(db, userId);
     const current = db.prepare('SELECT profile_slug FROM users WHERE id = ?').get(userId)!;
     db.prepare('UPDATE users SET auto_pause_days = ?, profile_slug = ? WHERE id = ?').run(
       days as number | null, profile.public_profile ? (current.profile_slug ?? crypto.randomBytes(9).toString('base64url')) : null, userId,

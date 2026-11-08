@@ -7,6 +7,13 @@
 
 export const HISTORY_BYTES = 92;
 export const HISTORY_DAYS = 730;
+export const LEGACY_COUNTER_ID = '00000000000000000000000000000000';
+
+/** Missing IDs stay in the legacy lifetime; never infer a reset from a stale upload. */
+export function parseCounterId(raw: unknown): string | null {
+  return raw === undefined ? LEGACY_COUNTER_ID
+    : typeof raw === 'string' && /^[0-9a-f]{32}$/.test(raw) ? raw : null;
+}
 
 export interface GlobalStatsSnapshot {
   v: number;
@@ -292,7 +299,7 @@ export function combineBookStats(snapshots: BookStatsSnapshot[]): BookStatsCombi
 }
 
 /** Local dates already include the reader's configured UTC offset. Never re-zone them. */
-export interface DailyReading { date: string; seconds: number }
+export interface DailyReading { date: string; seconds: number; counter_id?: string }
 
 export function parseDailyReading(raw: unknown): DailyReading[] | null {
   if (raw === undefined) return [];
@@ -301,14 +308,14 @@ export function parseDailyReading(raw: unknown): DailyReading[] | null {
   const out: DailyReading[] = [];
   for (const item of raw) {
     if (typeof item !== 'object' || item === null) return null;
-    const { date, seconds } = item as Record<string, unknown>;
+    const { date, seconds, counter_id } = item as Record<string, unknown>;
     if (typeof date !== 'string' || !/^20\d{2}-\d{2}-\d{2}$/.test(date) ||
         !Number.isSafeInteger(seconds) || (seconds as number) < 0 || (seconds as number) > 0xffffffff ||
-        dates.has(date)) return null;
+        dates.has(date) || parseCounterId(counter_id) === null) return null;
     const parsed = new Date(date + 'T00:00:00Z');
     if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) return null;
     dates.add(date);
-    out.push({ date, seconds: seconds as number });
+    out.push({ date, seconds: seconds as number, ...(counter_id === undefined ? {} : { counter_id: counter_id as string }) });
   }
   return out;
 }

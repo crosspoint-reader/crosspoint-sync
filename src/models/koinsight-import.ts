@@ -8,6 +8,7 @@ import { withTransaction, type DB } from '../db/db.js';
 import { AccountImportError } from './account-data.js';
 import { resolveDocument, statsDocuments } from './merge.js';
 import { combineBookStats, HISTORY_BYTES, HISTORY_DAYS, type BookStatsSnapshot } from './stats.js';
+import { seedStatsCounters } from './stats-counters.js';
 
 export const MAX_HISTORY_FILE = 50 * 1024 * 1024;
 const DEVICE = 'import:koinsight';
@@ -235,6 +236,12 @@ export function importHistory(db: DB, userId: number, prepared: ReturnType<typeo
       const day = db.prepare('INSERT INTO stats_device_day (user_id, device_id, date, seconds, updated_at) VALUES (?, ?, ?, ?, ?)');
       for (const d of daily) day.run(userId, DEVICE, d.date, d.seconds, now);
     }
+    // This explicit import reconciles edits/deletions, unlike firmware counters.
+    // Refresh its backing baseline along with the compatible per-device views.
+    for (const table of ['stats_counter_snapshots', 'stats_counter_days']) {
+      db.prepare(`DELETE FROM ${table} WHERE user_id = ? AND device_id = ?`).run(userId, DEVICE);
+    }
+    seedStatsCounters(db, userId, DEVICE);
   });
   return { books: prepared.length, imported_history: importedHistory, preserved_history: prepared.length - importedHistory };
 }

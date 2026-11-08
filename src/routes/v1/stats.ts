@@ -9,6 +9,7 @@ import {
   parseBookStats,
   parseGlobalStats,
   parseDailyReading,
+  parseCounterId,
   type BookStatsSnapshot,
   type DailyReading,
   type GlobalStatsSnapshot,
@@ -22,6 +23,7 @@ import { bookorbitExclusions, readBookorbitStats } from '../../models/bookorbit-
 import { parseReadingSession } from '../../models/reading-sessions.js';
 import { combineReadingStreak } from '../../models/reading-streak.js';
 import { importBookorbitStats } from '../../connectors/bookorbit-stats.js';
+import { seedStatsCounters, storeStatsDays, storeStatsSnapshot } from '../../models/stats-counters.js';
 
 const MAX_BOOK_BATCH = 20;
 // Books per GET /stats/activity/books request.
@@ -174,7 +176,8 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     return c.json({ until: now, accepted_session_ids: items.map((s: any) => s.session_id) });
   });
 
-  app.put('/stats/global', async (c) => {
+  // New firmware uses distinct write URLs so older servers cannot silently discard IDs.
+  app.on('PUT', ['/stats/global', '/stats/counters/global'], async (c) => {
     let body: unknown;
     try {
       body = await c.req.json();
@@ -184,34 +187,24 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     const o = (body ?? {}) as Record<string, unknown>;
     const deviceId = deviceIdFrom(o);
     const snapshot = parseGlobalStats(o);
+    const counterId = parseCounterId(o.counter_id);
     const daily = parseDailyReading(o.daily);
-    if (!deviceId || !snapshot || !daily) {
+    if (!deviceId || !snapshot || !daily || !counterId) {
       return kosyncError(c, 403, 2003, 'Invalid request');
     }
     const device = typeof o.device === 'string' ? o.device.slice(0, 128) : '';
     const user = c.get('user');
     const now = nowSeconds();
     withTransaction(db, () => {
-      db.prepare(
-        `INSERT INTO stats_device_global (user_id, device_id, device, payload, updated_at)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(user_id, device_id) DO UPDATE SET
-           device = excluded.device, payload = excluded.payload, updated_at = excluded.updated_at`
-      ).run(user.id, deviceId, device, JSON.stringify(snapshot), now);
-      const upsertDay = db.prepare(
-        `INSERT INTO stats_device_day (user_id, device_id, date, seconds, updated_at)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(user_id, device_id, date) DO UPDATE SET
-           seconds = MAX(stats_device_day.seconds, excluded.seconds),
-           updated_at = excluded.updated_at`
-      );
-      for (const day of daily) upsertDay.run(user.id, deviceId, day.date, day.seconds, now);
+      seedStatsCounters(db, user.id, deviceId, '');
+      storeStatsSnapshot(db, user.id, deviceId, '', counterId, snapshot, now, device, o.counter_id === undefined);
+      storeStatsDays(db, user.id, deviceId, '', daily, now);
     });
     // Explicit acknowledgment lets readers retain unsent counters when talking to old servers.
-    return c.json({ until: now, accepted_daily: daily.length });
+    return c.json({ until: now, accepted_daily: daily.length, counter_ids: 1 });
   });
 
-  app.put('/stats/books', async (c) => {
+  app.on('PUT', ['/stats/books', '/stats/counters/books'], async (c) => {
     let body: unknown;
     try {
       body = await c.req.json();
@@ -224,40 +217,29 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     if (!deviceId || !Array.isArray(items) || items.length === 0 || items.length > MAX_BOOK_BATCH) {
       return kosyncError(c, 403, 2003, 'Invalid request');
     }
-    const parsed: { document: string; snapshot: BookStatsSnapshot; daily: DailyReading[] }[] = [];
+    const parsed: { document: string; counterId: string; legacyUpload: boolean; snapshot: BookStatsSnapshot; daily: DailyReading[] }[] = [];
     for (const raw of items) {
+      if (typeof raw !== 'object' || raw === null) return kosyncError(c, 403, 2003, 'Invalid request');
       const item = raw as Record<string, unknown>;
       const snapshot = parseBookStats(item);
+      const counterId = parseCounterId(item.counter_id);
       // Optional: the book's seconds per local day, like the global upload's `daily`.
       const daily = parseDailyReading(item?.daily);
-      if (!isValidDocument(item.document) || !snapshot || !daily) {
+      if (!isValidDocument(item.document) || !snapshot || !daily || !counterId) {
         return kosyncError(c, 403, 2003, 'Invalid request');
       }
-      parsed.push({ document: item.document, snapshot, daily });
+      parsed.push({ document: item.document, counterId, legacyUpload: item.counter_id === undefined, snapshot, daily });
     }
     const user = c.get('user');
     const now = nowSeconds();
-    const upsert = db.prepare(
-      `INSERT INTO stats_device_book (user_id, device_id, document, payload, updated_at)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(user_id, device_id, document) DO UPDATE SET
-         payload = excluded.payload,
-         updated_at = excluded.updated_at`
-    );
-    const upsertDay = db.prepare(
-      `INSERT INTO stats_device_book_day (user_id, device_id, document, date, seconds, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(user_id, device_id, document, date) DO UPDATE SET
-         seconds = MAX(stats_device_book_day.seconds, excluded.seconds),
-         updated_at = excluded.updated_at`
-    );
     withTransaction(db, () => {
       for (const p of parsed) {
-        upsert.run(user.id, deviceId, p.document, JSON.stringify(p.snapshot), now);
-        for (const d of p.daily) upsertDay.run(user.id, deviceId, p.document, d.date, d.seconds, now);
+        seedStatsCounters(db, user.id, deviceId, p.document);
+        storeStatsSnapshot(db, user.id, deviceId, p.document, p.counterId, p.snapshot, now, '', p.legacyUpload);
+        storeStatsDays(db, user.id, deviceId, p.document, p.daily, now);
       }
     });
-    return c.json({ until: now, accepted: parsed.length, accepted_daily: parsed.reduce((n, p) => n + p.daily.length, 0) });
+    return c.json({ until: now, accepted: parsed.length, accepted_daily: parsed.reduce((n, p) => n + p.daily.length, 0), counter_ids: 1 });
   });
 
   // `device_id` keeps one device; `since` (an earlier answer's `until`) keeps only the days uploaded since.

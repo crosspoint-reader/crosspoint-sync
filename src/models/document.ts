@@ -14,6 +14,8 @@ const DOCUMENT_TABLES = [
   'connector_matches',
   'stats_device_book',
   'stats_device_book_day',
+  'stats_counter_snapshots',
+  'stats_counter_days',
   'clippings',
   'bookmarks',
   'progress_samples',
@@ -53,7 +55,7 @@ export function deleteDocumentData(db: DB, userId: number, document: string): nu
     }
     // Stats stay under the hash a device uploaded them with, so merged-in
     // copies still hold their own rows.
-    for (const table of ['stats_device_book', 'stats_device_book_day']) {
+    for (const table of ['stats_device_book', 'stats_device_book_day', 'stats_counter_snapshots', 'stats_counter_days']) {
       const aliasStats = db
         .prepare(
           `DELETE FROM ${table} WHERE user_id = ? AND document IN

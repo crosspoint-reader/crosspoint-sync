@@ -442,9 +442,43 @@ settings to sync clippings alongside the current book's manual progress sync.
 
 ### Reading stats
 
-Model (matches the firmware's nearby P2P stats sync): **each device uploads its own snapshot;
-snapshots replace, never accumulate; the server aggregates across devices on read.** Never merge
-another device's stats into local ones.
+Each device uploads only its own counters. The server preserves independently
+identified counter lifetimes and combines them into one per-reader view, then
+aggregates across readers. Repeated snapshots update a lifetime; they are never
+added as new reading. Never merge another device's or the server's combined
+totals into local upload counters.
+
+Reset-aware clients use `PUT /api/v1/stats/counters/global` and
+`PUT /api/v1/stats/counters/books`, with the same request shapes as the legacy
+URLs below. Each global snapshot and each book item carries `counter_id`, exactly
+32 lowercase hexadecimal digits. Each `daily` item independently carries its
+daily store's `counter_id`; resetting totals must not relabel unchanged daily
+history. Responses include `counter_ids: 1`, plus the existing acknowledgments.
+Clients must require that capability acknowledgment and never fall back to old
+write URLs when the new URLs are unavailable.
+
+Missing IDs on legacy URLs map to `00000000000000000000000000000000`.
+Existing firmware files adopt that identity on upgrade, avoiding double counting.
+Only a fresh set of counters gets a new ID. A reset archives previous lifetimes;
+new reading contributes immediately. Same-lifetime cumulative counters and time
+buckets cannot decrease, and history bitmaps are unioned at their correct anchors.
+Current completion/date/pace edits still apply; a snapshot with regressed reading
+counters cannot erase its previous metadata. Untagged legacy uploads always
+preserve prior completions and date history, including books marked finished
+without being opened and later uploads after a reset. They keep the highest
+global completion count, book completion flags, earliest start and latest finish.
+Editing that ambiguous metadata requires an explicit counter ID.
+Resetting local stats does not delete
+server history. Legacy firmware cannot distinguish resets from old retries, so
+smaller legacy counters preserve the prior totals until they catch up.
+
+Migration `0049_stats_counter_ids.sql` preserves existing totals as the legacy
+lifetime in `stats_counter_snapshots` and `stats_counter_days`. Existing device
+tables remain combined views maintained transactionally on upload, preserving GET
+response shapes, filters, activity and pagination. Account exports include the
+new records; older archives initialize legacy lifetimes on import. Explicit
+account/book deletion also removes the relevant lifetime records. Daily totals
+within one reader/date saturate at 4294967295 seconds, as before.
 
 BookOrbit reading sessions are imported separately for matched books already known to Sync,
 including their complete historical session lists. Existing links are picked up automatically;

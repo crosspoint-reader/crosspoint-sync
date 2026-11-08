@@ -3,19 +3,26 @@
 A firmware integration guide for shipping per-book and overall ("global") reading-stats sync
 against `https://sync.crosspointreader.com` (or any self-hosted crosspoint-sync instance).
 It maps CrossInk's existing structs (`BookReadingStats`, `GlobalReadingStats`) onto the wire
-format 1:1 — no on-device data-model changes are needed.
+format, including durable identities for independently resettable counters.
 
 Full endpoint reference: [docs/API.md](../API.md) (§ Reading stats).
 
 ## The model in one paragraph
 
-Stats sync works exactly like CrossInk's nearby (ESP-NOW) stats sync, just with a server in the
-middle. **Each device uploads its own snapshot; a re-upload replaces that device's previous
-snapshot; nothing is ever merged into another device's numbers.** The server keeps one row per
-`(user, device_id)` for global stats and one per `(user, device_id, document)` for book stats,
-and computes combined views on read. So the device-side logic is: serialize current stats →
-PUT → done. There is no diffing, no conflict handling, and re-sending the same snapshot twice
-is harmless.
+Each device uploads its own snapshots with a persistent `counter_id` for each
+counter set. Re-uploads update that set without duplicating it; a fresh card or
+local reset starts another set while keeping earlier cloud history. Existing
+pre-ID files adopt the zero legacy ID on upgrade. Never change the ID on a
+populated file or copy combined server totals into local upload counters.
+Global, book and daily stores have independent IDs because they reset separately.
+The server retains its one-row-per-device GET responses by combining these sets.
+
+Use `/api/v1/stats/counters/global` and `/api/v1/stats/counters/books` for writes.
+Send `counter_id` as 32 lowercase hex digits on the global snapshot, each book
+item and each daily item. Require `counter_ids: 1` in every acknowledgment.
+An older server's 404/405 must keep the upload pending; never fall back to a
+legacy write URL. Update the server first. See [Reading stats](../API.md#reading-stats)
+for field semantics and legacy safeguards.
 
 ## Prerequisites (all already in the firmware)
 
@@ -31,7 +38,7 @@ is harmless.
   or binary method per the device setting). Book stats and progress for the same book should use
   the same hash so a future UI can join them.
 
-## 1. Overall stats — PUT /api/v1/stats/global
+## 1. Overall stats — PUT /api/v1/stats/counters/global
 
 Send after a reading session ends (or from the sync menu). One small JSON object, ~500 bytes:
 
@@ -39,6 +46,7 @@ Send after a reading session ends (or from the sync menu). One small JSON object
 {
   "device_id": "crossink-a1b2c3d4e5f6",
   "device": "CrossInk",
+  "counter_id": "00000000000000000000000000000000",
   "v": 5,
   "sessions": 312,
   "seconds": 184300,
@@ -67,7 +75,7 @@ Field mapping from `GlobalReadingStats`:
 | `history_b64` | `readingHistoryBits[92]` | plain base64 of the raw 92 bytes; bit semantics unchanged (bit 0 = anchor day, bit N = anchor_day − N, LSB-first per byte) |
 | `streak` | `longestReadingStreak` | |
 
-Response: `200 {"until": 1752345678}`. Non-200 → treat like a kosync sync failure (show error,
+Response: `200 {"until": 1752345678, "counter_ids": 1, "accepted_daily": 0}`. Non-200 → treat like a kosync sync failure (show error,
 retry later); the server state is unchanged on validation failures (`403 {"code":2003,...}`).
 
 Sketch (ArduinoJson):
@@ -76,6 +84,9 @@ Sketch (ArduinoJson):
 JsonDocument doc; // ~1KB is plenty
 doc["device_id"] = deviceId;
 doc["device"]    = "CrossInk";
+char counterId[33];
+g.counterId.hex(counterId);
+doc["counter_id"] = counterId;
 doc["v"]         = 5;
 doc["sessions"]  = g.totalSessions;
 doc["seconds"]   = g.totalReadingSeconds;
@@ -88,10 +99,10 @@ for (auto s : g.dayOfWeekSeconds) dow.add(s);
 doc["anchor_day"]  = g.readingHistoryAnchorDay;
 doc["history_b64"] = base64Encode(g.readingHistoryBits.data(), 92);
 doc["streak"]      = g.longestReadingStreak;
-// PUT to <serverUrl>/api/v1/stats/global with the kosync auth headers
+// PUT to <serverUrl>/api/v1/stats/counters/global with the kosync auth headers
 ```
 
-## 2. Per-book stats — PUT /api/v1/stats/books
+## 2. Per-book stats — PUT /api/v1/stats/counters/books
 
 Batch endpoint: up to 20 books per request, one `device_id` per request. Syncing just the
 currently open book after each session is the simplest correct behavior; a "sync all" menu action
@@ -103,6 +114,7 @@ can page through every book with stats in chunks of 20.
   "items": [
     {
       "document": "25f8abb4f4f5594f02f361726814fea1",
+      "counter_id": "00000000000000000000000000000000",
       "v": 5,
       "sessions": 9,
       "seconds": 8400,
@@ -138,7 +150,7 @@ Field mapping from `BookReadingStats` (stats_v5):
 | `start_date` / `finished_date` | `startDate` / `finishedDate` | **convert to unix seconds** (midnight UTC of the stored date); send `0` for "not set" |
 | `tod` / `dow` | `timeOfDaySeconds` / `dayOfWeekSeconds` | same order as on device |
 
-Response: `200 {"until": ..., "accepted": <n>}`. All integers must be non-negative JSON numbers
+Response: `200 {"until": ..., "accepted": <n>, "counter_ids": 1}`. All integers must be non-negative JSON numbers
 and booleans real booleans — the server rejects the whole batch with 403/2003 if any item is
 malformed, so nothing partial is written.
 
@@ -195,7 +207,7 @@ Suggested triggers, mirroring the existing kosync UX:
 2. **Manual "Sync stats" menu item**: pages through all books with local stats in batches of 20.
 3. Never on a timer — WiFi is expensive on this hardware; piggyback on user-initiated syncs.
 
-Ordering doesn't matter and retries are safe (uploads are idempotent replacements). If the device
+Ordering doesn't matter and retries are safe (each counter set is idempotent). If the device
 was offline for a month, one sync catches everything up — snapshots carry totals, not deltas.
 
 ## 5. Related integrations worth pairing with stats

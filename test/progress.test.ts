@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DOC, makeTestApp, registerUser } from './helpers.js';
+import { LEGACY_COUNTER_ID } from '../src/models/stats.js';
 
 const POSITION = {
   pctQ: 486700,
@@ -14,7 +15,8 @@ const POSITION = {
 describe('CrossInk completion in the library', () => {
   const ALIAS = 'ffeeddccbbaa99887766554433221100';
   const stats = (completed: boolean, document = DOC) => ({
-    document, v: 5, sessions: 1, seconds: 600, pages: 10, completed,
+    // Updated firmware retains the legacy ID on adopted files and tags edits explicitly.
+    document, counter_id: LEGACY_COUNTER_ID, v: 5, sessions: 1, seconds: 600, pages: 10, completed,
     avg_fwd: 12, pace_n: 10, eta: 0, start_manual: false, finish_manual: false,
     start_date: 0, finished_date: 0, tod: [0, 0, 0, 0], dow: [0, 0, 0, 0, 0, 0, 0],
   });

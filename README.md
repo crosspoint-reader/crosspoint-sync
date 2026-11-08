@@ -287,12 +287,19 @@ Valid dates are 2000–2099; durations are integers from 0 through 4294967295.
 The response includes `accepted_daily`, including 0 for legacy payloads.
 
 Migration `0014_daily_reading.sql` adds `stats_device_day` without modifying old
-snapshots or generating historical days. Each `(user_id, device_id, date)` stores
-the maximum received counter. Repeats, stale requests, and missing dates in partial
+snapshots or generating historical days. Each counter identity stores its maximum received counter per date;
+the per-device view adds independent counter lifetimes. Repeats, stale requests, and missing dates in partial
 batches cannot add time twice or erase it. Devices must send only their own local
 counters with a stable ID; copying a device's history to another identity would
 count it twice. Concurrent reading on two devices counts each device's active
-time. Counters are monotonic history, independent of resettable global totals.
+time. Counters are monotonic history, independent of local global-total resets.
+Reset-aware CrossInk firmware assigns fresh counter IDs after a reset or card
+replacement, so new reading adds to previous cloud history. Repeated uploads
+cannot duplicate or decrease a counter set's history. Update the server before
+the firmware; newer firmware retains pending stats when an older server lacks
+the protected write endpoints. Older firmware's smaller totals are preserved
+at their previous values because a reset cannot be distinguished from a stale
+retry. See [the stats API](docs/API.md#reading-stats) for migration details.
 
 `GET /api/v1/stats/global` includes `stats.daily` for each device.
 `GET /api/v1/stats/summary` includes date-sorted `daily` rows with `date`, summed
