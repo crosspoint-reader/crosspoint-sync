@@ -21,6 +21,10 @@ import { readBookorbitStats } from './bookorbit-stats.js';
  *   since a book can be finished offline and only synced days later.
  * - Start and finish dates the user set by hand win over everything else.
  */
+/** Minutes west of UTC, fixed for legacy APIs or resolved per Unix timestamp (seconds). */
+export type ActivityTimezone = number | ((at: number) => number);
+export const activityOffset = (timezone: ActivityTimezone, at: number) => typeof timezone === 'number' ? timezone : timezone(at);
+
 export const FINISHED_AT = 0.98;
 
 export interface LogRow {
@@ -84,13 +88,13 @@ export interface DayBook {
 export function computeActivity(
   rows: LogRow[],
   docs: Map<string, DocInfo>,
-  tzOffsetMinutes = 0,
+  tzOffsetMinutes: ActivityTimezone = 0,
   finishedDates: Map<string, number> = new Map(),
   startDates: Map<string, number> = new Map()
 ): Activity {
   // Device dates are calendar dates: pin them to local noon in the client
   // timezone so they land on that same day however they're displayed.
-  const localNoon = (date: number | undefined) => (date ? date + 12 * 3600 + tzOffsetMinutes * 60 : null);
+  const localNoon = (date: number | undefined) => (date ? date + 12 * 3600 + activityOffset(tzOffsetMinutes, date + 12 * 3600) * 60 : null);
   const byDoc = new Map<string, LogRow[]>();
   for (const r of rows) {
     const list = byDoc.get(r.document) ?? [];
@@ -109,7 +113,7 @@ export function computeActivity(
   const readingDays = new Set<string>();
   const days = new Map<string, { pages: number; syncs: number; books: Map<string, DayBook> }>();
   // The day bucket for a sync, and this book's entry in it (opened at position `from`).
-  const dayKey = (at: number) => new Date((at - tzOffsetMinutes * 60) * 1000).toISOString().slice(0, 10);
+  const dayKey = (at: number) => new Date((at - activityOffset(tzOffsetMinutes, at) * 60) * 1000).toISOString().slice(0, 10);
   const dayOf = (at: number, document: string, from: number) => {
     const key = dayKey(at);
     readingDays.add(key);
@@ -223,7 +227,7 @@ export function computeActivity(
 
 /** A user's activity from the database: progress history, plus finish and start
  *  dates from device stats and reading days from a BookOrbit import. */
-export function readingActivity(db: DB, userId: number, tz: number, options: { includeStatsOnly?: boolean } = {}): Activity {
+export function readingActivity(db: DB, userId: number, tz: ActivityTimezone, options: { includeStatsOnly?: boolean } = {}): Activity {
   const rows = db
     .prepare('SELECT document, percentage, at FROM progress_log WHERE user_id = ?')
     .all(userId) as unknown as LogRow[];

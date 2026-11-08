@@ -1,0 +1,4 @@
+CREATE TABLE sleep_backgrounds (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  png BLOB NOT NULL
+);
