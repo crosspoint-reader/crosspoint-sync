@@ -29,3 +29,21 @@ let importedPage = Data(#"{"items":[{"document":"goodreads.101","title":"Importe
 let page = try JSONDecoder().decode(WidgetBooksPage.self, from: importedPage)
 check(page.items.first?.document == "goodreads.101" && page.items.first?.percentage == nil && page.next == "100:next", "history-only books decode with nullable progress and paging")
 print("Widget metrics: 11 checks passed")
+
+// A provider refresh must notice a cover-only app publication, even with identical JSON.
+let snapshotDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+try FileManager.default.createDirectory(at: snapshotDir, withIntermediateDirectories: true)
+defer { try? FileManager.default.removeItem(at: snapshotDir) }
+let jsonFile = snapshotDir.appendingPathComponent("widget.json")
+let coverFile = snapshotDir.appendingPathComponent("cover.png")
+try legacy.write(to: jsonFile)
+let missingCover = WidgetSnapshot.read(in: snapshotDir)!
+check(missingCover.cover == nil, "refresh starts without a cover")
+try Data("restored by app".utf8).write(to: coverFile)
+let recoveredCover = WidgetSnapshot.read(in: snapshotDir)!
+check(recoveredCover.json == missingCover.json, "app publishes identical JSON")
+check(recoveredCover != missingCover, "cover-only publication supersedes failed provider download")
+check(WidgetSnapshot.read(in: snapshotDir) == recoveredCover, "unchanged bytes permit refresh")
+try Data("corrected by app".utf8).write(to: coverFile)
+check(WidgetSnapshot.read(in: snapshotDir) != recoveredCover, "replacement cover supersedes provider download")
+print("Widget snapshot: 5 checks passed")

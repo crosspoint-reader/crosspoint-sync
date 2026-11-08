@@ -83,8 +83,11 @@ pub fn update_shortcuts(app: tauri::AppHandle, json: Option<String>) -> Result<(
 // Kept independent of the iOS filesystem so identity boundaries are testable.
 #[cfg(any(target_os = "ios", test))]
 fn matching_cover(incoming: &serde_json::Value, previous: &serde_json::Value) -> bool {
-  ["session", "book_document", "cover_url"].iter().all(|key|
-    !incoming[*key].is_null() && incoming[*key] == previous[*key])
+  // Credentials can rotate without changing the account that owns the image.
+  ["server", "username"].iter().all(|key|
+    incoming["session"][*key].is_string() && incoming["session"][*key] == previous["session"][*key]) &&
+    ["book_document", "cover_url"].iter().all(|key|
+      !incoming[*key].is_null() && incoming[*key] == previous[*key])
 }
 
 #[cfg(test)]
@@ -99,6 +102,8 @@ mod cover_tests {
     let mut updated = saved.clone();
     updated["percent"] = json!(50);
     assert!(matching_cover(&updated, &saved));
+    updated["session"]["key"] = json!("rotated-secret");
+    assert!(matching_cover(&updated, &saved), "password rotation keeps the same cover");
     for (key, value) in [("book_document", json!("book-b")), ("cover_url", json!("https://covers.test/fixed.jpg")),
       ("session", json!({"server": "https://sync.test", "username": "other", "key": "secret"})),
       ("session", json!({"server": "https://other.test", "username": "reader", "key": "secret"}))] {

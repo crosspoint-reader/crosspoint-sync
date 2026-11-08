@@ -91,7 +91,7 @@ open class ReadingWidget : AppWidgetProvider() {
         val session = incoming.optJSONObject("session")
         val oldSession = previous?.optJSONObject("session")
         val sameCover = previous != null && session != null && oldSession != null &&
-          listOf("server", "username", "key").all { session.optString(it) == oldSession.optString(it) } &&
+          listOf("server", "username").all { !session.isNull(it) && session.optString(it) == oldSession.optString(it) } &&
           listOf("book_document", "cover_url").all { !incoming.isNull(it) && incoming.optString(it) == previous.optString(it) }
         if (coverBase64.isNotEmpty()) file.writeBytes(Base64.decode(coverBase64, Base64.DEFAULT))
         else if (!sameCover) file.delete()
@@ -114,10 +114,13 @@ open class ReadingWidget : AppWidgetProvider() {
     }
     private fun fetch(context: Context): Boolean {
       val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-      val original = synchronized(lock) { prefs.getString("data", null) } ?: return false
-      var data = JSONObject(original)
+      val original = synchronized(lock) {
+        val json = prefs.getString("data", null) ?: return false
+        json to runCatching { File(context.filesDir, COVER).readBytes() }.getOrNull()
+      }
+      var data = JSONObject(original.first)
       val session = data.optJSONObject("session") ?: return false
-      val hasCover = synchronized(lock) { File(context.filesDir, COVER).exists() }
+      val hasCover = original.second != null
       var changedCover = false
       var cover: ByteArray? = null
       try {
@@ -168,7 +171,9 @@ open class ReadingWidget : AppWidgetProvider() {
         changedCover = true
       }
       synchronized(lock) {
-        if (prefs.getString("data", null) != original) return false
+        // Cover-only app publications also supersede this network refresh.
+        val currentCover = runCatching { File(context.filesDir, COVER).readBytes() }.getOrNull()
+        if (prefs.getString("data", null) != original.first || !java.util.Arrays.equals(currentCover, original.second)) return false
         if (changedCover) {
           val file = File(context.filesDir, COVER)
           if (cover == null) file.delete() else file.writeBytes(cover!!)

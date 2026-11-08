@@ -92,10 +92,10 @@ struct Provider: TimelineProvider {
     return try? JSONDecoder().decode(T.self, from: body)
   }
   private func refresh() async {
-    guard let original = locked({ try? Data(contentsOf: $0.appendingPathComponent("widget.json")) }) ?? nil,
-      var data = try? JSONDecoder().decode(ReadingData.self, from: original), let session = data.session else { return }
+    guard let original = locked({ WidgetSnapshot.read(in: $0) }) ?? nil,
+      var data = try? JSONDecoder().decode(ReadingData.self, from: original.json), let session = data.session else { return }
     let tz = -TimeZone.current.secondsFromGMT() / 60
-    let hasCover = locked { FileManager.default.fileExists(atPath: $0.appendingPathComponent("cover.png").path) } ?? false
+    let hasCover = original.cover != nil
     var newCover: Data?
     var coverChanged = false
     do {
@@ -146,8 +146,8 @@ struct Provider: TimelineProvider {
     }
     locked { dir in
       let file = dir.appendingPathComponent("widget.json")
-      // App changes, goal edits and logout all supersede this refresh.
-      guard (try? Data(contentsOf: file)) == original else { return }
+      // Include image bytes: the app can restore a cover with identical JSON.
+      guard WidgetSnapshot.read(in: dir) == original else { return }
       if coverChanged {
         let cover = dir.appendingPathComponent("cover.png")
         if let newCover { try? newCover.write(to: cover, options: .atomic) }
