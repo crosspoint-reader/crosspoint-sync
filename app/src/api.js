@@ -641,6 +641,11 @@ export const api = {
   setSpotifyAnchor: (s, doc, track, positionMs) =>
     call(s, `/api/v1/connectors/spotify/anchor/${doc}`, { method: 'PUT', body: JSON.stringify({ track, position_ms: positionMs }) }),
   clearSpotifyAnchor: (s, doc) => call(s, `/api/v1/connectors/spotify/anchor/${doc}`, { method: 'DELETE' }),
+  // Audiobookshelf calibration: the item's chapters + listening position, and the anchor.
+  absTracks: (s, doc) => call(s, `/api/v1/connectors/audiobookshelf/tracks/${doc}`),
+  setAbsAnchor: (s, doc, track, positionMs) =>
+    call(s, `/api/v1/connectors/audiobookshelf/anchor/${doc}`, { method: 'PUT', body: JSON.stringify({ track, position_ms: positionMs }) }),
+  clearAbsAnchor: (s, doc) => call(s, `/api/v1/connectors/audiobookshelf/anchor/${doc}`, { method: 'DELETE' }),
   // pick: a search/candidate row, or null for "don't sync this book".
   setMatch: (s, id, doc, pick) =>
     call(s, `/api/v1/connectors/${id}/matches/${doc}`, {

@@ -1,6 +1,8 @@
 import { ConnectorOperationError } from './types.js';
 import { cachedEpub, epubPosition, epubXPath, withEpubMap, type TextEpub } from './bookfusion-epub.js';
 import { decideMatch, extractTitleAuthor, type Candidate } from './matching.js';
+import { audioToText, textToAudio } from './spotify.js';
+import { getMatchAnchor } from './store.js';
 import type {
   Connector,
   ConnectorContext,
@@ -172,13 +174,44 @@ async function search(cred: Credential, query: string, http: HttpTransport): Pro
 /** Fetch an item's audiobook duration in seconds (null if unknown). */
 async function fetchDuration(http: HttpTransport, c: AbsCred, externalId: string): Promise<number | null> {
   const r = await absGet(http, c, `/api/items/${encodeURIComponent(externalId)}?expanded=1`);
-  const media = r.body?.media;
+  return fetchDurationFrom(r.body?.media);
+}
+
+/** An item's duration from its media: media.duration, else the audio files summed. */
+function fetchDurationFrom(media: any): number | null {
   const d = media?.duration;
   if (typeof d === 'number' && d > 0) return d;
   // Fall back to summing the audio files (older ABS items omit media.duration).
   const files = Array.isArray(media?.audioFiles) ? media.audioFiles : [];
   const sum = files.reduce((acc: number, f: any) => acc + (typeof f?.duration === 'number' ? f.duration : 0), 0);
   return sum > 0 ? sum : null;
+}
+
+/**
+ * The item's chapters with where each starts (ms), for the calibration picker,
+ * plus the listening position. A chapterless item is one "track" spanning the book.
+ */
+export async function absTracks(cred: Credential, externalId: string, http: HttpTransport) {
+  const c = parseCred(cred);
+  if (!c) throw new ConnectorOperationError('bad credential', false, true);
+  const [item, prog] = await Promise.all([
+    absGet(http, c, `/api/items/${encodeURIComponent(externalId)}?expanded=1`),
+    absGet(http, c, `/api/me/progress/${encodeURIComponent(externalId)}`),
+  ]);
+  if (item.status === 401 || item.status === 403) throw new ConnectorOperationError('unauthorized', false, true);
+  if (item.status < 200 || item.status >= 300) throw new ConnectorOperationError(`Audiobookshelf item request failed (${item.status})`, item.status >= 500);
+  const total_ms = Math.round((fetchDurationFrom(item.body?.media) ?? 0) * 1000);
+  const chapters = Array.isArray(item.body?.media?.chapters) ? item.body.media.chapters : [];
+  const tracks = chapters.length
+    ? chapters.map((ch: any, index: number) => ({
+        index, name: String(ch?.title ?? `Chapter ${index + 1}`),
+        start_ms: Math.round((Number(ch?.start) || 0) * 1000),
+        duration_ms: Math.max(0, Math.round(((Number(ch?.end) || 0) - (Number(ch?.start) || 0)) * 1000)),
+      }))
+    : [{ index: 0, name: 'Whole book', start_ms: 0, duration_ms: total_ms }];
+  const p = prog.body;
+  const position_ms = typeof p?.currentTime === 'number' ? Math.round(p.currentTime * 1000) : null;
+  return { tracks, total_ms, position_ms, finished: !!p?.isFinished, listened_pct: total_ms && position_ms != null ? position_ms / total_ms : null };
 }
 
 /** Resolve the audiobook duration (seconds): cached on the match, else fetch. */
@@ -256,7 +289,7 @@ async function resolveCfi(
  * percentage.
  */
 async function pullProgress(
-  cred: Credential, m: Match, http: HttpTransport, sinceMs: number
+  cred: Credential, m: Match, http: HttpTransport, sinceMs: number, ctx?: ConnectorContext
 ): Promise<InboundChange | null> {
   const c = parseCred(cred);
   if (!c) return null;
@@ -272,6 +305,8 @@ async function pullProgress(
   if (!pct && hasAudio && typeof p.currentTime === 'number') {
     pct = p.currentTime / p.duration;
   }
+  // "Not the right spot?" calibration: listening % -> reading %.
+  if (hasAudio && ctx) pct = audioToText(pct, getMatchAnchor(ctx.db, ctx.userId, 'audiobookshelf', m.externalId));
   // Ebook-only items are read in ABS's own reader, which records its position
   // as ebookProgress + an ebookLocation CFI rather than `progress`. Items with
   // audio keep the listening position (that is the audiobook<->ebook sync).
@@ -314,11 +349,13 @@ async function push(
   // displayed progress if isFinished is absent or true. So we send isFinished
   // ONLY when finishing; otherwise we omit it and let progress/currentTime land.
   const duration = await resolveDuration(http, c, m);
-  const payload: Record<string, unknown> = { progress: finished ? 1 : pct };
+  // The listening side goes through the calibration; ebookProgress below stays the reading %.
+  const audio = ctx ? textToAudio(pct, getMatchAnchor(ctx.db, ctx.userId, 'audiobookshelf', m.externalId)) : pct;
+  const payload: Record<string, unknown> = { progress: finished ? 1 : audio };
   if (finished) payload.isFinished = true;
   if (duration) {
     payload.duration = duration;
-    payload.currentTime = Math.max(0, Math.min(duration, pct * duration));
+    payload.currentTime = Math.max(0, Math.min(duration, audio * duration));
   }
 
   // The ebook side of the same progress record. ABS's reader shows ebookProgress

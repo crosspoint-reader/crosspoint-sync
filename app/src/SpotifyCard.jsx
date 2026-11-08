@@ -20,11 +20,19 @@ export function parseClock(text) {
   return parts.reduce((t, n) => t * 60 + n, 0) * 1000
 }
 
-// "Not the right spot?": line Spotify up with the reader. Pick the track (and time)
+// "Not the right spot?": line an audiobook up with the reader. Pick the track (and time)
 // that matches where the reader is now; the server maps both directions through it.
-function Calibrate({ session, book, data, onDone }) {
-  const [tracks] = useLoad(() => api.spotifyTracks(session, book.document), [book.document])
-  const [track, setTrack] = useState(data.target?.chapterIndex ?? data.position.chapterIndex)
+// `service` is the connector's calls: { name, tracks, save, clear } (Spotify's by default).
+const spotify = {
+  name: 'Spotify',
+  tracks: (session, doc) => api.spotifyTracks(session, doc),
+  save: (session, doc, track, ms) => api.setSpotifyAnchor(session, doc, track, ms),
+  clear: (session, doc) => api.clearSpotifyAnchor(session, doc),
+}
+
+export function Calibrate({ session, book, data, onDone, service = spotify, track: initial }) {
+  const [tracks] = useLoad(() => service.tracks(session, book.document), [book.document])
+  const [track, setTrack] = useState(initial ?? data.target?.chapterIndex ?? data.position.chapterIndex)
   const [time, setTime] = useState('')
   const [busy, setBusy] = useState(false)
   async function run(fn, title) {
@@ -34,7 +42,7 @@ function Calibrate({ session, book, data, onDone }) {
       notify({ title })
       onDone()
     } catch (e) {
-      notify({ error: true, title: "Spotify: that didn't work", detail: e.message })
+      notify({ error: true, title: `${service.name}: that didn't work`, detail: e.message })
       setBusy(false)
     }
   }
@@ -42,7 +50,7 @@ function Calibrate({ session, book, data, onDone }) {
     e.preventDefault()
     const ms = parseClock(time)
     if (ms == null) return notify({ error: true, title: 'Use a time like 3:01' })
-    run(() => api.setSpotifyAnchor(session, book.document, Number(track), ms), 'Spotify lined up with your reader')
+    run(() => service.save(session, book.document, Number(track), ms), `${service.name} lined up with your reader`)
   }
   const field = 'h-11 rounded-xl bg-surface px-3 text-sm text-stone-900 ring-1 ring-stone-950/10 outline-none focus:ring-2 focus:ring-brand-500/60'
   return (
@@ -54,7 +62,7 @@ function Calibrate({ session, book, data, onDone }) {
         <Loader2 className="mx-auto my-2 size-4 animate-spin text-stone-400" />
       ) : (
         <div className="flex gap-2">
-          <select aria-label="Spotify track" value={track} onChange={(e) => setTrack(e.target.value)} className={`${field} min-w-0 flex-1`}>
+          <select aria-label={`${service.name} track`} value={track} onChange={(e) => setTrack(e.target.value)} className={`${field} min-w-0 flex-1`}>
             {tracks.tracks.map((t) => (
               <option key={t.index} value={t.index}>
                 {t.name} ({clock(t.start_ms)})
@@ -69,7 +77,7 @@ function Calibrate({ session, book, data, onDone }) {
           {busy ? <Loader2 className="size-4 animate-spin" /> : 'Save'}
         </button>
         {data.anchor && (
-          <button type="button" disabled={busy} onClick={() => run(() => api.clearSpotifyAnchor(session, book.document), 'Spotify back to automatic')} className="h-10 rounded-xl px-4 text-sm font-semibold text-stone-600 active:bg-stone-200">
+          <button type="button" disabled={busy} onClick={() => run(() => service.clear(session, book.document), `${service.name} back to automatic`)} className="h-10 rounded-xl px-4 text-sm font-semibold text-stone-600 active:bg-stone-200">
             Reset
           </button>
         )}

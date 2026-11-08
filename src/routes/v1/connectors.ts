@@ -8,6 +8,7 @@ import { purgeConnector, queueDepth, queueErrors } from '../../connectors/queue.
 import { backfillConnector } from '../../connectors/fanout.js';
 import { pollConnector, jellyfinFirstSync, spotifyFirstSync } from '../../connectors/fanin.js';
 import { resolveMatch } from '../../connectors/runner.js';
+import { absTracks } from '../../connectors/audiobookshelf.js';
 import { CLIENT_ID_RE, CLIENT_ID_REJECTED, playWhenDeviceAppears, spotifyPlan, spotifyResume, spotifyTracks } from '../../connectors/spotify.js';
 import {
   backfillDocumentMeta,
@@ -790,6 +791,69 @@ export function connectorRoutes(
     const b = await spotifyBook(c);
     if (b.error) return b.error;
     setMatchAnchor(db, b.user.id, 'spotify', b.document, null);
+    return c.json({ anchor: null });
+  });
+
+  // Audiobookshelf's "Not the right spot?": the same calibration as Spotify, picked
+  // from the item's chapters. Matching stays with the background pull (refresh.ts).
+  function absBook(c: Context<AppEnv>) {
+    const document = c.req.param('document') ?? '';
+    if (!isValidDocument(document)) return { error: kosyncError(c, 403, 2004, "Field 'document' not provided.") };
+    const user = c.get('user');
+    const account = getAccount(db, user.id, 'audiobookshelf');
+    if (!account) return { error: c.json({ code: 2003, message: 'Audiobookshelf not linked' }, 400) };
+    const externalId = getMatch(db, user.id, 'audiobookshelf', document)?.external_id ?? null;
+    return {
+      user, document, cred: decryptCredential(account, db), externalId,
+      readerPct: latestPercentage(db, user.id, document),
+      anchor: externalId ? getMatchAnchor(db, user.id, 'audiobookshelf', externalId) : null,
+    };
+  }
+
+  function absFailed(c: Context<AppEnv>, userId: number, err: unknown) {
+    if (err instanceof ConnectorOperationError && err.needsReauth) setAccountStatus(db, userId, 'audiobookshelf', 'needs_reauth', err.message);
+    return c.json({ code: 2003, message: err instanceof Error ? err.message : 'Audiobookshelf failed' }, 502);
+  }
+
+  app.get('/connectors/audiobookshelf/tracks/:document', async (c) => {
+    const b = absBook(c);
+    if (b.error) return b.error;
+    if (!b.externalId) return c.json({ matched: false });
+    try {
+      return c.json({ matched: true, ...(await absTracks(b.cred, b.externalId, transport)), reader_pct: b.readerPct, anchor: b.anchor });
+    } catch (err) {
+      return absFailed(c, b.user.id, err);
+    }
+  });
+
+  app.put('/connectors/audiobookshelf/anchor/:document', async (c) => {
+    const b = absBook(c);
+    if (b.error) return b.error;
+    if (!b.externalId) return c.json({ code: 2003, message: 'Book is not matched on Audiobookshelf' }, 404);
+    if (b.readerPct == null || !(b.readerPct > 0 && b.readerPct < 1)) {
+      return c.json({ code: 2003, message: 'Sync your reader from somewhere inside the book first' }, 400);
+    }
+    const body = (await c.req.json().catch(() => null)) as { track?: unknown; position_ms?: unknown } | null;
+    const index = Number(body?.track);
+    const offset = Math.max(0, Number(body?.position_ms ?? 0) || 0);
+    try {
+      const { tracks, total_ms } = await absTracks(b.cred, b.externalId, transport);
+      const t = tracks[index];
+      if (!Number.isInteger(index) || !t || !total_ms) return kosyncError(c, 403, 2003, 'Invalid request');
+      const audio = (t.start_ms + Math.min(offset, t.duration_ms)) / total_ms;
+      if (!(audio > 0 && audio < 1)) return c.json({ code: 2003, message: 'Pick a spot inside the book, not its very start or end' }, 400);
+      const anchor = { text: b.readerPct, audio };
+      setMatchAnchor(db, b.user.id, 'audiobookshelf', b.document, anchor);
+      return c.json({ anchor });
+    } catch (err) {
+      return absFailed(c, b.user.id, err);
+    }
+  });
+
+  app.delete('/connectors/audiobookshelf/anchor/:document', (c) => {
+    const b = absBook(c);
+    if (b.error) return b.error;
+    setMatchAnchor(db, b.user.id, 'audiobookshelf', b.document, null);
     return c.json({ anchor: null });
   });
 

@@ -6,6 +6,7 @@ import { isPace, moodEmoji } from './moods.js'
 import ShareSheet from './ShareSheet.jsx'
 import { useNativeBack, useNativeButton } from './tabbar.js'
 import SpotifyCard from './SpotifyCard.jsx'
+import AbsCard from './AbsCard.jsx'
 import { Picker } from './Settings.jsx'
 import { STATUS, ActionSheet, Card, Cover, EmptyState, ErrorNote, ProgressBar, ShareIcon, Sheet, Spinner, ViaHardcover, ago, duration, notify, pct, useLoad } from './ui.jsx'
 
@@ -992,11 +993,12 @@ export default function Book({ session, book, books, activity, back = { href: '#
             </div>
           </div>
           <About session={session} book={book} revision={revision} />
-          {/* Cards two-up in a grid, so the rest reflow when one (Spotify) drops out. */}
+          {/* Cards two-up in a grid, so the rest reflow when one (Spotify, ABS) drops out. */}
           <div className="md:mt-4 md:grid md:grid-cols-2 md:items-start md:gap-4 md:[&>*]:mt-0">
             <Details book={book} />
             {!wide && <Stats session={session} doc={book.document} aliases={book.aliases} activity={activity} revision={revision} />}
             <SpotifyCard session={session} book={book} onChange={onChange} revision={revision} />
+            <AbsCard session={session} book={book} revision={revision} />
             <Services key={book.document} session={session} book={book} onSync={synced} />
           </div>
         </div>

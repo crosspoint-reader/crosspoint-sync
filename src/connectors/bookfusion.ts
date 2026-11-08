@@ -10,6 +10,7 @@ import type {
   DeviceLinkPoll,
   DeviceLinkStart,
   DocumentMeta,
+  ExternalBook,
   HttpTransport,
   InboundChange,
   Match,
@@ -84,25 +85,32 @@ async function match(
 ): Promise<Match | null> {
   const ta = extractTitleAuthor(doc);
   if (!ta) return null;
-  const token = tokenOf(cred);
-  const q = `${ta.title} ${ta.author}`.trim();
-  const res = await http(`${BASE}/api/user/books/search`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: JSON.stringify({ query: q, per_page: 10 }),
-  });
-  if (res.status < 200 || res.status >= 300) return null;
-  let body: any;
-  try {
-    body = await res.json();
-  } catch {
-    return null;
-  }
-  const hits = extractBooks(body);
+  // Search on the title alone, like Audiobookshelf; the author only scores the hits.
+  const q = ta.title.trim();
+  const hits = await searchBooks(tokenOf(cred), q, http);
   if (hits.length === 0) return null;
   const decision = decideMatch(ta.title, ta.author, hits);
   if (!decision.accepted || !decision.best) return null;
   return { externalId: decision.best.externalId, confidence: decision.best.score, queryUsed: q };
+}
+
+async function searchBooks(token: string, query: string, http: HttpTransport): Promise<Candidate[]> {
+  const res = await http(`${BASE}/api/user/books/search`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({ query, per_page: 10 }),
+  });
+  if (res.status < 200 || res.status >= 300) return [];
+  try {
+    return extractBooks(await res.json());
+  } catch {
+    return [];
+  }
+}
+
+/** Search the user's BookFusion library (for the manual-match picker). */
+async function search(cred: Credential, query: string, http: HttpTransport): Promise<ExternalBook[]> {
+  return (await searchBooks(tokenOf(cred), query, http)).map((b) => ({ ...b, author: b.author ?? null }));
 }
 
 export function extractBooks(body: any): Candidate[] {
@@ -270,6 +278,7 @@ export const bookfusionConnector: Connector = {
   beta: false,
   validate,
   match,
+  search,
   push,
   pullProgress,
   beginLink,
