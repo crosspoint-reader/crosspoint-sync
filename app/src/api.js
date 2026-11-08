@@ -115,7 +115,7 @@ function clearOffline(session) {
 async function call(session, path, init = {}, keepOffline = true, { offlineFallback = true, timestampSaved = false, store = true, cachePath = path } = {}) {
   const version = sessionVersion
   const reading = readingVersion
-  const readingGet = (!init.method || init.method === 'GET') && /^\/api\/v1\/(clippings|progress)([/?]|$)/.test(path)
+  const readingGet = (!init.method || init.method === 'GET') && (/^\/api\/v1\/(clippings|progress)([/?]|$)/.test(path) || /^\/api\/v1\/documents\/[^/]+\/cover$/.test(path))
   const key = `${OFFLINE}${session.username}@${session.server}${cachePath}`
   const isGet = keepOffline && (!init.method || init.method === 'GET')
   let res
@@ -298,6 +298,8 @@ function invalidateClippingCaches(s, documents) {
 const PROGRESS = '/api/v1/progress?limit=500'
 
 function patchCachedBook(session, document, field, result) {
+  // A title/author correction or explicit cover clear also invalidates lookups.
+  if (field === 'info') localStorage.removeItem(`${OFFLINE}${session.username}@${session.server}/api/v1/documents/${document}/cover`)
   const key = `${OFFLINE}${session.username}@${session.server}${PROGRESS}`
   const progress = read(key)
   if (!progress?.items.some((b) => b.document === document)) return
@@ -329,6 +331,7 @@ function patchCachedBook(session, document, field, result) {
 }
 
 function removeCachedBook(session, document) {
+  localStorage.removeItem(`${OFFLINE}${session.username}@${session.server}/api/v1/documents/${document}/cover`)
   const prefix = `${OFFLINE}${session.username}@${session.server}`
   const key = `${prefix}${PROGRESS}`
   const progress = read(key)
@@ -539,6 +542,7 @@ async function changeReadingGoal(s, year, init) {
 }
 
 export const cached = {
+  cover: (s, doc) => saved(s, `/api/v1/documents/${doc}/cover`)?.url ?? null,
   readingGoals: (s) => saved(s, GOALS_CACHE) ?? saved(s, goalsPath()),
   books: (s) => {
     const r = saved(s, PROGRESS)

@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { BookOpen, CircleAlert, CircleCheck, CircleX, Pause, Share, Share2, X } from 'lucide-react'
 import { api, isApp } from './api.js'
+import { coverBlob } from './coverCache.js'
 import { useSheet } from './tabbar.js'
 
 // Pins the page while any sheet is open: focusing a field in a sheet would otherwise scroll the page behind it.
@@ -213,6 +214,12 @@ export function Cover({ session, book, small = false, tiny = false, className = 
     }
   }, [session, book.document, book.cover_url, book.title, near])
   const url = book.cover_url || (looked?.document === book.document ? looked.url : null)
+
+  // Populate the shared cache only for visible native-app covers. The widget
+  // can then use these bytes even though it downloads through a different client.
+  useEffect(() => {
+    if (isApp && near && url) coverBlob(url).catch(() => {})
+  }, [near, url])
 
   const frame = `relative aspect-[2/3] shrink-0 overflow-hidden rounded-md shadow-sm ring-1 ring-stone-950/10 ${className}`
   if (url && url !== broken) {

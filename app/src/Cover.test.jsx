@@ -2,7 +2,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 
-vi.mock('./api.js', () => ({ isApp: false, api: { cover: vi.fn() } }))
+vi.mock('./api.js', () => ({ isApp: true, api: { cover: vi.fn() } }))
+vi.mock('./coverCache.js', () => ({ coverBlob: vi.fn().mockResolvedValue(new Blob()) }))
+const { coverBlob } = await import('./coverCache.js')
 const { api } = await import('./api.js')
 const { Cover } = await import('./ui.jsx')
 
@@ -17,6 +19,13 @@ afterEach(() => {
 })
 
 describe('Cover', () => {
+  it('warms the widget cache with the displayed URL, including a corrected cover', () => {
+    const { rerender } = render(<Cover session={session} book={chamber} />)
+    expect(coverBlob).toHaveBeenLastCalledWith(chamber.cover_url)
+    rerender(<Cover session={session} book={quest} />)
+    expect(coverBlob).toHaveBeenLastCalledWith(quest.cover_url)
+  })
+
   it('follows a new book in the same slot (offline first paint, then the fresh list)', () => {
     const { container, rerender } = render(<Cover session={session} book={chamber} />)
     expect(src(container)).toBe(chamber.cover_url)

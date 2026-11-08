@@ -1,6 +1,7 @@
 import { decodeHistory, hasReadingTime, localDay, longestReadingStreak, readingStreak } from './readingHistory.js'
 import { invoke } from '@tauri-apps/api/core'
-import { http, isApp } from './api.js'
+import { cached, isApp } from './api.js'
+import { coverBlob } from './coverCache.js'
 
 // Feeds the home screen widget: Android through MainActivity's CrossPointWidget
 // bridge, iOS through the Rust update_widget command (App Group container).
@@ -20,9 +21,7 @@ export function clearWidget() {
 
 async function coverBase64(url) {
   try {
-    const res = await http(url)
-    if (!res.ok) return ''
-    const img = await createImageBitmap(await res.blob())
+    const img = await createImageBitmap(await coverBlob(url))
     // Widget-sized PNG: bitmaps cross IPC to the launcher and must stay small.
     const canvas = document.createElement('canvas')
     canvas.width = 168
@@ -30,7 +29,9 @@ async function coverBase64(url) {
     const ctx = canvas.getContext('2d')
     const s = Math.max(168 / img.width, 252 / img.height)
     ctx.drawImage(img, (168 - img.width * s) / 2, (252 - img.height * s) / 2, img.width * s, img.height * s)
-    return canvas.toDataURL('image/png').split(',')[1]
+    const cover = canvas.toDataURL('image/png').split(',')[1]
+    img.close()
+    return cover
   } catch {
     return ''
   }
@@ -72,11 +73,15 @@ export async function updateWidget({ session, books, summary, activity, goals })
   // Stable through duplicate app renders; native providers use it for freshness.
   data.snapshot_day = today
   if (session) data.session = { server: session.server, username: session.username, key: session.key }
-  data.cover_url = current?.cover_url ?? null
+  data.cover_url = current?.cover_url ?? (session && current ? cached.cover(session, current.document) : null) ?? null
   const key = JSON.stringify(data)
   if (key === last) return
   last = key
   const currentVersion = ++version
-  const cover = current?.cover_url ? await coverBase64(current.cover_url) : ''
-  if (currentVersion === version) await publish(data, cover)
+  const cover = data.cover_url ? await coverBase64(data.cover_url) : ''
+  if (currentVersion === version) {
+    await publish(data, cover)
+    // A failed download must be retried even when reading data hasn't changed.
+    if (data.cover_url && !cover) last = ''
+  }
 }
