@@ -487,3 +487,12 @@ describe('BookOrbit stats', () => {
     expect(queryByText(/Duplicate BookOrbit session records are counted once/)).toBeNull()
   })
 })
+
+it('pins every year-calendar day to its weekday row', () => {
+  const { container, getByText } = render(<Stats session={{}} books={[]} activity={activity} />)
+  fireEvent.click(getByText('Year'))
+  const cells = [...container.querySelectorAll('[data-tip]')]
+  expect(cells.length).toBeGreaterThan(300)
+  const rows = { Mon: '1', Tue: '2', Wed: '3', Thu: '4', Fri: '5', Sat: '6', Sun: '7' }
+  for (const el of cells) expect(el.style.gridRow).toBe(rows[el.dataset.tip.slice(0, 3)])
+})

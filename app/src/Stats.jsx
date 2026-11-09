@@ -398,11 +398,11 @@ function ReadingCalendar({ summary, activity, books = [] }) {
     setScale(v)
     setBack(0)
   }
-  const cell = (d, round) => {
-    if (!shown(d)) return <div key={d.getTime()} className="aspect-square" />
+  const cell = (d, round, style) => {
+    if (!shown(d)) return <div key={d.getTime()} className="aspect-square" style={style} />
     const key = localDay(d)
     const tip = `${fmt(d, { weekday: 'short', month: 'short', day: 'numeric' })}: ${byDay.has(key) ? tipFor(key) : 'no reading'}`
-    return <div key={d.getTime()} data-tip={tip} aria-label={tip} className={`aspect-square ${round} ${unmeasured(key) ? UNKNOWN_SHADE : SHADES[level(key)]}`} />
+    return <div key={d.getTime()} data-tip={tip} aria-label={tip} style={style} className={`aspect-square ${round} ${unmeasured(key) ? UNKNOWN_SHADE : SHADES[level(key)]}`} />
   }
   // Share the visible period, reading days, available page/time totals and longest streak.
   const share = () => {
@@ -538,14 +538,14 @@ function ReadingCalendar({ summary, activity, books = [] }) {
               }}
             >
               {WEEKDAYS.map((w, r) => (
-                <p key={w} className="sticky left-0 z-10 flex min-w-6 items-center self-stretch bg-surface pr-1.5 font-mono text-[0.6rem] leading-none text-stone-400 shadow-[4px_0_0_white]">
+                <p key={w} style={{ gridRow: r + 1, gridColumn: 1 }} className="sticky left-0 z-10 flex min-w-6 items-center self-stretch bg-surface pr-1.5 font-mono text-[0.6rem] leading-none text-stone-400 shadow-[4px_0_0_white]">
                   {!year || r % 2 === 0 ? w[0] : ''}
                 </p>
               ))}
-              <span />
-              {weeks.map((monday) => (
+              {/* Explicit cells: month labels leave gaps in row 8 that auto-placement would fill with days. */}
+              {weeks.map((monday, i) => (
                 <Fragment key={monday.getTime()}>
-                  {WEEKDAYS.map((w, r) => cell(new Date(monday.getTime() + r * DAY_MS), 'rounded-[2px]'))}
+                  {WEEKDAYS.map((w, r) => cell(new Date(monday.getTime() + r * DAY_MS), 'rounded-[2px]', { gridRow: r + 1, gridColumn: i + 2 }))}
                 </Fragment>
               ))}
               {/* Labels span weeks so their text fits; keep the last month inside the grid. */}
