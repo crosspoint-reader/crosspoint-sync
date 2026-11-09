@@ -22,7 +22,13 @@ pub fn update_widget(json: String, cover: String) -> Result<(), String> {
     let guard = Lock(file);
     let cover_path = dir.join("cover.png");
     if cover.is_empty() {
-      let _ = std::fs::remove_file(cover_path);
+      let incoming = serde_json::from_str::<serde_json::Value>(&json).map_err(|e| e.to_string())?;
+      let previous = std::fs::read(dir.join("widget.json")).ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+      // An offline app update may have no image bytes. Keep the saved cover
+      // only when its account, document and exact URL still identify this book.
+      let same_cover = previous.as_ref().is_some_and(|old| matching_cover(&incoming, old));
+      if !same_cover { let _ = std::fs::remove_file(cover_path); }
     } else {
       let temp = dir.join("cover.tmp");
       std::fs::write(&temp, STANDARD.decode(cover).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
@@ -72,4 +78,45 @@ pub fn update_shortcuts(app: tauri::AppHandle, json: Option<String>) -> Result<(
   #[cfg(not(target_os = "ios"))]
   let _ = (app, json);
   Ok(())
+}
+
+// Kept independent of the iOS filesystem so identity boundaries are testable.
+#[cfg(any(target_os = "ios", test))]
+fn matching_cover(incoming: &serde_json::Value, previous: &serde_json::Value) -> bool {
+  // Credentials can rotate without changing the account that owns the image.
+  ["server", "username"].iter().all(|key|
+    incoming["session"][*key].is_string() && incoming["session"][*key] == previous["session"][*key]) &&
+    ["book_document", "cover_url"].iter().all(|key|
+      !incoming[*key].is_null() && incoming[*key] == previous[*key])
+}
+
+#[cfg(test)]
+mod cover_tests {
+  use super::matching_cover;
+  use serde_json::json;
+
+  #[test]
+  fn retains_only_the_exact_account_book_and_cover() {
+    let saved = json!({"session": {"server": "https://sync.test", "username": "reader", "key": "secret"},
+      "book_document": "book-a", "cover_url": "https://covers.test/a.jpg", "percent": 40});
+    let mut updated = saved.clone();
+    updated["percent"] = json!(50);
+    assert!(matching_cover(&updated, &saved));
+    updated["session"]["key"] = json!("rotated-secret");
+    assert!(matching_cover(&updated, &saved), "password rotation keeps the same cover");
+    for (key, value) in [("book_document", json!("book-b")), ("cover_url", json!("https://covers.test/fixed.jpg")),
+      ("session", json!({"server": "https://sync.test", "username": "other", "key": "secret"})),
+      ("session", json!({"server": "https://other.test", "username": "reader", "key": "secret"}))] {
+      let mut changed = updated.clone();
+      changed[key] = value;
+      assert!(!matching_cover(&changed, &saved), "changed {key}");
+    }
+    for key in ["session", "book_document", "cover_url"] {
+      let mut cleared = updated.clone();
+      cleared.as_object_mut().unwrap().remove(key);
+      assert!(!matching_cover(&cleared, &saved), "missing {key}");
+      assert!(!matching_cover(&saved, &cleared), "legacy missing {key}");
+    }
+    assert!(!matching_cover(&json!({}), &saved));
+  }
 }

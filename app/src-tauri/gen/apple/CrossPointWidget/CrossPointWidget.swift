@@ -92,9 +92,10 @@ struct Provider: TimelineProvider {
     return try? JSONDecoder().decode(T.self, from: body)
   }
   private func refresh() async {
-    guard let original = locked({ try? Data(contentsOf: $0.appendingPathComponent("widget.json")) }) ?? nil,
-      var data = try? JSONDecoder().decode(ReadingData.self, from: original), let session = data.session else { return }
+    guard let original = locked({ WidgetSnapshot.read(in: $0) }) ?? nil,
+      var data = try? JSONDecoder().decode(ReadingData.self, from: original.json), let session = data.session else { return }
     let tz = -TimeZone.current.secondsFromGMT() / 60
+    let hasCover = original.cover != nil
     var newCover: Data?
     var coverChanged = false
     do {
@@ -128,15 +129,15 @@ struct Provider: TimelineProvider {
         data.title = current?.title ?? current?.filename ?? "Nothing in progress"
         data.author = current?.author ?? ""
         data.percent = current.map { min(100, max(0, Int((($0.percentage ?? 0) * 100).rounded()))) } ?? -1
+        coverChanged = current?.document != data.book_document || current?.cover_url != data.cover_url || !hasCover
         data.book_document = current?.document
-        coverChanged = current?.cover_url != data.cover_url
         if coverChanged, let link = current?.cover_url, let url = URL(string: link),
           let (bytes, response) = try? await URLSession.shared.data(for: URLRequest(url: url, timeoutInterval: 10)),
           (response as? HTTPURLResponse)?.statusCode == 200, let image = UIImage(data: bytes) {
           newCover = coverPNG(image)
         }
         // A failed cover remains retryable on the next refresh.
-        if !coverChanged || newCover != nil || current?.cover_url == nil { data.cover_url = current?.cover_url }
+        data.cover_url = current?.cover_url
       }
       if overview != nil && books != nil && goals != nil { data.updated_at = ISO8601DateFormatter().string(from: Date()) }
     } catch {
@@ -145,8 +146,8 @@ struct Provider: TimelineProvider {
     }
     locked { dir in
       let file = dir.appendingPathComponent("widget.json")
-      // App changes, goal edits and logout all supersede this refresh.
-      guard (try? Data(contentsOf: file)) == original else { return }
+      // Include image bytes: the app can restore a cover with identical JSON.
+      guard WidgetSnapshot.read(in: dir) == original else { return }
       if coverChanged {
         let cover = dir.appendingPathComponent("cover.png")
         if let newCover { try? newCover.write(to: cover, options: .atomic) }

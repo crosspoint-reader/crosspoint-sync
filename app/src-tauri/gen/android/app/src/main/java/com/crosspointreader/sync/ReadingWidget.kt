@@ -86,7 +86,15 @@ open class ReadingWidget : AppWidgetProvider() {
     fun saveFromApp(context: Context, json: String, coverBase64: String) {
       synchronized(lock) {
         val file = File(context.filesDir, COVER)
-        if (coverBase64.isEmpty()) file.delete() else file.writeBytes(Base64.decode(coverBase64, Base64.DEFAULT))
+        val incoming = JSONObject(json)
+        val previous = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("data", null)?.let { JSONObject(it) }
+        val session = incoming.optJSONObject("session")
+        val oldSession = previous?.optJSONObject("session")
+        val sameCover = previous != null && session != null && oldSession != null &&
+          listOf("server", "username").all { !session.isNull(it) && session.optString(it) == oldSession.optString(it) } &&
+          listOf("book_document", "cover_url").all { !incoming.isNull(it) && incoming.optString(it) == previous.optString(it) }
+        if (coverBase64.isNotEmpty()) file.writeBytes(Base64.decode(coverBase64, Base64.DEFAULT))
+        else if (!sameCover) file.delete()
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("data", json).apply()
       }
       refresh(context)
@@ -106,9 +114,13 @@ open class ReadingWidget : AppWidgetProvider() {
     }
     private fun fetch(context: Context): Boolean {
       val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-      val original = synchronized(lock) { prefs.getString("data", null) } ?: return false
-      var data = JSONObject(original)
+      val original = synchronized(lock) {
+        val json = prefs.getString("data", null) ?: return false
+        json to runCatching { File(context.filesDir, COVER).readBytes() }.getOrNull()
+      }
+      var data = JSONObject(original.first)
       val session = data.optJSONObject("session") ?: return false
+      val hasCover = original.second != null
       var changedCover = false
       var cover: ByteArray? = null
       try {
@@ -140,6 +152,7 @@ open class ReadingWidget : AppWidgetProvider() {
         allBooks(session)?.let { items ->
           loaded++
           val current = (0 until items.length()).map { items.getJSONObject(it) }.firstOrNull { it.optString("status") == "reading" && title(it) != null }
+          val oldDocument = data.optString("book_document")
           data.put("label", if (current == null) "CROSSPOINT SYNC" else "CONTINUE READING")
             .put("title", current?.let { title(it) } ?: "Nothing in progress")
             .put("author", current?.takeUnless { it.isNull("author") }?.optString("author") ?: "")
@@ -147,9 +160,9 @@ open class ReadingWidget : AppWidgetProvider() {
             .put("book_document", current?.optString("document") ?: JSONObject.NULL)
           val url = current?.takeUnless { it.isNull("cover_url") }?.optString("cover_url")
           val old = data.takeUnless { it.isNull("cover_url") }?.optString("cover_url")
-          changedCover = url != old
+          changedCover = url != old || current?.optString("document") != oldDocument || !hasCover
           if (changedCover && url != null) cover = runCatching { coverPng(url) }.getOrNull()
-          if (!changedCover || cover != null || url == null) data.put("cover_url", url ?: JSONObject.NULL)
+          data.put("cover_url", url ?: JSONObject.NULL)
         }
         if (loaded == 0) return false
         if (loaded == 3) data.put("updated_at", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(java.util.Date()))
@@ -158,7 +171,9 @@ open class ReadingWidget : AppWidgetProvider() {
         changedCover = true
       }
       synchronized(lock) {
-        if (prefs.getString("data", null) != original) return false
+        // Cover-only app publications also supersede this network refresh.
+        val currentCover = runCatching { File(context.filesDir, COVER).readBytes() }.getOrNull()
+        if (prefs.getString("data", null) != original.first || !java.util.Arrays.equals(currentCover, original.second)) return false
         if (changedCover) {
           val file = File(context.filesDir, COVER)
           if (cover == null) file.delete() else file.writeBytes(cover!!)

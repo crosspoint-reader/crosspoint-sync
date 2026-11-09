@@ -1,5 +1,17 @@
 import Foundation
 
+// Read and compare under the provider's snapshot lock. Cover-only app writes
+// supersede in-flight network work just like a change to the JSON snapshot.
+struct WidgetSnapshot: Equatable {
+  let json: Data
+  let cover: Data?
+
+  static func read(in dir: URL) -> WidgetSnapshot? {
+    guard let json = try? Data(contentsOf: dir.appendingPathComponent("widget.json")) else { return nil }
+    return WidgetSnapshot(json: json, cover: try? Data(contentsOf: dir.appendingPathComponent("cover.png")))
+  }
+}
+
 struct WidgetBook: Decodable {
   let document: String
   let title: String?

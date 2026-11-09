@@ -369,3 +369,19 @@ it('uploads history as multipart data and only clears cached data after a succes
   await api.importHistory(s, file, 'UTC', {})
   expect(localStorage.getItem(key)).toBeNull()
 })
+
+it('invalidates a looked-up cover on metadata edits and rejects a pre-edit lookup', async () => {
+  const s = session('reader')
+  fetchMock.mockResolvedValueOnce(response({ url: 'https://covers.test/wrong.jpg' }))
+  await api.cover(s, 'book')
+  expect(cached.cover(s, 'book')).toBe('https://covers.test/wrong.jpg')
+  let finish
+  fetchMock.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+  const pending = api.cover(s, 'book')
+  fetchMock.mockResolvedValueOnce(response({ document: 'book', cover_url: null }))
+  await api.setInfo(s, 'book', { cover_url: null })
+  expect(cached.cover(s, 'book')).toBeNull()
+  finish(response({ url: 'https://covers.test/wrong.jpg' }))
+  await expect(pending).rejects.toMatchObject({ stale: true })
+  expect(cached.cover(s, 'book')).toBeNull()
+})
