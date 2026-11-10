@@ -133,11 +133,19 @@ export async function bookorbitStatsJson(cred: Credential, http: HttpTransport, 
   const c = parseCred(cred);
   if (!c) throw new ConnectorOperationError('invalid BookOrbit credentials', false, true);
   const res = await call(http, c, 'GET', path);
-  if (res.status < 200 || res.status >= 300) {
-    throw new ConnectorOperationError(`BookOrbit request failed (${res.status})`,
-      res.status === 429 || res.status >= 500, res.status === 401 || res.status === 403);
-  }
+  if (res.status < 200 || res.status >= 300) throw requestFailed(res.status);
   return res.json();
+}
+
+async function routeMissing(res: Awaited<ReturnType<HttpTransport>>): Promise<boolean> {
+  if (res.status !== 404) return false;
+  const body = await res.json().catch(() => null) as { message?: unknown } | null;
+  return typeof body?.message === 'string' && body.message.startsWith('Cannot ');
+}
+
+function requestFailed(status: number): ConnectorOperationError {
+  return new ConnectorOperationError(`BookOrbit request failed (${status})`,
+    status === 429 || status >= 500, status === 401 || status === 403);
 }
 
 /** Save a cumulative session checkpoint with a provider-side retry identity. */
@@ -226,8 +234,26 @@ interface FileProgress {
 
 // The book-level endpoint only exposes the web reader's updatedAt. Plugin
 // writes preserve that timestamp; the file endpoint also exposes textUpdatedAt.
+// BookOrbit 3.7 limits /books/files/:id/progress to its iOS app, so use
+// /reading-progress (3.6+) and fall back for servers without it.
 async function fileProgress(cred: Credential, http: HttpTransport, file: string): Promise<FileProgress> {
-  const row = await bookorbitStatsJson(cred, http, `/books/files/${encodeURIComponent(file)}/progress`);
+  const c = parseCred(cred);
+  if (!c) throw new ConnectorOperationError('invalid BookOrbit credentials', false, true);
+  const res = await call(http, c, 'GET', `/reading-progress?fileId=${encodeURIComponent(file)}`);
+  let row;
+  if (await routeMissing(res)) {
+    row = await bookorbitStatsJson(cred, http, `/books/files/${encodeURIComponent(file)}/progress`);
+  } else {
+    if (res.status < 200 || res.status >= 300) throw requestFailed(res.status);
+    const entry = (await res.json().catch(() => null) as any)?.items?.[0];
+    row = entry && {
+      percentage: entry.percentage,
+      updatedAt: entry.updatedAt,
+      textUpdatedAt: entry.text?.updatedAt,
+      koreaderProgress: entry.koreader,
+      cfi: entry.text?.cfi,
+    };
+  }
   if (!row || typeof row !== 'object' || Array.isArray(row) ||
       typeof row.percentage !== 'number' || !Number.isFinite(row.percentage)) {
     throw new ConnectorOperationError('BookOrbit returned invalid progress', true);
@@ -381,16 +407,30 @@ async function push(
     if (Number.isFinite(updated) && Math.floor(updated / 1000) > ev.timestamp) return { ok: true };
 
     // Enough precision that pulling our own write back reads as the same position, not an edit.
-    const body: Record<string, unknown> = { percentage: Math.round((finished ? 1 : pct) * 1_000_000) / 10_000 };
+    const percentage = Math.round((finished ? 1 : pct) * 1_000_000) / 10_000;
     // KOReader-style XPointers are what BookOrbit stores for its KOReader devices;
     // the CFI is what its web reader resumes from. A CFI miss still saves the rest.
+    let koreader: string | undefined;
+    let cfi: string | undefined;
     if (ev.progress?.startsWith('/body')) {
       const xpath = ev.progress;
-      body.koreaderProgress = xpath;
-      const at = await positionMap(http, c, m, file, ctx, (b) => epubPosition(b, xpath)).catch(() => null);
-      if (at) body.cfi = at.cfi;
+      koreader = xpath;
+      cfi = (await positionMap(http, c, m, file, ctx, (b) => epubPosition(b, xpath)).catch(() => null))?.cfi;
     }
-    const saved = result((await call(http, c, 'POST', `/books/files/${encodeURIComponent(file)}/progress`, body)).status);
+    // editedAt makes BookOrbit itself reject the write if a newer position lands after the check
+    // above. The check compares whole seconds, so the event counts as the end of its second.
+    let res = await call(http, c, 'PUT', '/reading-progress', { writes: [{
+      fileId: Number(file), percentage, editedAt: new Date(ev.timestamp * 1000 + 999).toISOString(),
+      ...(koreader && { koreader }), ...(cfi && { text: { cfi } }),
+    }] });
+    if (await routeMissing(res)) {
+      res = await call(http, c, 'POST', `/books/files/${encodeURIComponent(file)}/progress`,
+        { percentage, ...(koreader && { koreaderProgress: koreader }), ...(cfi && { cfi }) });
+    } else if (res.status >= 200 && res.status < 300) {
+      const reply = await res.json().catch(() => null) as { results?: { status?: string }[] } | null;
+      if (reply?.results?.[0]?.status === 'superseded') return { ok: true };
+    }
+    const saved = result(res.status);
     if (!saved.ok || !finished) return saved;
     return result((await call(http, c, 'PATCH', `/books/${encodeURIComponent(m.externalId)}/status`, { status: 'read' })).status);
   } catch (err) {

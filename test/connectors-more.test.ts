@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DOC, makeTestApp, registerUser } from './helpers.js';
+import { DOC, makeTestApp, orbitProgressList, orbitWrite, registerUser } from './helpers.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
 import { SAVE_CREDENTIAL, type HttpTransport } from '../src/connectors/types.js';
 import { drainQueue } from '../src/connectors/runner.js';
@@ -972,13 +972,14 @@ describe('bookorbit connector', () => {
   it('pushes percentage and XPointer, and marks finished books read', async () => {
     const fake = fakeTransport();
     fake.on('/auth/login', 200, LOGIN);
-    fake.on('/books/files/71/progress', 200, { percentage: 0, updatedAt: null });
+    fake.on('/reading-progress?fileId=71', 200, orbitProgressList({ percentage: 0, updatedAt: null }));
     const m = { externalId: '12', externalEdition: '71', confidence: 1 };
     const r1 = await bookorbitConnector.push(cred('p'), m,
       { kind: 'progress', document: 'd', percentage: 0.4237, progress: '/body/DocFragment[3]/body/p[2]', timestamp: 1 }, fake.transport);
     expect(r1.ok).toBe(true);
-    const save = fake.calls.find((c) => c.method === 'POST' && c.url.endsWith('/api/v1/books/files/71/progress'))!;
-    expect(JSON.parse(save.body!)).toEqual({ percentage: 42.37, koreaderProgress: '/body/DocFragment[3]/body/p[2]' });
+    const save = fake.calls.find((c) => c.method === 'PUT' && c.url.endsWith('/api/v1/reading-progress'))!;
+    expect(orbitWrite(save.body)).toEqual({ fileId: 71, percentage: 42.37, koreader: '/body/DocFragment[3]/body/p[2]', editedAt: '1970-01-01T00:00:01.999Z' });
+    expect(fake.calls.some((c) => c.url.includes('/books/files/71/progress'))).toBe(false);
     expect(fake.calls.some((c) => c.url.endsWith('/status'))).toBe(false);
 
     const r2 = await bookorbitConnector.push(cred('p'), m, { kind: 'finished', document: 'd', percentage: 1, timestamp: 2 }, fake.transport);
@@ -993,13 +994,13 @@ describe('bookorbit connector', () => {
   it('logs in again when the cached token is rejected', async () => {
     const fake = fakeTransport();
     fake.on('/auth/login', 200, LOGIN);
-    fake.on('/books/files/71/progress', 200, { percentage: 0, updatedAt: null });
+    fake.on('/reading-progress?fileId=71', 200, orbitProgressList({ percentage: 0, updatedAt: null }));
     const m = { externalId: '12', externalEdition: '71', confidence: 1 };
     const ev = { kind: 'progress' as const, document: 'd', percentage: 0.1, timestamp: 1 };
     await bookorbitConnector.push(cred('r'), m, ev, fake.transport);
     let rejected = false;
     const t: HttpTransport = async (url, init) => {
-      if (url.includes('/progress') && !rejected) { rejected = true; return { status: 401, text: async () => '', json: async () => ({}) }; }
+      if (url.includes('/reading-progress') && !rejected) { rejected = true; return { status: 401, text: async () => '', json: async () => ({}) }; }
       return fake.transport(url, init);
     };
     const r = await bookorbitConnector.push(cred('r'), m, ev, t);
@@ -1010,7 +1011,7 @@ describe('bookorbit connector', () => {
   it.each(['progress', 'finished'] as const)('does not overwrite newer BookOrbit progress with a queued %s event', async (kind) => {
     const fake = fakeTransport();
     fake.on('/auth/login', 200, LOGIN);
-    fake.on('/books/files/71/progress', 200, { percentage: 8.42, updatedAt: '2026-10-22T21:58:01Z' });
+    fake.on('/reading-progress?fileId=71', 200, orbitProgressList({ percentage: 8.42, updatedAt: '2026-10-22T21:58:01Z' }));
     const result = await bookorbitConnector.push(cred(`stale-${kind}`), { externalId: '12', externalEdition: '71', confidence: 1 },
       { kind, document: 'd', percentage: kind === 'finished' ? 1 : 0.06734, timestamp: Date.parse('2026-10-22T21:27:32Z') / 1000 }, fake.transport);
     expect(result.ok).toBe(true);
@@ -1020,7 +1021,7 @@ describe('bookorbit connector', () => {
   it('retries without writing when remote progress cannot be checked', async () => {
     const fake = fakeTransport();
     fake.on('/auth/login', 200, LOGIN);
-    fake.on('/books/files/71/progress', 503, {});
+    fake.on('/reading-progress?fileId=71', 503, {});
     const result = await bookorbitConnector.push(cred('unavailable'), { externalId: '12', externalEdition: '71', confidence: 1 },
       { kind: 'progress', document: 'd', percentage: 0.1, timestamp: 1 }, fake.transport);
     expect(result).toMatchObject({ ok: false, retryable: true });
@@ -1030,17 +1031,51 @@ describe('bookorbit connector', () => {
   it('allows a newer local position even when it moves backwards', async () => {
     const fake = fakeTransport();
     fake.on('/auth/login', 200, LOGIN);
-    fake.on('/books/files/71/progress', 200, { percentage: 8.42, updatedAt: '2026-10-22T21:58:01Z' });
+    fake.on('/reading-progress?fileId=71', 200, orbitProgressList({ percentage: 8.42, updatedAt: '2026-10-22T21:58:01Z' }));
     expect(await bookorbitConnector.push(cred('newer-local'), { externalId: '12', externalEdition: '71', confidence: 1 },
       { kind: 'progress', document: 'd', percentage: 0.05, timestamp: Date.parse('2026-10-22T22:00:00Z') / 1000 }, fake.transport))
       .toEqual({ ok: true });
-    expect(JSON.parse(fake.calls.find((c) => c.method === 'POST' && c.url.endsWith('/books/files/71/progress'))!.body!)).toEqual({ percentage: 5 });
+    expect(orbitWrite(fake.calls.find((c) => c.method === 'PUT' && c.url.endsWith('/reading-progress'))!.body)).toEqual({ fileId: 71, percentage: 5, editedAt: '2026-10-22T22:00:00.999Z' });
+  });
+
+  it('treats a write BookOrbit supersedes with a newer position as done, without marking the book read', async () => {
+    const fake = fakeTransport();
+    fake.on('/auth/login', 200, LOGIN);
+    fake.on('/reading-progress?fileId=71', 200, orbitProgressList({ percentage: 0, updatedAt: null }));
+    fake.on('"writes"', 200, { results: [{ fileId: 71, status: 'superseded', progress: {} }] });
+    expect(await bookorbitConnector.push(cred('race'), { externalId: '12', externalEdition: '71', confidence: 1 },
+      { kind: 'finished', document: 'd', percentage: 1, timestamp: 1 }, fake.transport)).toEqual({ ok: true });
+    expect(fake.calls.some((c) => c.url.endsWith('/status'))).toBe(false);
+  });
+
+  it('falls back to the per-file progress routes on servers without /reading-progress', async () => {
+    const fake = fakeTransport();
+    fake.on('/auth/login', 200, LOGIN);
+    fake.on('/books/files/71/progress', 200, { percentage: 0, updatedAt: null });
+    fake.on('/reading-progress', 404, { statusCode: 404, message: 'Cannot GET /api/v1/reading-progress' });
+    const m = { externalId: '12', externalEdition: '71', confidence: 1 };
+    expect(await bookorbitConnector.push(cred('legacy'), m,
+      { kind: 'progress', document: 'd', percentage: 0.25, progress: '/body/p[1]', timestamp: 1 }, fake.transport)).toEqual({ ok: true });
+    const save = fake.calls.find((c) => c.method === 'POST' && c.url.endsWith('/api/v1/books/files/71/progress'))!;
+    expect(JSON.parse(save.body!)).toEqual({ percentage: 25, koreaderProgress: '/body/p[1]' });
+  });
+
+  it.each(['GET', 'PUT'])('does not fall back or ask for reauth when %s /reading-progress 404s for a missing file', async (method) => {
+    const fake = fakeTransport();
+    fake.on('/auth/login', 200, LOGIN);
+    fake.on('/reading-progress?fileId=71', 200, orbitProgressList({ percentage: 0, updatedAt: null }));
+    fake.on(method === 'GET' ? '/reading-progress?fileId=71' : '"writes"', 404, { statusCode: 404, message: 'No file with id 71' });
+    const r = await bookorbitConnector.push(cred(`gone-${method}`), { externalId: '12', externalEdition: '71', confidence: 1 },
+      { kind: 'progress', document: 'd', percentage: 0.1, timestamp: 1 }, fake.transport);
+    expect(r).toMatchObject({ ok: false, retryable: false });
+    expect(r.needsReauth).toBeFalsy();
+    expect(fake.calls.some((c) => c.url.includes('/books/files/71/progress'))).toBe(false);
   });
 
   it('pulls newer progress for a matched book', async () => {
     const fake = fakeTransport();
     fake.on('/auth/login', 200, LOGIN);
-    fake.on('/books/files/71/progress', 200, { percentage: 55, updatedAt: '2026-09-01T00:00:00Z' });
+    fake.on('/reading-progress?fileId=71', 200, orbitProgressList({ percentage: 55, updatedAt: '2026-09-01T00:00:00Z' }));
     const m = { externalId: '12', externalEdition: '71', confidence: 1 };
     const since = Date.parse('2026-08-31T00:00:00Z');
     const ch = await bookorbitConnector.pullProgress!(cred('pull'), m, fake.transport, since);

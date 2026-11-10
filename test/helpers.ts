@@ -59,3 +59,22 @@ export async function registerUser(
 }
 
 export const DOC = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+
+/** A BookOrbit `GET /reading-progress?fileId=71` response holding the given file progress. */
+export function orbitProgressList(row: {
+  percentage: number; updatedAt?: string | null; textUpdatedAt?: string | null;
+  cfi?: string | null; koreaderProgress?: string | null;
+}) {
+  return { items: [{
+    fileId: 71, percentage: row.percentage, updatedAt: row.updatedAt ?? null,
+    text: { cfi: row.cfi ?? null, page: null, updatedAt: row.textUpdatedAt ?? null },
+    narration: { seconds: null, fragment: null, sectionIndex: null, percentage: null, updatedAt: null },
+    kobo: { source: null, type: null, value: null, contentPercent: null },
+    koreader: row.koreaderProgress ?? null,
+  }] };
+}
+
+/** The single write in a BookOrbit `PUT /reading-progress` request body. */
+export function orbitWrite(body: string | undefined): Record<string, unknown> {
+  return JSON.parse(body!).writes[0];
+}
