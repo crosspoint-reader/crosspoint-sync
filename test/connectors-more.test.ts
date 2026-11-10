@@ -1052,12 +1052,24 @@ describe('bookorbit connector', () => {
     const fake = fakeTransport();
     fake.on('/auth/login', 200, LOGIN);
     fake.on('/books/files/71/progress', 200, { percentage: 0, updatedAt: null });
-    fake.on('/reading-progress', 404, {});
+    fake.on('/reading-progress', 404, { statusCode: 404, message: 'Cannot GET /api/v1/reading-progress' });
     const m = { externalId: '12', externalEdition: '71', confidence: 1 };
     expect(await bookorbitConnector.push(cred('legacy'), m,
       { kind: 'progress', document: 'd', percentage: 0.25, progress: '/body/p[1]', timestamp: 1 }, fake.transport)).toEqual({ ok: true });
     const save = fake.calls.find((c) => c.method === 'POST' && c.url.endsWith('/api/v1/books/files/71/progress'))!;
     expect(JSON.parse(save.body!)).toEqual({ percentage: 25, koreaderProgress: '/body/p[1]' });
+  });
+
+  it.each(['GET', 'PUT'])('does not fall back or ask for reauth when %s /reading-progress 404s for a missing file', async (method) => {
+    const fake = fakeTransport();
+    fake.on('/auth/login', 200, LOGIN);
+    fake.on('/reading-progress?fileId=71', 200, orbitProgressList({ percentage: 0, updatedAt: null }));
+    fake.on(method === 'GET' ? '/reading-progress?fileId=71' : '"writes"', 404, { statusCode: 404, message: 'No file with id 71' });
+    const r = await bookorbitConnector.push(cred(`gone-${method}`), { externalId: '12', externalEdition: '71', confidence: 1 },
+      { kind: 'progress', document: 'd', percentage: 0.1, timestamp: 1 }, fake.transport);
+    expect(r).toMatchObject({ ok: false, retryable: false });
+    expect(r.needsReauth).toBeFalsy();
+    expect(fake.calls.some((c) => c.url.includes('/books/files/71/progress'))).toBe(false);
   });
 
   it('pulls newer progress for a matched book', async () => {

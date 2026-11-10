@@ -137,6 +137,12 @@ export async function bookorbitStatsJson(cred: Credential, http: HttpTransport, 
   return res.json();
 }
 
+async function routeMissing(res: Awaited<ReturnType<HttpTransport>>): Promise<boolean> {
+  if (res.status !== 404) return false;
+  const body = await res.json().catch(() => null) as { message?: unknown } | null;
+  return typeof body?.message === 'string' && body.message.startsWith('Cannot ');
+}
+
 function requestFailed(status: number): ConnectorOperationError {
   return new ConnectorOperationError(`BookOrbit request failed (${status})`,
     status === 429 || status >= 500, status === 401 || status === 403);
@@ -229,13 +235,13 @@ interface FileProgress {
 // The book-level endpoint only exposes the web reader's updatedAt. Plugin
 // writes preserve that timestamp; the file endpoint also exposes textUpdatedAt.
 // BookOrbit 3.7 limits /books/files/:id/progress to its iOS app, so use
-// /reading-progress (3.6+) and fall back for servers that 404 on it.
+// /reading-progress (3.6+) and fall back for servers without it.
 async function fileProgress(cred: Credential, http: HttpTransport, file: string): Promise<FileProgress> {
   const c = parseCred(cred);
   if (!c) throw new ConnectorOperationError('invalid BookOrbit credentials', false, true);
   const res = await call(http, c, 'GET', `/reading-progress?fileId=${encodeURIComponent(file)}`);
   let row;
-  if (res.status === 404) {
+  if (await routeMissing(res)) {
     row = await bookorbitStatsJson(cred, http, `/books/files/${encodeURIComponent(file)}/progress`);
   } else {
     if (res.status < 200 || res.status >= 300) throw requestFailed(res.status);
@@ -417,7 +423,7 @@ async function push(
       fileId: Number(file), percentage, editedAt: new Date(ev.timestamp * 1000 + 999).toISOString(),
       ...(koreader && { koreader }), ...(cfi && { text: { cfi } }),
     }] });
-    if (res.status === 404) {
+    if (await routeMissing(res)) {
       res = await call(http, c, 'POST', `/books/files/${encodeURIComponent(file)}/progress`,
         { percentage, ...(koreader && { koreaderProgress: koreader }), ...(cfi && { cfi }) });
     } else if (res.status >= 200 && res.status < 300) {
