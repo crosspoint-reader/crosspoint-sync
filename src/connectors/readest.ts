@@ -393,7 +393,14 @@ async function pullHighlights(
     const key = (n: any) => JSON.stringify([c.server, c.username ?? '', bookHash, n.id, n.cfi, n.updated_at]);
     const notes = (await highlightsIn(bookHash)).filter((n: any) => !skip(n.text) && !unplaced.has(key(n)));
     if (!notes.length) continue;
-    const bytes = await epub(http, c, bookHash);
+    let bytes: Epub;
+    try {
+      bytes = await epub(http, c, bookHash);
+    } catch (err) {
+      // A copy whose file Readest doesn't hold (notes without an upload) mustn't hide the other copy.
+      if (err instanceof ConnectorOperationError && !err.retryable && !err.needsReauth) continue;
+      throw err;
+    }
     for (const n of notes) {
       const at = await epubRangeOffsets(bytes, n.cfi).catch(() => null);
       if (!at || normalizeEpubQuote(at.text) !== normalizeEpubQuote(n.text)) {

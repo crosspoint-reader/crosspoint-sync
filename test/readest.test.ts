@@ -313,6 +313,18 @@ describe('readest connector highlight pull', () => {
     expect(got.map((h) => h.text).sort()).toEqual(['Pre', 'bold tail']);
   });
 
+  it('still imports the library copy when the file\'s own copy cannot be downloaded', async () => {
+    const fake = fakeTransport();
+    readestLibrary(fake, []);
+    fake.on(`/api/crosspoint/books/${DOC}`, 404, { error: 'Book not found' });
+    fake.on(`type=notes&book=${DOC}`, 200, { books: [], configs: [], notes: [readestNote({ book_hash: DOC, text: 'Pre', cfi: 'epubcfi(/6/4!/4/4,/1:0,/1:3)' })] });
+    fake.on(`type=notes&book=${BOOK}`, 200, { books: [], configs: [], notes: [readestNote()] });
+    expect((await readestConnector.pullHighlights!(CRED, MATCH, fake.transport, () => false)).map((h) => h.text)).toEqual(['bold tail']);
+    // A server error still fails the pull, so it is retried.
+    fake.on(`/api/crosspoint/books/${DOC}`, 503, {});
+    await expect(readestConnector.pullHighlights!(CRED, MATCH, fake.transport, () => false)).rejects.toThrow('503');
+  });
+
   it('skips a highlight whose position covers more text than the highlight', async () => {
     const fake = fakeTransport();
     // The range covers "Pre bold tail"; the note says only "Pre".
