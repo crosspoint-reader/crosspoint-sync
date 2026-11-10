@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { documentMeta, getMatchSnapshot, setMatchSnapshot } from './store.js';
 import { ConnectorOperationError, SAVE_CREDENTIAL, type SavableCredential } from './types.js';
-import { cachedEpub, epubQuoteRangeCfi, epubRangeCfi, epubXPath, normalizeEpubQuote, type Epub } from './bookfusion-epub.js';
+import { cachedEpub, epubQuoteRangeCfi, epubRangeCfi, epubRangeOffsets, epubXPath, normalizeEpubQuote, type Epub } from './bookfusion-epub.js';
 import type {
   Connector,
   ConnectorContext,
@@ -11,6 +11,7 @@ import type {
   DocumentMeta,
   HttpTransport,
   InboundChange,
+  InboundHighlight,
   Match,
   OutboundEvent,
   PushResult,
@@ -48,7 +49,9 @@ import type {
  * A clipping is placed in Readest's own copy of the book, so the book must be
  * in the reader's Readest cloud library: its chapter offsets become a range CFI
  * plus start and end XPointers there, checked against the clipping text. A
- * re-sent or edited clipping keeps its note id and updates in place.
+ * re-sent or edited clipping keeps its note id and updates in place. Readest
+ * highlights come back the same way: their range CFI in that copy becomes
+ * chapter offsets, and a highlight whose text isn't there is left out.
  */
 
 const DEFAULT_BASE = 'https://web.readest.com';
@@ -58,6 +61,7 @@ const MAX_TEXT = 500;
 const MS_PER_SECOND = 1000;
 const LINK_PAGE = 'https://web.readest.com/link';
 const CONNECTOR_ID = 'readest';
+const NOT_IN_LIBRARY = 'book is not in your Readest library (upload the EPUB to Readest Cloud)';
 // Readest's Supabase project and its public anon key, as its KOReader plugin ships them.
 const DEFAULT_SUPABASE_URL = 'https://vbsyxfusjjqdxkjqlysc.supabase.co';
 const DEFAULT_SUPABASE_ANON_KEY =
@@ -281,6 +285,7 @@ function epub(http: HttpTransport, c: ReadestCred, bookHash: string) {
   return cachedEpub(['readest', c.server, bookHash], async () => {
     const link = await http(`${c.server}/books/${encodeURIComponent(bookHash)}`, { method: 'GET', headers: headers(c) });
     if (link.status === 401) throw new ConnectorOperationError('unauthorized', false, true);
+    if (link.status === 404) throw new ConnectorOperationError(NOT_IN_LIBRARY, false);
     const url = link.status === 200 ? (await readJson(link)).downloadUrl : null;
     if (typeof url !== 'string') {
       throw new ConnectorOperationError(`Readest EPUB link failed (${link.status})`, link.status === 429 || link.status >= 500);
@@ -316,8 +321,8 @@ async function pushHighlight(
 ): Promise<PushResult> {
   const h = ev.highlight;
   if (!h || !h.text.trim()) return { ok: false, retryable: false, error: 'empty highlight' };
-  const book = await readestBook(c, cred, m, http, ctx);
-  if (!book) return { ok: false, retryable: false, error: 'book is not in your Readest library (upload the EPUB to Readest Cloud)' };
+  // A file Readest holds may have no library entry yet; its own hash still finds it.
+  const book = (await readestBook(c, cred, m, http, ctx)) ?? { bookHash: m.externalId, metaHash: null };
   const bytes = await epub(http, c, book.bookHash);
   const positioned = h.spine != null && h.startOffset != null && h.endOffset != null;
   const { cfi, text } = positioned
@@ -345,6 +350,61 @@ async function pushHighlight(
   };
   await syncApi(http, c, cred, 'POST', '', { books: [], configs: [], notes: [note] });
   return { ok: true };
+}
+
+// Books a pull found no Readest copy for, so each progress read doesn't list the whole library again.
+// ponytail: in-process only; a restart searches again.
+const noCopyUntil = new Map<string, number>();
+const SEARCH_AGAIN_MS = 60 * 60 * 1000;
+export function clearReadestSearches(): void { noCopyUntil.clear(); }
+
+/** Unix seconds from Readest's ISO timestamp (or epoch ms), 0 when missing. */
+function seconds(value: unknown): number {
+  const ms = typeof value === 'number' ? value : typeof value === 'string' ? Date.parse(value) : NaN;
+  return Number.isFinite(ms) ? Math.floor(ms / MS_PER_SECOND) : 0;
+}
+
+async function pullHighlights(
+  cred: Credential, m: Match, http: HttpTransport, skip: (text: string) => boolean, ctx?: ConnectorContext
+): Promise<InboundHighlight[]> {
+  const c = parseCred(cred);
+  if (!c) return [];
+  // Only live highlights in one copy: its CFIs mean nothing in another copy's EPUB.
+  const highlightsIn = async (bookHash: string) => {
+    const res = await syncApi(http, c, cred, 'GET', `?since=0&type=notes&book=${encodeURIComponent(bookHash)}`);
+    return (Array.isArray(res.notes) ? res.notes : []).filter((n: any) =>
+      n?.type === 'annotation' && !n.deleted_at && n.book_hash === bookHash &&
+      typeof n.cfi === 'string' && typeof n.text === 'string' && n.text.trim());
+  };
+  // Readest keys notes by the file's own hash, which a library entry may not exist for yet.
+  let bookHash = m.externalId;
+  let notes = await highlightsIn(bookHash);
+  if (!notes.length) {
+    const key = JSON.stringify([c.server, c.username ?? '', m.externalId]);
+    if ((noCopyUntil.get(key) ?? 0) > Date.now()) return [];
+    const book = await readestBook(c, cred, m, http, ctx);
+    if (!book) noCopyUntil.set(key, Date.now() + SEARCH_AGAIN_MS);
+    if (!book || book.bookHash === bookHash) return [];
+    bookHash = book.bookHash;
+    notes = await highlightsIn(bookHash);
+  }
+  notes = notes.filter((n: any) => !skip(n.text));
+  if (!notes.length) return [];
+  const bytes = await epub(http, c, bookHash);
+  const out: InboundHighlight[] = [];
+  for (const n of notes) {
+    const at = await epubRangeOffsets(bytes, n.cfi).catch(() => null);
+    if (!at || !normalizeEpubQuote(at.text).startsWith(normalizeEpubQuote(n.text).slice(0, 40))) continue;
+    // Readest selections can take in the space around a word; whitespace is one codepoint each.
+    const text = at.text.trim();
+    const lead = at.text.length - at.text.trimStart().length;
+    out.push({
+      text, note: typeof n.note === 'string' && n.note.trim() ? n.note : null, chapter: null,
+      spine: at.spine, startOffset: at.start + lead, endOffset: at.start + lead + Array.from(text).length,
+      createdAt: seconds(n.created_at),
+    });
+  }
+  return out;
 }
 
 async function push(
@@ -536,6 +596,7 @@ export const readestConnector: Connector = {
   match,
   push,
   pullProgress,
+  pullHighlights,
   beginLink,
   pollLink,
   revoke,
