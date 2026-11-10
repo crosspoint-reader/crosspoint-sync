@@ -301,7 +301,36 @@ describe('readest connector highlight pull', () => {
     expect(await readestConnector.pullHighlights!(CRED, MATCH, fake.transport, () => false)).toEqual([
       expect.objectContaining({ text: 'bold tail', spine: 1, startOffset: 8, endOffset: 17 }),
     ]);
-    expect(fake.calls.some((c) => c.url.includes('type=books'))).toBe(false);
+  });
+
+  it('imports highlights from both the file\'s own copy and the library copy', async () => {
+    const fake = fakeTransport();
+    readestLibrary(fake, []);
+    fake.on(`/api/crosspoint/books/${DOC}`, 200, { downloadUrl: 'https://files.readest.test/book.epub?sig=1' });
+    fake.on(`type=notes&book=${DOC}`, 200, { books: [], configs: [], notes: [readestNote({ book_hash: DOC })] });
+    fake.on(`type=notes&book=${BOOK}`, 200, { books: [], configs: [], notes: [readestNote({ id: 'n2', cfi: 'epubcfi(/6/4!/4/4,/1:0,/1:3)', text: 'Pre' })] });
+    const got = await readestConnector.pullHighlights!(CRED, MATCH, fake.transport, () => false);
+    expect(got.map((h) => h.text).sort()).toEqual(['Pre', 'bold tail']);
+  });
+
+  it('skips a highlight whose position covers more text than the highlight', async () => {
+    const fake = fakeTransport();
+    // The range covers "Pre bold tail"; the note says only "Pre".
+    readestLibrary(fake, [readestNote({ cfi: 'epubcfi(/6/4!/4/4,/1:0,/3:5)', text: 'Pre' })]);
+    expect(await readestConnector.pullHighlights!(CRED, MATCH, fake.transport, () => false)).toEqual([]);
+  });
+
+  it('does not download the book again for a highlight it could not place, until it is edited', async () => {
+    const fake = fakeTransport();
+    readestLibrary(fake, [readestNote({ text: 'something else' })]);
+    const downloads = () => fake.calls.filter((c) => c.url.startsWith('https://files.readest.test/')).length;
+    await readestConnector.pullHighlights!(CRED, MATCH, fake.transport, () => false);
+    clearBookFusionEpubCache();
+    await readestConnector.pullHighlights!(CRED, MATCH, fake.transport, () => false);
+    expect(downloads()).toBe(1);
+    fake.on('type=notes', 200, { books: [], configs: [], notes: [readestNote({ updated_at: '2026-01-02T00:00:00Z' })] });
+    expect(await readestConnector.pullHighlights!(CRED, MATCH, fake.transport, () => false)).toHaveLength(1);
+    expect(downloads()).toBe(2);
   });
 
   it('leaves out known, deleted, other-copy and misplaced highlights, and bookmarks', async () => {

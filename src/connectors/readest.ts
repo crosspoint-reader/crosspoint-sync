@@ -356,7 +356,10 @@ async function pushHighlight(
 // ponytail: in-process only; a restart searches again.
 const noCopyUntil = new Map<string, number>();
 const SEARCH_AGAIN_MS = 60 * 60 * 1000;
-export function clearReadestSearches(): void { noCopyUntil.clear(); }
+// Highlights whose text isn't at their CFI, so their book isn't downloaded again on every read.
+// Keyed with the CFI and edit time: an edited highlight is tried again.
+const unplaced = new Set<string>();
+export function clearReadestSearches(): void { noCopyUntil.clear(); unplaced.clear(); }
 
 /** Unix seconds from Readest's ISO timestamp (or epoch ms), 0 when missing. */
 function seconds(value: unknown): number {
@@ -369,40 +372,43 @@ async function pullHighlights(
 ): Promise<InboundHighlight[]> {
   const c = parseCred(cred);
   if (!c) return [];
-  // Only live highlights in one copy: its CFIs mean nothing in another copy's EPUB.
+  // Live highlights in one copy; its CFIs mean nothing in another copy's EPUB.
   const highlightsIn = async (bookHash: string) => {
     const res = await syncApi(http, c, cred, 'GET', `?since=0&type=notes&book=${encodeURIComponent(bookHash)}`);
     return (Array.isArray(res.notes) ? res.notes : []).filter((n: any) =>
       n?.type === 'annotation' && !n.deleted_at && n.book_hash === bookHash &&
       typeof n.cfi === 'string' && typeof n.text === 'string' && n.text.trim());
   };
-  // Readest keys notes by the file's own hash, which a library entry may not exist for yet.
-  let bookHash = m.externalId;
-  let notes = await highlightsIn(bookHash);
-  if (!notes.length) {
-    const key = JSON.stringify([c.server, c.username ?? '', m.externalId]);
-    if ((noCopyUntil.get(key) ?? 0) > Date.now()) return [];
+  // Readest keys notes by the file's own hash (which may have no library entry)
+  // and may also hold another copy of the book in its library.
+  const copies = [m.externalId];
+  const search = JSON.stringify([c.server, c.username ?? '', m.externalId]);
+  if ((noCopyUntil.get(search) ?? 0) <= Date.now()) {
     const book = await readestBook(c, cred, m, http, ctx);
-    if (!book) noCopyUntil.set(key, Date.now() + SEARCH_AGAIN_MS);
-    if (!book || book.bookHash === bookHash) return [];
-    bookHash = book.bookHash;
-    notes = await highlightsIn(bookHash);
+    if (!book) noCopyUntil.set(search, Date.now() + SEARCH_AGAIN_MS);
+    else if (book.bookHash !== m.externalId) copies.push(book.bookHash);
   }
-  notes = notes.filter((n: any) => !skip(n.text));
-  if (!notes.length) return [];
-  const bytes = await epub(http, c, bookHash);
   const out: InboundHighlight[] = [];
-  for (const n of notes) {
-    const at = await epubRangeOffsets(bytes, n.cfi).catch(() => null);
-    if (!at || !normalizeEpubQuote(at.text).startsWith(normalizeEpubQuote(n.text).slice(0, 40))) continue;
-    // Readest selections can take in the space around a word; whitespace is one codepoint each.
-    const text = at.text.trim();
-    const lead = at.text.length - at.text.trimStart().length;
-    out.push({
-      text, note: typeof n.note === 'string' && n.note.trim() ? n.note : null, chapter: null,
-      spine: at.spine, startOffset: at.start + lead, endOffset: at.start + lead + Array.from(text).length,
-      createdAt: seconds(n.created_at),
-    });
+  for (const bookHash of copies) {
+    const key = (n: any) => JSON.stringify([c.server, c.username ?? '', bookHash, n.id, n.cfi, n.updated_at]);
+    const notes = (await highlightsIn(bookHash)).filter((n: any) => !skip(n.text) && !unplaced.has(key(n)));
+    if (!notes.length) continue;
+    const bytes = await epub(http, c, bookHash);
+    for (const n of notes) {
+      const at = await epubRangeOffsets(bytes, n.cfi).catch(() => null);
+      if (!at || normalizeEpubQuote(at.text) !== normalizeEpubQuote(n.text)) {
+        unplaced.add(key(n));
+        continue;
+      }
+      // Readest selections can take in the space around a word; whitespace is one codepoint each.
+      const text = at.text.trim();
+      const lead = at.text.length - at.text.trimStart().length;
+      out.push({
+        text, note: typeof n.note === 'string' && n.note.trim() ? n.note : null, chapter: null,
+        spine: at.spine, startOffset: at.start + lead, endOffset: at.start + lead + Array.from(text).length,
+        createdAt: seconds(n.created_at),
+      });
+    }
   }
   return out;
 }
