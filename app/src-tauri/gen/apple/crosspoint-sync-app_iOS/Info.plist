@@ -19,16 +19,16 @@
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
+			<key>CFBundleURLName</key>
+			<string>crosspointsync</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>crosspointsync</string>
 			</array>
-			<key>CFBundleURLName</key>
-			<string>crosspointsync</string>
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>17</string>
+	<string>19</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>

@@ -844,6 +844,8 @@ export function connectorRoutes(
       if (!(audio > 0 && audio < 1)) return c.json({ code: 2003, message: 'Pick a spot inside the book, not its very start or end' }, 400);
       const anchor = { text: b.readerPct, audio };
       setMatchAnchor(db, b.user.id, 'audiobookshelf', b.document, anchor);
+      // Move ABS to the picked spot now (the queue pushes the reader % through the anchor).
+      backfillConnector(db, b.user.id, 'audiobookshelf', b.document);
       return c.json({ anchor });
     } catch (err) {
       return absFailed(c, b.user.id, err);
@@ -854,6 +856,7 @@ export function connectorRoutes(
     const b = absBook(c);
     if (b.error) return b.error;
     setMatchAnchor(db, b.user.id, 'audiobookshelf', b.document, null);
+    backfillConnector(db, b.user.id, 'audiobookshelf', b.document);
     return c.json({ anchor: null });
   });
 
