@@ -320,7 +320,7 @@ export interface Connector {
    * known ones (which can mean downloading the EPUB). Optional.
    */
   pullHighlights?(
-    cred: Credential, match: Match, http: HttpTransport, skip: (text: string) => boolean
+    cred: Credential, match: Match, http: HttpTransport, skip: (text: string) => boolean, ctx?: ConnectorContext
   ): Promise<InboundHighlight[]>;
 
   /** Begin an interactive device-code link (OAuth device grant). Optional. */

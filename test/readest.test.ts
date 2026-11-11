@@ -5,7 +5,7 @@ import { DOC, makeTestApp, registerUser } from './helpers.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
 import type { HttpTransport, OutboundEvent } from '../src/connectors/types.js';
 import { drainQueue } from '../src/connectors/runner.js';
-import { readestBase, readestConnector } from '../src/connectors/readest.js';
+import { clearReadestSearches, readestBase, readestConnector } from '../src/connectors/readest.js';
 import { SAVE_CREDENTIAL } from '../src/connectors/types.js';
 import { clearBookFusionEpubCache } from '../src/connectors/bookfusion-epub.js';
 
@@ -100,7 +100,7 @@ const progressEvent = (over: Partial<OutboundEvent> = {}): OutboundEvent => ({
 const body = (call: { body?: string }) => JSON.parse(call.body ?? '{}');
 
 const KEY = { TOKEN_ENC_KEY: 'a'.repeat(64) };
-beforeEach(() => { Object.assign(process.env, KEY); resetEncryptionKeyCache(); clearBookFusionEpubCache(); });
+beforeEach(() => { Object.assign(process.env, KEY); resetEncryptionKeyCache(); clearBookFusionEpubCache(); clearReadestSearches(); });
 afterEach(() => { vi.useRealTimers(); delete process.env.TOKEN_ENC_KEY; delete process.env.READEST_URL; resetEncryptionKeyCache(); });
 
 describe('readest connector (unit)', () => {
@@ -219,6 +219,7 @@ describe('readest connector highlights', () => {
   it('gives up on a book that is not in the Readest library, and on text that is not at its position', async () => {
     const fake = fakeTransport();
     fake.on('/api/sync', 200, library([]));
+    fake.on(`/api/crosspoint/books/${DOC}`, 404, { error: 'Book not found' });
     expect(await readestConnector.push(CRED, MATCH, highlightEvent(), fake.transport)).toMatchObject({
       ok: false, retryable: false, error: expect.stringContaining('not in your Readest library'),
     });
@@ -226,6 +227,17 @@ describe('readest connector highlights', () => {
     fake.on('/api/sync', 200, library([libraryBook()]));
     expect(await readestConnector.push(CRED, MATCH, highlightEvent({ text: 'something else' }), fake.transport)).toMatchObject({ ok: false, retryable: false });
     expect(fake.calls.some((c) => c.method === 'POST')).toBe(false);
+  });
+
+  it('places a clipping in a file Readest holds before its library entry exists', async () => {
+    const fake = fakeTransport();
+    fake.on('/api/sync', 200, library([]));
+    fake.on(`/api/crosspoint/books/${DOC}`, 200, { downloadUrl: 'https://files.readest.test/book.epub?sig=1' });
+    fake.on('https://files.readest.test/', 200, EPUB);
+    expect(await readestConnector.push(CRED, MATCH, highlightEvent(), fake.transport)).toEqual({ ok: true });
+    const note = body(fake.calls.find((c) => c.method === 'POST')!).notes[0];
+    expect(note).toMatchObject({ bookHash: DOC, text: 'bold tail', cfi: 'epubcfi(/6/4!/4/4,/2/1:0,/3:5)' });
+    expect(note).not.toHaveProperty('metaHash');
   });
 
   it('refreshes an expired session once and saves the rotated tokens', async () => {
@@ -250,6 +262,135 @@ describe('readest connector highlights', () => {
     fake.on('/auth/v1/token', 400, { error: 'invalid_grant' });
     const cred = { ...CRED, refresh_token: 'rt-revoked', expires_at: 1 };
     expect(await readestConnector.push(cred, MATCH, highlightEvent(), fake.transport)).toMatchObject({ ok: false, needsReauth: true });
+  });
+});
+
+// Readest's own note rows, as GET /api/sync returns them.
+const readestNote = (over: Record<string, unknown> = {}) => ({
+  book_hash: BOOK, meta_hash: 'meta-1', id: 'n1', type: 'annotation', style: 'highlight', color: 'yellow',
+  cfi: 'epubcfi(/6/4!/4/4,/2/1:0,/3:5)', text: 'bold tail', note: 'from Readest',
+  created_at: '2025-10-09T08:53:20.000Z', updated_at: '2025-10-09T08:53:20.000Z', deleted_at: null, ...over,
+});
+function readestLibrary(fake: ReturnType<typeof fakeTransport>, notes: unknown[]) {
+  bookFiles(fake);
+  fake.on('/api/sync', 200, library([libraryBook()]));
+  fake.on('type=notes', 200, { books: [], configs: [], notes });
+}
+
+describe('readest connector highlight pull', () => {
+  it('brings back a Readest highlight as chapter offsets in its copy of the book', async () => {
+    const fake = fakeTransport();
+    readestLibrary(fake, [readestNote()]);
+    expect(await readestConnector.pullHighlights!(CRED, MATCH, fake.transport, () => false)).toEqual([{
+      text: 'bold tail', note: 'from Readest', chapter: null, spine: 1, startOffset: 8, endOffset: 17, createdAt: 1_760_000_000,
+    }]);
+    // Nothing under our own hash, so the library copy with the same title is asked next.
+    expect(fake.calls.filter((c) => c.url.includes('type=notes')).map((c) => c.url)).toEqual([
+      `https://web.readest.com/api/sync?since=0&type=notes&book=${DOC}`,
+      `https://web.readest.com/api/sync?since=0&type=notes&book=${BOOK}`,
+    ]);
+    expect(fake.calls.find((c) => c.url.includes('type=notes'))!.headers?.authorization).toBe('Bearer at-1');
+  });
+
+  it('reads highlights stored under the file\'s own hash without a library entry', async () => {
+    const fake = fakeTransport();
+    fake.on(`/api/crosspoint/books/${DOC}`, 200, { downloadUrl: 'https://files.readest.test/book.epub?sig=1' });
+    fake.on('https://files.readest.test/', 200, EPUB);
+    fake.on('/api/sync', 200, library([]));
+    fake.on('type=notes', 200, { books: [], configs: [], notes: [readestNote({ book_hash: DOC })] });
+    expect(await readestConnector.pullHighlights!(CRED, MATCH, fake.transport, () => false)).toEqual([
+      expect.objectContaining({ text: 'bold tail', spine: 1, startOffset: 8, endOffset: 17 }),
+    ]);
+  });
+
+  it('imports highlights from both the file\'s own copy and the library copy', async () => {
+    const fake = fakeTransport();
+    readestLibrary(fake, []);
+    fake.on(`/api/crosspoint/books/${DOC}`, 200, { downloadUrl: 'https://files.readest.test/book.epub?sig=1' });
+    fake.on(`type=notes&book=${DOC}`, 200, { books: [], configs: [], notes: [readestNote({ book_hash: DOC })] });
+    fake.on(`type=notes&book=${BOOK}`, 200, { books: [], configs: [], notes: [readestNote({ id: 'n2', cfi: 'epubcfi(/6/4!/4/4,/1:0,/1:3)', text: 'Pre' })] });
+    const got = await readestConnector.pullHighlights!(CRED, MATCH, fake.transport, () => false);
+    expect(got.map((h) => h.text).sort()).toEqual(['Pre', 'bold tail']);
+  });
+
+  it('still imports the library copy when the file\'s own copy cannot be downloaded', async () => {
+    const fake = fakeTransport();
+    readestLibrary(fake, []);
+    fake.on(`/api/crosspoint/books/${DOC}`, 404, { error: 'Book not found' });
+    fake.on(`type=notes&book=${DOC}`, 200, { books: [], configs: [], notes: [readestNote({ book_hash: DOC, text: 'Pre', cfi: 'epubcfi(/6/4!/4/4,/1:0,/1:3)' })] });
+    fake.on(`type=notes&book=${BOOK}`, 200, { books: [], configs: [], notes: [readestNote()] });
+    expect((await readestConnector.pullHighlights!(CRED, MATCH, fake.transport, () => false)).map((h) => h.text)).toEqual(['bold tail']);
+    // A server error still fails the pull, so it is retried.
+    fake.on(`/api/crosspoint/books/${DOC}`, 503, {});
+    await expect(readestConnector.pullHighlights!(CRED, MATCH, fake.transport, () => false)).rejects.toThrow('503');
+  });
+
+  it('skips a highlight whose position covers more text than the highlight', async () => {
+    const fake = fakeTransport();
+    // The range covers "Pre bold tail"; the note says only "Pre".
+    readestLibrary(fake, [readestNote({ cfi: 'epubcfi(/6/4!/4/4,/1:0,/3:5)', text: 'Pre' })]);
+    expect(await readestConnector.pullHighlights!(CRED, MATCH, fake.transport, () => false)).toEqual([]);
+  });
+
+  it('does not download the book again for a highlight it could not place, until it is edited', async () => {
+    const fake = fakeTransport();
+    readestLibrary(fake, [readestNote({ text: 'something else' })]);
+    const downloads = () => fake.calls.filter((c) => c.url.startsWith('https://files.readest.test/')).length;
+    await readestConnector.pullHighlights!(CRED, MATCH, fake.transport, () => false);
+    clearBookFusionEpubCache();
+    await readestConnector.pullHighlights!(CRED, MATCH, fake.transport, () => false);
+    expect(downloads()).toBe(1);
+    fake.on('type=notes', 200, { books: [], configs: [], notes: [readestNote({ updated_at: '2026-01-02T00:00:00Z' })] });
+    expect(await readestConnector.pullHighlights!(CRED, MATCH, fake.transport, () => false)).toHaveLength(1);
+    expect(downloads()).toBe(2);
+  });
+
+  it('leaves out known, deleted, other-copy and misplaced highlights, and bookmarks', async () => {
+    const fake = fakeTransport();
+    readestLibrary(fake, [
+      readestNote({ id: 'known', text: 'Pre' , cfi: 'epubcfi(/6/4!/4/4,/1:0,/1:3)' }),
+      readestNote({ id: 'gone', deleted_at: '2026-01-01T00:00:00Z' }),
+      readestNote({ id: 'other', book_hash: 'c'.repeat(32) }),
+      readestNote({ id: 'moved', text: 'something else' }),
+      readestNote({ id: 'mark', type: 'bookmark' }),
+      readestNote({ id: 'broken', cfi: 'epubcfi(/6/99!/4)' }),
+    ]);
+    expect(await readestConnector.pullHighlights!(CRED, MATCH, fake.transport, (t) => t === 'Pre')).toEqual([]);
+    // Nothing left to place, so the EPUB is never fetched for the skipped ones alone.
+    const none = fakeTransport();
+    readestLibrary(none, [readestNote({ deleted_at: '2026-01-01T00:00:00Z' })]);
+    expect(await readestConnector.pullHighlights!(CRED, MATCH, none.transport, () => false)).toEqual([]);
+    expect(none.calls.some((c) => c.url.startsWith('https://files.readest.test/'))).toBe(false);
+  });
+
+  it('leaves the spaces a Readest selection took in out of the clipping', async () => {
+    const fake = fakeTransport();
+    // " tail" is 12-17 in chapter 2; Readest took in the space before it.
+    readestLibrary(fake, [readestNote({ cfi: 'epubcfi(/6/4!/4/4,/3:0,/3:5)', text: ' tail' })]);
+    expect(await readestConnector.pullHighlights!(CRED, MATCH, fake.transport, () => false)).toEqual([
+      expect.objectContaining({ text: 'tail', startOffset: 13, endOffset: 17 }),
+    ]);
+  });
+
+  it('lists the Readest library at most once an hour for a book Readest does not have', async () => {
+    const fake = fakeTransport();
+    fake.on('/api/sync', 200, library([]));
+    const listings = () => fake.calls.filter((c) => c.url.endsWith('?since=0&type=books')).length;
+    const cred = { ...CRED, expires_at: Math.floor(Date.now() / 1000) + 24 * 3600 };
+    await readestConnector.pullHighlights!(cred, MATCH, fake.transport, () => false);
+    await readestConnector.pullHighlights!(cred, MATCH, fake.transport, () => false);
+    expect(listings()).toBe(1);
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 61 * 60_000 });
+    await readestConnector.pullHighlights!(cred, MATCH, fake.transport, () => false);
+    expect(listings()).toBe(2);
+  });
+
+  it('brings back nothing for a book that is not in the Readest library', async () => {
+    const fake = fakeTransport();
+    fake.on('/api/sync', 200, library([]));
+    expect(await readestConnector.pullHighlights!(CRED, MATCH, fake.transport, () => false)).toEqual([]);
+    expect(fake.calls.filter((c) => c.url.includes('type=notes'))).toHaveLength(1);
+    expect(fake.calls.some((c) => c.url.startsWith('https://files.readest.test/'))).toBe(false);
   });
 });
 
@@ -310,6 +451,36 @@ describe('readest connector (end to end)', () => {
     await drainQueue(db, fake.transport, 10);
     const post = fake.calls.find((c) => c.method === 'POST' && c.url === 'https://web.readest.com/api/sync');
     expect(body(post!).notes[0]).toMatchObject({ bookHash: BOOK, text: 'bold tail', note: 'nice', cfi: 'epubcfi(/6/4!/4/4,/2/1:0,/3:5)' });
+  });
+
+  it('imports a Readest highlight as a clipping when the reader syncs', async () => {
+    const fake = fakeTransport();
+    const { app } = makeTestApp({}, { connectorTransport: fake.transport });
+    const { headers } = await registerUser(app);
+    signIn(fake);
+    const { device_code } = await (await app.request('/api/v1/connectors/readest/link/begin', { method: 'POST', headers })).json();
+    await app.request('/api/v1/connectors/readest/link/poll', { method: 'POST', headers, body: JSON.stringify({ device_code }) });
+    readestLibrary(fake, [readestNote()]);
+    await app.request('/syncs/progress', {
+      method: 'PUT', headers,
+      body: JSON.stringify({ document: DOC, progress: XPOINTER, percentage: 0.5, device_id: 'd1', metadata: { title: 'Piranesi', authors: 'Susanna Clarke' } }),
+    });
+    // A progress read refreshes the book from Readest, highlights included.
+    await app.request(`/syncs/progress/${DOC}`, { headers });
+    const clips = await (await app.request(`/api/v1/clippings/${DOC}`, { headers })).json();
+    expect(clips.items).toEqual([expect.objectContaining({ text: 'bold tail', note: 'from Readest', spine: 1, start_offset: 8, end_offset: 17 })]);
+    // A second read finds it known and adds nothing, and nothing is sent back to Readest.
+    await app.request(`/syncs/progress/${DOC}`, { headers });
+    expect((await (await app.request(`/api/v1/clippings/${DOC}`, { headers })).json()).items).toHaveLength(1);
+    expect(fake.calls.some((c) => c.method === 'POST' && c.url.endsWith('/api/sync'))).toBe(false);
+
+    // Deleted on the reader: Readest still has it, but it stays deleted here.
+    const id = clips.items[0].id;
+    await app.request(`/api/v1/clippings/${DOC}`, { method: 'PUT', headers, body: JSON.stringify({ items: [{ id, deleted: 1 }] }) });
+    await app.request(`/syncs/progress/${DOC}`, { headers });
+    expect((await (await app.request(`/api/v1/clippings/${DOC}`, { headers })).json()).items).toEqual([
+      expect.objectContaining({ id, deleted: 1 }),
+    ]);
   });
 
   it('revokes the reader key and signs the session out on unlink, and the old ones on a new link', async () => {
