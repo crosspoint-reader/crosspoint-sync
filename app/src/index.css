@@ -213,6 +213,11 @@ body::before {
 .native-adaptive .app-layout { padding-left: 0; }
 .native-adaptive .app-layout > aside { display: none; }
 .native-adaptive .app-main { padding-bottom: 1rem; }
+.native-adaptive .toast-layer {
+  bottom: calc(max(env(safe-area-inset-bottom), var(--native-inset-bottom, 0px)) + 1rem);
+  padding-right: calc(max(env(safe-area-inset-right), var(--native-inset-right, 0px)) + 1rem);
+  padding-left: calc(max(env(safe-area-inset-left), var(--native-inset-left, 0px)) + 1rem);
+}
 .native-adaptive .native-menu {
   top: max(env(safe-area-inset-top), var(--native-inset-top, 0px));
   right: calc(max(env(safe-area-inset-right), var(--native-inset-right, 0px)) + 0.75rem);
