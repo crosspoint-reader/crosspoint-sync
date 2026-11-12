@@ -11,7 +11,7 @@ import { hardcoverConnector } from '../src/connectors/hardcover.js';
 import { audiobookshelfConnector, baseUrl as absBaseUrl } from '../src/connectors/audiobookshelf.js';
 import { bookorbitConnector } from '../src/connectors/bookorbit.js';
 import { pollConnector } from '../src/connectors/fanin.js';
-import { saveMatch } from '../src/connectors/store.js';
+import { getMatch, saveMatch } from '../src/connectors/store.js';
 
 function fakeTransport() {
   const calls: { url: string; method: string; body?: string }[] = [];
@@ -940,6 +940,40 @@ describe('bookorbit connector', () => {
     expect(await bookorbitConnector.push({ server: 'orbit.test', apiKey: KEY }, { externalId: '12', externalEdition: '71', confidence: 1 },
       { kind: 'progress', document: 'd', percentage: 0.1, timestamp: 1 }, fake.transport)).toMatchObject({ ok: false, needsReauth: true });
     expect(fake.calls).toHaveLength(1);
+  });
+
+  it('marks a rejected key for relinking when looking up an unmatched book', async () => {
+    const fake = fakeTransport();
+    fake.on('/books/12', 401, { statusCode: 401, message: 'Invalid API key' });
+    expect(await bookorbitConnector.push({ server: 'orbit.test', apiKey: KEY }, { externalId: '12', externalEdition: null, confidence: 1 },
+      { kind: 'progress', document: 'd', percentage: 0.1, timestamp: 1 }, fake.transport)).toMatchObject({ ok: false, needsReauth: true });
+  });
+
+  it.each([
+    [{ statusCode: 403, message: 'No access to this library' }, { ok: false, retryable: false }],
+    [{ statusCode: 403, message: 'This API key is read-only', errorCode: 'API_KEY_READ_ONLY' }, { ok: false, needsReauth: true }],
+  ])('only asks to relink for a 403 about the key: %j', async (body, expected) => {
+    const fake = fakeTransport();
+    fake.on('/books/files/71/progress', 200, { percentage: 0, updatedAt: null });
+    fake.on('"percentage"', 403, body);
+    const r = await bookorbitConnector.push({ server: 'orbit.test', apiKey: KEY }, { externalId: '12', externalEdition: '71', confidence: 1 },
+      { kind: 'progress', document: 'd', percentage: 0.1, timestamp: 1 }, fake.transport);
+    expect(r).toMatchObject(expected);
+    if (!('needsReauth' in expected)) expect(r.needsReauth).toBeFalsy();
+  });
+
+  it('finds the surviving file after BookOrbit merges away the matched one', async () => {
+    const { app, db } = makeTestApp();
+    await registerUser(app);
+    saveMatch(db, 1, 'bookorbit', DOC, { externalId: '12', externalEdition: '70', confidence: 1 }, 'manual');
+    const fake = fakeTransport();
+    fake.on('/books/files/70/progress', 404, { statusCode: 404, message: 'No file with id 70' });
+    fake.on('/books/12', 200, { id: 12, files: [{ id: 71, format: 'epub', role: 'primary' }] });
+    fake.on('/books/files/71/progress', 200, { percentage: 0, updatedAt: null });
+    expect(await bookorbitConnector.push({ server: 'orbit.test', apiKey: KEY }, { externalId: '12', externalEdition: '70', confidence: 1 },
+      { kind: 'progress', document: DOC, percentage: 0.1, timestamp: 1 }, fake.transport, { db, userId: 1, document: DOC })).toEqual({ ok: true });
+    expect(fake.calls.some((c) => c.method === 'POST' && c.url.endsWith('/books/files/71/progress'))).toBe(true);
+    expect(getMatch(db, 1, 'bookorbit', DOC)?.external_edition).toBe('71');
   });
 
   it('validates with a native password login', async () => {

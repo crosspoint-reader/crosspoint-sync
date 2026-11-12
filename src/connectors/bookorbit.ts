@@ -1,5 +1,6 @@
 import { decideMatch, extractTitleAuthor, type Candidate } from './matching.js';
 import { baseUrl } from './audiobookshelf.js';
+import { replaceMatchEdition } from './store.js';
 import { cachedEpub, epubPosition, epubQuoteRangeCfi, epubRangeCfi, epubRangeOffsets, epubXPath, normalizeEpubQuote, withEpubMap, type Epub } from './bookfusion-epub.js';
 import {
   ConnectorOperationError,
@@ -128,8 +129,30 @@ async function call(http: HttpTransport, c: OrbitCred, method: string, path: str
   }
 }
 
+/**
+ * 401 is always the credential. A 403 is only about the account when BookOrbit says it is the key;
+ * a plain 403 is one library or book this account cannot see.
+ */
+async function authFailure(res: Awaited<ReturnType<HttpTransport>>): Promise<boolean> {
+  if (res.status === 401) return true;
+  if (res.status !== 403) return false;
+  const body = await res.json().catch(() => null) as { errorCode?: unknown } | null;
+  return typeof body?.errorCode === 'string' && body.errorCode.startsWith('API_KEY');
+}
+
+class OrbitRequestError extends ConnectorOperationError {
+  constructor(message: string, retryable: boolean, needsReauth: boolean, readonly status: number) {
+    super(message, retryable, needsReauth);
+  }
+}
+
+async function failure(res: Awaited<ReturnType<HttpTransport>>, what: string): Promise<ConnectorOperationError> {
+  return new OrbitRequestError(`${what} (${res.status})`, res.status === 429 || res.status >= 500, await authFailure(res), res.status);
+}
+
 async function getJson(http: HttpTransport, c: OrbitCred, path: string): Promise<any> {
   const res = await call(http, c, 'GET', path);
+  if (res.status === 401 || res.status === 403) throw await failure(res, 'BookOrbit request failed');
   if (res.status < 200 || res.status >= 300) return null;
   try {
     return await res.json();
@@ -143,10 +166,7 @@ export async function bookorbitStatsJson(cred: Credential, http: HttpTransport, 
   const c = parseCred(cred);
   if (!c) throw new ConnectorOperationError('invalid BookOrbit credentials', false, true);
   const res = await call(http, c, 'GET', path);
-  if (res.status < 200 || res.status >= 300) {
-    throw new ConnectorOperationError(`BookOrbit request failed (${res.status})`,
-      res.status === 429 || res.status >= 500, res.status === 401 || res.status === 403);
-  }
+  if (res.status < 200 || res.status >= 300) throw await failure(res, 'BookOrbit request failed');
   return res.json();
 }
 
@@ -155,8 +175,7 @@ export async function saveBookorbitSession(cred: Credential, http: HttpTransport
   const c = parseCred(cred);
   if (!c) throw new ConnectorOperationError('invalid BookOrbit credentials', false, true);
   const res = await call(http, c, 'POST', `/books/files/${encodeURIComponent(file)}/sessions`, body);
-  if (res.status !== 204) throw new ConnectorOperationError(`BookOrbit session export failed (${res.status})`,
-    res.status === 429 || res.status >= 500, res.status === 401 || res.status === 403);
+  if (res.status !== 204) throw await failure(res, 'BookOrbit session export failed');
 }
 
 async function validate(cred: Credential, http: HttpTransport): Promise<ValidateResult> {
@@ -258,6 +277,27 @@ async function fileProgress(cred: Credential, http: HttpTransport, file: string)
   return row;
 }
 
+/**
+ * The match's EPUB file and its progress. Merging duplicate books in BookOrbit deletes one copy's
+ * file, so a remembered file that 404s is looked up again from the book once.
+ */
+async function fileWithProgress(
+  cred: Credential, c: OrbitCred, http: HttpTransport, m: Match, ctx?: ConnectorContext
+): Promise<{ file: string; row: FileProgress } | null> {
+  let file = m.externalEdition ?? (await fileId(http, c, m.externalId));
+  if (!file) return null;
+  try {
+    return { file, row: await fileProgress(cred, http, file) };
+  } catch (err) {
+    if (!m.externalEdition || !(err instanceof OrbitRequestError) || err.status !== 404) throw err;
+    const stale = file;
+    file = await fileId(http, c, m.externalId);
+    if (!file || file === stale) throw err;
+    if (ctx?.document) replaceMatchEdition(ctx.db, ctx.userId, 'bookorbit', ctx.document, m.externalId, stale, file);
+    return { file, row: await fileProgress(cred, http, file) };
+  }
+}
+
 function progressUpdatedAt(row: FileProgress): number {
   const textTime = typeof row.textUpdatedAt === 'string' ? Date.parse(row.textUpdatedAt) : NaN;
   if (Number.isFinite(textTime)) return textTime;
@@ -269,9 +309,9 @@ async function pullProgress(
 ): Promise<InboundChange | null> {
   const c = parseCred(cred);
   if (!c) return null;
-  const file = m.externalEdition ?? (await fileId(http, c, m.externalId));
-  if (!file) return null;
-  const row = await fileProgress(cred, http, file);
+  const found = await fileWithProgress(cred, c, http, m, ctx);
+  if (!found) return null;
+  const { file, row } = found;
   const updatedAtMs = progressUpdatedAt(row);
   if (!Number.isFinite(updatedAtMs) || updatedAtMs <= sinceMs) return null;
   const pct = Math.max(0, Math.min(1, row.percentage / 100));
@@ -331,9 +371,11 @@ async function pullHighlights(
   return out;
 }
 
-function result(status: number): PushResult {
+async function result(res: Awaited<ReturnType<HttpTransport>>): Promise<PushResult> {
+  const status = res.status;
   if (status >= 200 && status < 300) return { ok: true };
-  if (status === 401 || status === 403) return { ok: false, retryable: false, needsReauth: true, error: 'unauthorized' };
+  if (await authFailure(res)) return { ok: false, retryable: false, needsReauth: true, error: 'unauthorized' };
+  if (status === 403) return { ok: false, retryable: false, error: 'no access to this book in BookOrbit' };
   if (status === 429) return { ok: false, retryable: true, error: 'rate limited' };
   if (status >= 500) return { ok: false, retryable: true, error: `server ${status}` };
   return { ok: false, retryable: false, error: `unexpected status ${status}` };
@@ -373,12 +415,12 @@ async function pushHighlight(http: HttpTransport, c: OrbitCred, m: Match, file: 
   }
   if (same) {
     if ((same.note ?? null) === (h.note ?? null)) return { ok: true };
-    return result((await call(http, c, 'PATCH', `/books/${book}/annotations/${encodeURIComponent(same.id)}`, { note: h.note ?? null })).status);
+    return result(await call(http, c, 'PATCH', `/books/${book}/annotations/${encodeURIComponent(same.id)}`, { note: h.note ?? null }));
   }
   const body: Record<string, unknown> = { cfi, bookFileId: Number(file), text: h.text };
   if (h.note) body.note = h.note;
   if (h.chapter) body.chapterTitle = h.chapter.slice(0, 500);
-  return result((await call(http, c, 'POST', `/books/${book}/annotations`, body)).status);
+  return result(await call(http, c, 'POST', `/books/${book}/annotations`, body));
 }
 
 async function push(
@@ -388,18 +430,18 @@ async function push(
   if (!c) return { ok: false, retryable: false, needsReauth: true, error: 'bad credential' };
   try {
     if (ev.kind === 'highlight') {
-      const file = m.externalEdition ?? (await fileId(http, c, m.externalId));
+      const file = (await fileWithProgress(cred, c, http, m, ctx))?.file;
       if (!file) return { ok: false, retryable: false, error: 'book has no EPUB file in BookOrbit' };
       return ev.highlight ? await pushHighlight(http, c, m, file, ev.highlight) : { ok: true };
     }
     const pct = Math.max(0, Math.min(1, ev.percentage ?? 0));
     const finished = ev.kind === 'finished' || pct >= 0.999;
-    const file = m.externalEdition ?? (await fileId(http, c, m.externalId));
-    if (!file) return { ok: false, retryable: false, error: 'book has no EPUB file in BookOrbit' };
+    const found = await fileWithProgress(cred, c, http, m, ctx);
+    if (!found) return { ok: false, retryable: false, error: 'book has no EPUB file in BookOrbit' };
+    const { file, row: current } = found;
 
     // Backfills and delayed queue jobs retain the original reading timestamp.
     // Do not replace a position saved more recently by another reader.
-    const current = await fileProgress(cred, http, file);
     const updated = progressUpdatedAt(current);
     if (Number.isFinite(updated) && Math.floor(updated / 1000) > ev.timestamp) return { ok: true };
 
@@ -413,9 +455,9 @@ async function push(
       const at = await positionMap(http, c, m, file, ctx, (b) => epubPosition(b, xpath)).catch(() => null);
       if (at) body.cfi = at.cfi;
     }
-    const saved = result((await call(http, c, 'POST', `/books/files/${encodeURIComponent(file)}/progress`, body)).status);
+    const saved = await result(await call(http, c, 'POST', `/books/files/${encodeURIComponent(file)}/progress`, body));
     if (!saved.ok || !finished) return saved;
-    return result((await call(http, c, 'PATCH', `/books/${encodeURIComponent(m.externalId)}/status`, { status: 'read' })).status);
+    return result(await call(http, c, 'PATCH', `/books/${encodeURIComponent(m.externalId)}/status`, { status: 'read' }));
   } catch (err) {
     if (err instanceof ConnectorOperationError) {
       return { ok: false, retryable: err.retryable, needsReauth: err.needsReauth, error: err.message };

@@ -166,9 +166,9 @@ describe('BookOrbit historical stats', () => {
     expect((await f.summary()).seconds).toBe(0);
   });
 
-  it('keeps matches when the same account switches from a password to an API key', async () => {
+  it.each(['orbit.test', 'https://orbit.test/'])('keeps matches when the same account switches from a password to an API key at %s', async (server) => {
     const f = await fixture();
-    upsertAccount(f.db, f.id, 'bookorbit', { server: f.cred.server, apiKey: 'bok_key', username: f.cred.username }, null);
+    upsertAccount(f.db, f.id, 'bookorbit', { server, apiKey: 'bok_key', username: f.cred.username }, null);
     expect(f.db.prepare("SELECT * FROM connector_matches WHERE connector_id = 'bookorbit'").all()).toHaveLength(1);
   });
 

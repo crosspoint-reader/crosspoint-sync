@@ -552,14 +552,16 @@ function Service({ session, conn, onChange }) {
                 {openForm ? 'Cancel' : 'Use API key'}
               </button>
             )}
-            <button
-              type="button"
-              disabled={!!busy}
-              onClick={() => setUnlinking(true)}
-              className="h-9 rounded-full px-3 text-sm font-medium text-red-600 active:bg-stone-100 md:hover:bg-stone-100"
-            >
-              {busy === 'unlink' ? <Loader2 className="size-4 animate-spin" /> : 'Unlink'}
-            </button>
+            {!(canUpgrade && openForm) && (
+              <button
+                type="button"
+                disabled={!!busy}
+                onClick={() => setUnlinking(true)}
+                className="h-9 rounded-full px-3 text-sm font-medium text-red-600 active:bg-stone-100 md:hover:bg-stone-100"
+              >
+                {busy === 'unlink' ? <Loader2 className="size-4 animate-spin" /> : 'Unlink'}
+              </button>
+            )}
           </div>
         ) : (
           <button
