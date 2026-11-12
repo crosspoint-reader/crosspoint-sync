@@ -305,10 +305,14 @@ export function setMatchNote(
 export function replaceMatchEdition(
   db: DB, userId: number, connectorId: string, document: string, externalId: string, from: string, to: string
 ): void {
-  db.prepare(
+  const changed = db.prepare(
     `UPDATE connector_matches SET external_edition = ?
      WHERE user_id = ? AND connector_id = ? AND document = ? AND external_id = ? AND external_edition = ?`
-  ).run(to, userId, connectorId, document, externalId, from);
+  ).run(to, userId, connectorId, document, externalId, from).changes;
+  if (changed) {
+    db.prepare('DELETE FROM epub_maps WHERE user_id = ? AND connector_id = ? AND external_id = ?')
+      .run(userId, connectorId, externalId);
+  }
 }
 
 /** A connector's last-seen remote position on a matched book (Spotify), or null. */

@@ -966,6 +966,7 @@ describe('bookorbit connector', () => {
     const { app, db } = makeTestApp();
     await registerUser(app);
     saveMatch(db, 1, 'bookorbit', DOC, { externalId: '12', externalEdition: '70', confidence: 1 }, 'manual');
+    db.prepare('INSERT INTO epub_maps (user_id, connector_id, external_id, map, used_at) VALUES (1, ?, ?, ?, 0)').run('bookorbit', '12', Buffer.alloc(0));
     const fake = fakeTransport();
     fake.on('/books/files/70/progress', 404, { statusCode: 404, message: 'No file with id 70' });
     fake.on('/books/12', 200, { id: 12, files: [{ id: 71, format: 'epub', role: 'primary' }] });
@@ -974,6 +975,7 @@ describe('bookorbit connector', () => {
       { kind: 'progress', document: DOC, percentage: 0.1, timestamp: 1 }, fake.transport, { db, userId: 1, document: DOC })).toEqual({ ok: true });
     expect(fake.calls.some((c) => c.method === 'POST' && c.url.endsWith('/books/files/71/progress'))).toBe(true);
     expect(getMatch(db, 1, 'bookorbit', DOC)?.external_edition).toBe('71');
+    expect(db.prepare("SELECT 1 FROM epub_maps WHERE connector_id = 'bookorbit'").all()).toHaveLength(0);
   });
 
   it('validates with a native password login', async () => {
