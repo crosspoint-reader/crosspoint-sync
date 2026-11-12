@@ -403,12 +403,33 @@ export function LinkForm({ session, conn, onLinked }) {
         {conn.id === 'hardcover' && tokenForm}
       </div>
     )
+  } else if (conn.id === 'bookorbit') {
+    body = (
+      <form className="space-y-2">
+        <p className="text-sm text-stone-600">
+          In BookOrbit, open Settings → API keys and create a Read and write key for CrossPoint Sync. Needs BookOrbit 3.8 or newer.
+        </p>
+        <input
+          className={`${field} font-mono`}
+          placeholder="https://books.example.com"
+          value={v.server ?? ''}
+          onChange={set('server')}
+          inputMode="url"
+          autoCapitalize="none"
+        />
+        <input className={`${field} font-mono`} type="password" placeholder="API key (bok_…)" value={v.apiKey ?? ''} onChange={set('apiKey')} autoComplete="off" />
+        {submit('Connect', () => ({
+          server: (v.server ?? '').trim(),
+          apiKey: (v.apiKey ?? '').trim(),
+        }))}
+      </form>
+    )
   } else if (conn.credential_kind === 'kosync' || conn.credential_kind === 'jellyfin') {
     body = (
       <form className="space-y-2">
         <input
           className={`${field} font-mono`}
-          placeholder={{ bookorbit: 'https://books.example.com', jellyfin: 'https://jellyfin.example.com' }[conn.id] ?? 'https://sync.koreader.rocks'}
+          placeholder={conn.id === 'jellyfin' ? 'https://jellyfin.example.com' : 'https://sync.koreader.rocks'}
           value={v.server ?? ''}
           onChange={set('server')}
           inputMode="url"
@@ -460,6 +481,7 @@ function Service({ session, conn, onChange }) {
   const [openForm, setOpenForm] = useState(false)
   const [busy, setBusy] = useState(null)
   const needsRelink = conn.linked && conn.status === 'needs_reauth'
+  const canUpgrade = conn.linked && !needsRelink && conn.legacy_login
   const icon = `${session.server}/icons/${conn.id}.png`
 
   async function act(kind, fn, done) {
@@ -521,14 +543,25 @@ function Service({ session, conn, onChange }) {
             >
               {busy === 'sync' ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
             </button>
-            <button
-              type="button"
-              disabled={!!busy}
-              onClick={() => setUnlinking(true)}
-              className="h-9 rounded-full px-3 text-sm font-medium text-red-600 active:bg-stone-100 md:hover:bg-stone-100"
-            >
-              {busy === 'unlink' ? <Loader2 className="size-4 animate-spin" /> : 'Unlink'}
-            </button>
+            {canUpgrade && (
+              <button
+                type="button"
+                onClick={() => setOpenForm(!openForm)}
+                className="h-9 rounded-full px-3 text-sm font-medium text-brand-600 active:bg-stone-100 md:hover:bg-stone-100"
+              >
+                {openForm ? 'Cancel' : 'Use API key'}
+              </button>
+            )}
+            {!(canUpgrade && openForm) && (
+              <button
+                type="button"
+                disabled={!!busy}
+                onClick={() => setUnlinking(true)}
+                className="h-9 rounded-full px-3 text-sm font-medium text-red-600 active:bg-stone-100 md:hover:bg-stone-100"
+              >
+                {busy === 'unlink' ? <Loader2 className="size-4 animate-spin" /> : 'Unlink'}
+              </button>
+            )}
           </div>
         ) : (
           <button
@@ -584,7 +617,10 @@ function Service({ session, conn, onChange }) {
         <Options conn={conn} save={(v) => act('options', () => api.setConnectorOptions(session, conn.id, v))} />
       )}
       {conn.id === 'microblog' && conn.linked && !needsRelink && <MicroblogPosting session={session} onChange={onChange} />}
-      {openForm && (!conn.linked || needsRelink) && (
+      {canUpgrade && !openForm && (
+        <p className="mt-2 text-xs text-stone-500">Linked with a password. Switching to an API key keeps your matches.</p>
+      )}
+      {openForm && (!conn.linked || needsRelink || canUpgrade) && (
         <LinkForm
           session={session}
           conn={conn}

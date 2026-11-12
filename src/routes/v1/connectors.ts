@@ -172,6 +172,10 @@ export function connectorRoutes(
 ): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
+  const legacyOrbitLogin = (account: NonNullable<ReturnType<typeof getAccount>>) => {
+    try { return !decryptCredential(account).apiKey; } catch { return false; }
+  };
+
   // List available connectors + this user's link status. Stealth (revealable)
   // connectors are listed only once revealed — or linked, which implies reveal.
   app.get('/connectors', (c) => {
@@ -208,6 +212,7 @@ export function connectorRoutes(
           linked: !!account,
           status: account?.status ?? null,
           account: account?.account_label ?? null,
+          ...(conn.id === 'bookorbit' && account ? { legacy_login: legacyOrbitLogin(account) } : {}),
           queue: account ? queueDepth(db, user.id, conn.id) : undefined,
           queue_errors: account ? [...queueErrors(db, user.id, conn.id), ...(conn.id === 'bookorbit' ?
             db.prepare(`SELECT 'reading session' AS kind, e.last_error AS message, COUNT(*) AS count

@@ -166,7 +166,7 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
 
   const cred = decryptCredential(account, db);
   try {
-    const result = await connector.push(cred, match, ev, http, { db, userId: row.user_id });
+    const result = await connector.push(cred, match, ev, http, { db, userId: row.user_id, document: row.document });
     if (!stillCurrent()) return;
     if (result.ok) {
       // Persist (or clear) the per-book condition so the review UI can show it.
