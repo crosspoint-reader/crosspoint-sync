@@ -116,3 +116,23 @@ Shortcuts. Load the Library and Clippings online, turn on airplane mode, close t
 app and run each action; check the returned fields and unchanged Cached At. Sign
 out and confirm actions no longer return the previous account's data. Sign into a
 different account and verify a previously selected book cannot resolve to it.
+
+### Importing files on mobile
+
+Share or open `.epub`, `.acsm`, `.md`, or `.txt` files in CrossPoint Sync to
+queue them in **Send books**. Imports are copied into app-owned storage and
+survive tab changes, restarts, and an unavailable reader. Tap Send when ready;
+a successful send deletes its queued copy. Failed sends stay queued, and Remove
+deletes only the app's copy. Files with identical names remain separate entries.
+The in-app file picker uses the same persistent queue.
+
+Android accepts Share (including multiple files) and Open intents. On iOS,
+**Open in CrossPoint Sync** opens the app directly. The **CrossPoint Sync** Share
+extension saves the files and confirms the result; open the app afterward to
+send them. iOS does not provide a supported API for this Share extension to
+launch its containing app. The extension uses the existing App Group
+`group.com.crosspointreader.sync` and the new automatically signed bundle
+identifier `com.crosspointreader.sync.share`.
+
+See [mobile import checks](../docs/mobile-file-imports-testing.md) for native
+build and device verification.

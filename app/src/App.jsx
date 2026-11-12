@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrent, onOpenUrl } from '@tauri-apps/plugin-deep-link'
 import { widgetRoute } from './widgetLinks.js'
+import { watchImports } from './importQueue.js'
+import { listen } from '@tauri-apps/api/event'
 import { ChartColumn, CloudOff, Compass, MessageSquareQuote, Eye, EyeOff, LibraryBig, Loader2, Lock, Send as SendIcon, Server, Settings as SettingsIcon, ShieldCheck, User } from 'lucide-react'
 import { useTheme } from './theme.js'
 import { DEFAULT_SERVER, syncShortcutsCache, api, hostedServer, isApp, lastServer, loadSession, login, logout, offline, cached, recover, register, saveSession } from './api.js'
-import { ErrorNote, LoadCacheProvider, PageSkeleton, RefreshPill, Toaster, useLoad } from './ui.jsx'
+import { ErrorNote, LoadCacheProvider, PageSkeleton, RefreshPill, Toaster, useLoad, notify } from './ui.jsx'
 import Library from './Library.jsx'
 import Book from './Book.jsx'
 import Stats from './Stats.jsx'
@@ -358,6 +360,20 @@ function Sidebar({ route, session }) {
 }
 
 function Home({ session, onSession, onLogout, theme }) {
+  useEffect(() => {
+    if (!isApp) return
+    let lastError
+    const report = error => {
+      const detail = String(error)
+      if (detail === lastError) return
+      lastError = detail
+      notify({ error: true, title: "Couldn't import files", detail })
+    }
+    const stop = watchImports(() => { location.hash = '#/send' }, report)
+    let live = true, unlisten
+    listen('import-error', event => report(event.payload)).then(fn => { if (live) unlisten = fn; else fn() }).catch(report)
+    return () => { live = false; stop(); unlisten?.() }
+  }, [])
   useEffect(() => {
     if (!isApp) return
     let live = true, stop

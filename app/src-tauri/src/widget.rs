@@ -54,7 +54,7 @@ extern "C" {
 
 #[cfg(target_os = "ios")]
 #[allow(unused_unsafe)]
-fn group_dir() -> Option<std::path::PathBuf> {
+pub(crate) fn group_dir() -> Option<std::path::PathBuf> {
   use objc2_foundation::{NSFileManager, NSString};
   let manager = unsafe { NSFileManager::defaultManager() };
   let url = unsafe { manager.containerURLForSecurityApplicationGroupIdentifier(&NSString::from_str("group.com.crosspointreader.sync")) }?;
