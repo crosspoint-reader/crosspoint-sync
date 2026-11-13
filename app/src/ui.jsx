@@ -556,3 +556,23 @@ export function Toggle({ checked, onChange, label }) {
     </button>
   )
 }
+
+// Tabs kept in the URL (#/<route>, #/<route>/<id>) so back returns to the same tab.
+export function Tabs({ route, tabs, tab, className = 'mt-5' }) {
+  return (
+    <nav className={`${className} flex gap-6 overflow-x-auto border-b border-stone-200`}>
+      {tabs.map(([id, label]) => (
+        <a
+          key={id}
+          href={id ? `#/${route}/${id}` : `#/${route}`}
+          aria-current={tab === id ? 'page' : undefined}
+          className={`-mb-px shrink-0 border-b-2 pb-2.5 text-sm font-semibold whitespace-nowrap transition ${
+            tab === id ? 'border-brand-500 text-stone-900' : 'border-transparent text-stone-500 hover:text-stone-800'
+          }`}
+        >
+          {label}
+        </a>
+      ))}
+    </nav>
+  )
+}

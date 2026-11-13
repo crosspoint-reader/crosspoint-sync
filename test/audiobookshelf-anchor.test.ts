@@ -45,6 +45,9 @@ it('calibrates an Audiobookshelf book: pulls and pushes map through the anchor',
     method: 'PUT', headers, body: JSON.stringify({ track: 2, position_ms: 500_000 }),
   });
   expect(await saved.json()).toEqual({ anchor: { text: 0.75, audio: 0.875 } });
+  // Saving queues the reader's spot so ABS moves there without waiting for the next read.
+  expect(db.prepare(`SELECT status FROM connector_queue WHERE user_id=? AND connector_id='audiobookshelf' AND document=?`).get(id, DOC))
+    .toEqual({ status: 'pending' });
 
   // Listening at 87.5% now reads back as the reader's 75%, not 87.5%.
   progress.currentTime = 3600;

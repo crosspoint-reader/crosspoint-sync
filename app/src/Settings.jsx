@@ -51,7 +51,7 @@ const HINTS = {
   jellyfin: 'Syncs reading progress with your Jellyfin book library (Jellyfin 12.0 or newer). Sign in with your Jellyfin username and password.',
   bookorbit: 'Syncs progress both ways, adds clippings as highlights, and exchanges reading sessions for matched books. Imports BookOrbit history and exports sessions recorded by newer CrossInk firmware. Includes other BookOrbit reader history alongside your device stats. Repeated sessions are counted once.',
   seekquel: 'Logs your reading in your Seekquel library: where you are in each book, the books you finish, and your highlights. If you read further in Seekquel, that place comes back to your reader. You approve the request in the Seekquel app.',
-  readest: 'Syncs your reading progress with Readest and brings your place back when you read further in a Readest app. Clippings become Readest highlights for books in your Readest cloud library. Use this instead of signing in to the Readest plugin\'s progress sync, which moves your reader off CrossPoint Sync and stops clipping sync. You approve the request on readest.com.',
+  readest: 'Syncs your reading progress with Readest and brings your place back when you read further in a Readest app. Clippings become Readest highlights, and Readest highlights become clippings, for books in your Readest cloud library. Use this instead of signing in to the Readest plugin\'s progress sync, which moves your reader off CrossPoint Sync and stops clipping sync. You approve the request on readest.com.',
   spotify: 'Moves your progress forward when you listen ahead in the Spotify audiobook, and resumes it there. Audiobooks are in the US, UK, Canada, Ireland, Australia and New Zealand.',
   kindle: 'Linking needs the CrossPoint Kindle Link browser extension.',
 }
@@ -403,12 +403,33 @@ export function LinkForm({ session, conn, onLinked }) {
         {conn.id === 'hardcover' && tokenForm}
       </div>
     )
+  } else if (conn.id === 'bookorbit') {
+    body = (
+      <form className="space-y-2">
+        <p className="text-sm text-stone-600">
+          In BookOrbit, open Settings → API keys and create a Read and write key for CrossPoint Sync. Needs BookOrbit 3.8 or newer.
+        </p>
+        <input
+          className={`${field} font-mono`}
+          placeholder="https://books.example.com"
+          value={v.server ?? ''}
+          onChange={set('server')}
+          inputMode="url"
+          autoCapitalize="none"
+        />
+        <input className={`${field} font-mono`} type="password" placeholder="API key (bok_…)" value={v.apiKey ?? ''} onChange={set('apiKey')} autoComplete="off" />
+        {submit('Connect', () => ({
+          server: (v.server ?? '').trim(),
+          apiKey: (v.apiKey ?? '').trim(),
+        }))}
+      </form>
+    )
   } else if (conn.credential_kind === 'kosync' || conn.credential_kind === 'jellyfin') {
     body = (
       <form className="space-y-2">
         <input
           className={`${field} font-mono`}
-          placeholder={{ bookorbit: 'https://books.example.com', jellyfin: 'https://jellyfin.example.com' }[conn.id] ?? 'https://sync.koreader.rocks'}
+          placeholder={conn.id === 'jellyfin' ? 'https://jellyfin.example.com' : 'https://sync.koreader.rocks'}
           value={v.server ?? ''}
           onChange={set('server')}
           inputMode="url"
@@ -460,6 +481,7 @@ function Service({ session, conn, onChange }) {
   const [openForm, setOpenForm] = useState(false)
   const [busy, setBusy] = useState(null)
   const needsRelink = conn.linked && conn.status === 'needs_reauth'
+  const canUpgrade = conn.linked && !needsRelink && conn.legacy_login
   const icon = `${session.server}/icons/${conn.id}.png`
 
   async function act(kind, fn, done) {
@@ -521,14 +543,25 @@ function Service({ session, conn, onChange }) {
             >
               {busy === 'sync' ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
             </button>
-            <button
-              type="button"
-              disabled={!!busy}
-              onClick={() => setUnlinking(true)}
-              className="h-9 rounded-full px-3 text-sm font-medium text-red-600 active:bg-stone-100 md:hover:bg-stone-100"
-            >
-              {busy === 'unlink' ? <Loader2 className="size-4 animate-spin" /> : 'Unlink'}
-            </button>
+            {canUpgrade && (
+              <button
+                type="button"
+                onClick={() => setOpenForm(!openForm)}
+                className="h-9 rounded-full px-3 text-sm font-medium text-brand-600 active:bg-stone-100 md:hover:bg-stone-100"
+              >
+                {openForm ? 'Cancel' : 'Use API key'}
+              </button>
+            )}
+            {!(canUpgrade && openForm) && (
+              <button
+                type="button"
+                disabled={!!busy}
+                onClick={() => setUnlinking(true)}
+                className="h-9 rounded-full px-3 text-sm font-medium text-red-600 active:bg-stone-100 md:hover:bg-stone-100"
+              >
+                {busy === 'unlink' ? <Loader2 className="size-4 animate-spin" /> : 'Unlink'}
+              </button>
+            )}
           </div>
         ) : (
           <button
@@ -584,7 +617,10 @@ function Service({ session, conn, onChange }) {
         <Options conn={conn} save={(v) => act('options', () => api.setConnectorOptions(session, conn.id, v))} />
       )}
       {conn.id === 'microblog' && conn.linked && !needsRelink && <MicroblogPosting session={session} onChange={onChange} />}
-      {openForm && (!conn.linked || needsRelink) && (
+      {canUpgrade && !openForm && (
+        <p className="mt-2 text-xs text-stone-500">Linked with a password. Switching to an API key keeps your matches.</p>
+      )}
+      {openForm && (!conn.linked || needsRelink || canUpgrade) && (
         <LinkForm
           session={session}
           conn={conn}
@@ -1062,9 +1098,10 @@ function Account({ session, onSession, onLogout }) {
   )
 }
 
-export default function Settings({ session, theme, onSession, onLogout, focusGoals = false }) {
+export default function Settings({ session, theme, onSession, onLogout, onSignIn, focusGoals = false }) {
   useNativeBack('#/')
   useEffect(() => { if (focusGoals) document.getElementById('reading-goals')?.scrollIntoView?.({ block: 'start' }) }, [focusGoals])
+  if (!session) return <GuestSettings theme={theme} onSignIn={onSignIn} />
   const host = new URL(session.server).host
   const section = 'mt-8 font-display text-xl font-semibold text-stone-900'
   return (
@@ -1090,13 +1127,7 @@ export default function Settings({ session, theme, onSession, onLogout, focusGoa
       <p className="mt-1 text-sm text-stone-500">Books your reader synced without a title or author are hidden. Show them to see their progress and last sync, then add the title and author so they match.</p>
       <Card className="mt-3 divide-y divide-stone-100">
         <UntitledBooks />
-        {isApp && (
-          <a href="#/browse/manage" className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-stone-800 active:bg-stone-50">
-            <Server className="size-5 text-stone-500" strokeWidth={1.75} />
-            <span className="flex-1">Catalogs</span>
-            <ChevronRight className="size-4 text-stone-400" />
-          </a>
-        )}
+        {isApp && <CatalogsLink />}
       </Card>
 
       <h2 className={section}>Appearance</h2>
@@ -1133,6 +1164,47 @@ export default function Settings({ session, theme, onSession, onLogout, focusGoa
       >
         <LogOut className="size-4" /> Sign out
       </button>
+    </div>
+  )
+}
+
+function CatalogsLink() {
+  return (
+    <a href="#/browse/manage" className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-stone-800 active:bg-stone-50">
+      <Server className="size-5 text-stone-500" strokeWidth={1.75} />
+      <span className="flex-1">Catalogs</span>
+      <ChevronRight className="size-4 text-stone-400" />
+    </a>
+  )
+}
+
+// Skipped sign-in: only what works without an account.
+function GuestSettings({ theme, onSignIn }) {
+  const section = 'mt-8 font-display text-xl font-semibold text-stone-900'
+  return (
+    <div className="settings-page max-w-2xl px-4 pt-2 pb-8 md:px-8 md:pt-6 lg:px-12">
+      <h1 className="flex min-h-11 items-center font-display text-3xl font-semibold tracking-tight text-stone-900 md:text-4xl">Settings</h1>
+      <Card className="mt-6 p-4">
+        <p className="font-semibold text-stone-900">Not signed in</p>
+        <p className="mt-1 text-sm/6 text-stone-500">Sign in or create an account to sync reading progress, clippings and stats from your reader.</p>
+        <button type="button" onClick={onSignIn} className="mt-4 h-12 w-full rounded-2xl bg-brand-500 text-sm font-semibold text-white active:bg-brand-600">
+          Sign in or create an account
+        </button>
+      </Card>
+
+      {isApp && (
+        <>
+          <h2 className={section}>Library</h2>
+          <Card className="mt-3">
+            <CatalogsLink />
+          </Card>
+        </>
+      )}
+
+      <h2 className={section}>Appearance</h2>
+      <div className="mt-3">
+        <Appearance theme={theme} />
+      </div>
     </div>
   )
 }

@@ -5,6 +5,7 @@ import { decryptSecret, encryptSecret } from '../crypto/secrets.js';
 import { getConnector } from './registry.js';
 import { SAVE_CREDENTIAL, type Connector, type Credential, type DataKind, type DocumentMeta, type Match, type SavableCredential } from './types.js';
 import { destinationForPost, selectedMicroblogDestination } from './microblog-destinations.js';
+import { baseUrl } from './audiobookshelf.js';
 
 export interface AccountRow {
   user_id: number;
@@ -55,7 +56,7 @@ export function upsertAccount(
   if (previous) {
     try {
       const old = decryptCredential(previous);
-      sameOrbitAccount = old.server === cred.server && old.username === cred.username;
+      sameOrbitAccount = baseUrl(String(old.server)) === baseUrl(String(cred.server)) && old.username === cred.username;
     } catch { /* Reconnecting also recovers an unreadable old credential. */ }
   }
   withTransaction(db, () => {
@@ -298,6 +299,20 @@ export function setMatchNote(
   db.prepare(
     'UPDATE connector_matches SET push_note = ? WHERE user_id = ? AND connector_id = ? AND document = ?'
   ).run(note, userId, connectorId, document);
+}
+
+/** Replace a match's edition only if it still holds the one the caller saw. */
+export function replaceMatchEdition(
+  db: DB, userId: number, connectorId: string, document: string, externalId: string, from: string, to: string
+): void {
+  const changed = db.prepare(
+    `UPDATE connector_matches SET external_edition = ?
+     WHERE user_id = ? AND connector_id = ? AND document = ? AND external_id = ? AND external_edition = ?`
+  ).run(to, userId, connectorId, document, externalId, from).changes;
+  if (changed) {
+    db.prepare('DELETE FROM epub_maps WHERE user_id = ? AND connector_id = ? AND external_id = ?')
+      .run(userId, connectorId, externalId);
+  }
 }
 
 /** A connector's last-seen remote position on a matched book (Spotify), or null. */

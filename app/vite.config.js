@@ -9,6 +9,8 @@ export default defineConfig({
   // Relative asset URLs: the same build runs in the native app and at /app/ on the sync server.
   base: './',
   plugins: [react(), tailwindcss()],
+  // The .cpfont worker loads its wasm as a separate asset, which needs ES workers.
+  worker: { format: 'es' },
   clearScreen: false,
   server: {
     port: 1420,

@@ -12,7 +12,6 @@ import Library from './Library.jsx'
 import Book from './Book.jsx'
 import Stats from './Stats.jsx'
 import Send from './Send.jsx'
-import Wallpaper from './Wallpaper.jsx'
 import Settings, { Matches } from './Settings.jsx'
 import Browse from './Browse.jsx'
 import Clippings from './Clippings.jsx'
@@ -36,7 +35,7 @@ function Field({ icon: Icon, trailing, inputRef, ...props }) {
   )
 }
 
-function Login({ onLogin }) {
+function Login({ onLogin, onSkip }) {
   const [form, setForm] = useState(() => {
     const server = lastServer()
     return { selfHosted: server !== DEFAULT_SERVER, server: server === DEFAULT_SERVER ? '' : server, username: '', password: '', token: '' }
@@ -86,8 +85,7 @@ function Login({ onLogin }) {
         <div className="absolute inset-0 bg-gradient-to-t from-brand-950/95 via-brand-950/40 to-transparent" />
         <div className="absolute inset-x-0 bottom-0 p-6 md:p-10">
           <img src={`${import.meta.env.BASE_URL}logo.png`} alt="" className="size-12 rounded-xl ring-1 ring-white/20 md:size-14" />
-          <p className="mt-4 inline-block -rotate-1 font-hand text-2xl/7 text-brand-200">Your reading, everywhere</p>
-          <h1 className="font-display text-3xl/tight font-semibold tracking-tight text-white md:text-5xl/tight">CrossPoint Sync</h1>
+          <h1 className="mt-4 font-display text-3xl/tight font-semibold tracking-tight text-white md:text-5xl/tight">CrossPoint Sync</h1>
           <p className="mt-2 hidden max-w-md text-base/7 text-white/75 md:block">
             Progress, clippings and reading stats from every CrossPoint and CrossInk reader, in one place.
           </p>
@@ -232,6 +230,18 @@ function Login({ onLogin }) {
               </button>
             </p>
           )}
+          {onSkip && (
+            <div className="mt-6 border-t border-stone-200 pt-5 text-center">
+              <button
+                type="button"
+                onClick={onSkip}
+                className="h-12 w-full rounded-2xl bg-surface text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100"
+              >
+                Skip for now
+              </button>
+              <p className="mt-2 text-xs/5 text-stone-500">Browse catalogs and send books, fonts, sleep screens and plugins without an account. Sign in later from Settings to sync progress.</p>
+            </div>
+          )}
         </div>
       </form>
     </div>
@@ -269,16 +279,41 @@ const NAV = [
   ...(isApp ? [{ href: '#/send', label: 'Send', icon: SendIcon, sf: 'paperplane', active: (r) => r === 'send' }] : []),
 ]
 
+// Without an account: the tools that work on this device alone.
+const GUEST_NAV = [
+  { href: '#/browse', label: 'Browse', icon: Compass, sf: 'safari', active: (r) => !['send', 'settings'].includes(r) },
+  { href: '#/send', label: 'Send', icon: SendIcon, sf: 'paperplane', active: (r) => r === 'send' },
+  { href: '#/settings', label: 'Settings', icon: SettingsIcon, sf: 'gearshape', active: (r) => r === 'settings' },
+]
+
+// Skipping sign-in is remembered on this device until the user signs in.
+const GUEST = 'crosspoint-guest'
+const loadGuest = () => {
+  try {
+    return localStorage.getItem(GUEST) === '1'
+  } catch {
+    return false
+  }
+}
+const saveGuest = (on) => {
+  try {
+    if (on) localStorage.setItem(GUEST, '1')
+    else localStorage.removeItem(GUEST)
+  } catch {
+    // per-device convenience only
+  }
+}
+
 function endRefresh() {
   window.CrossPointRefresh?.done() // Android
   if (isApp) invoke('end_refresh').catch(() => {}) // iOS
 }
 
 // Phone: bottom tab bar (native on iPhone, see tabbar.js).
-function TabBar({ route }) {
-  const current = NAV.find((n) => n.active(route))?.href
+function TabBar({ route, nav = NAV }) {
+  const current = nav.find((n) => n.active(route))?.href
   useEffect(() => {
-    if (nativeTabBar) return mountTabBar(NAV.map((n) => ({ id: n.href, title: n.label, sfSymbol: n.sf })), current)
+    if (nativeTabBar) return mountTabBar(nav.map((n) => ({ id: n.href, title: n.label, sfSymbol: n.sf })), current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   useEffect(() => {
@@ -290,7 +325,7 @@ function TabBar({ route }) {
   return (
     <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-stone-200 bg-surface/90 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
       <div className="mx-auto flex max-w-xl">
-        {NAV.map((n) => (
+        {nav.map((n) => (
           <a key={n.href} href={n.href} className={cls(n.active(route))}>
             <n.icon className="size-6" strokeWidth={1.75} />
             {n.label}
@@ -317,7 +352,7 @@ function SettingsLink() {
 
 // iPad / desktop: sidebar. Fixed, not sticky: sticky rides along when the page rubber-bands.
 // Runs to the bottom and left screen edges; padding keeps its contents out of the insets.
-function Sidebar({ route, session }) {
+function Sidebar({ route, session, nav = NAV }) {
   return (
     <aside className="fixed top-[env(safe-area-inset-top)] bottom-0 left-0 hidden w-[calc(15rem+env(safe-area-inset-left))] flex-col border-r border-stone-200 bg-surface/60 pt-6 pr-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pl-[calc(1rem+env(safe-area-inset-left))] md:flex lg:w-[calc(16rem+env(safe-area-inset-left))]">
       {/* 44px band at the top, matching each page's first row (back button / title). */}
@@ -326,7 +361,7 @@ function Sidebar({ route, session }) {
         <span className="font-display text-lg font-semibold text-stone-900">CrossPoint Sync</span>
       </div>
       <nav className="mt-8 space-y-1">
-        {NAV.map((n) => (
+        {nav.map((n) => (
           <a
             key={n.href}
             href={n.href}
@@ -339,7 +374,7 @@ function Sidebar({ route, session }) {
           </a>
         ))}
       </nav>
-      <div className="mt-auto border-t border-stone-200 pt-4">
+      {session && <div className="mt-auto border-t border-stone-200 pt-4">
         <a
           href="#/settings"
           className={`flex items-center gap-3 rounded-lg px-3 py-2 transition ${
@@ -354,7 +389,7 @@ function Sidebar({ route, session }) {
             </span>
           </span>
         </a>
-      </div>
+      </div>}
     </aside>
   )
 }
@@ -470,7 +505,7 @@ function Home({ session, onSession, onLogout, theme }) {
 
   let page
   if (route === 'settings') page = id && id !== 'goals' ? <Matches session={session} id={id} /> : <Settings session={session} theme={theme} onSession={onSession} onLogout={onLogout} focusGoals={id === 'goals'} />
-  else if (route === 'send' && isApp) page = id === 'wallpaper' ? <Wallpaper /> : <Send />
+  else if (route === 'send' && isApp) page = <Send tab={id ?? ''} />
   else if (route === 'browse' && isApp) page = <Browse parts={parts} />
   else if (error) page = <ErrorNote error={error} />
   else if (!books) page = <PageSkeleton route={route} />
@@ -515,9 +550,30 @@ function Home({ session, onSession, onLogout, theme }) {
   )
 }
 
+function Guest({ theme, onSignIn }) {
+  const [parts] = useHash()
+  const [route, id] = parts
+  const page = route === 'send' ? <Send tab={id ?? ''} />
+    : route === 'settings' ? <Settings theme={theme} onSignIn={onSignIn} />
+    : <Browse parts={route === 'browse' ? parts : ['browse']} />
+  return (
+    <LoadCacheProvider>
+      <div className="app-layout min-h-screen-safe md:flex md:pl-60 lg:pl-64">
+        <Sidebar route={route} nav={GUEST_NAV} />
+        <main className="app-main relative mx-auto w-full min-w-0 max-w-xl pb-16 md:max-w-6xl md:pb-10">
+          <Toaster />
+          {page}
+        </main>
+        <TabBar route={route} nav={GUEST_NAV} />
+      </div>
+    </LoadCacheProvider>
+  )
+}
+
 export default function App() {
   const theme = useTheme()
   const [session, setSession] = useState(loadSession)
+  const [guest, setGuest] = useState(() => !session && loadGuest())
   const [signOut, setSignOut] = useState(() => session ? null : { error: null })
   const sessionGeneration = useRef(0)
   const generation = sessionGeneration.current
@@ -552,12 +608,21 @@ export default function App() {
       </div>
     </main>
   )
+  if (!session && guest) return <Guest theme={theme} onSignIn={() => {
+    saveGuest(false)
+    setGuest(false)
+  }} />
   if (!session) return <Login onLogin={(s) => {
     if (generation !== sessionGeneration.current) return
     sessionGeneration.current++
+    saveGuest(false)
     window.scrollTo(0, 0)
     setSession(s)
-  }} />
+  }} onSkip={isApp ? () => {
+    saveGuest(true)
+    location.hash = '#/browse'
+    setGuest(true)
+  } : undefined} />
   return (
     <LoadCacheProvider key={JSON.stringify([session.server, session.username])}>
       <Home

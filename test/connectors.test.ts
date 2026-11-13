@@ -245,6 +245,27 @@ describe('connector management API', () => {
     }
   });
 
+  it('flags a password BookOrbit link and switches it to an API key in place', async () => {
+    const fake = fakeTransport();
+    fake.on('/auth/login', 200, { accessToken: 'orbit-token' });
+    fake.on('/auth/me', 200, { username: 'reader' });
+    const { app, db } = makeTestApp({}, { connectorTransport: fake.transport });
+    const { headers } = await registerUser(app);
+    const link = (credential: object) => app.request('https://sync.example.com/api/v1/connectors/bookorbit', {
+      method: 'PUT', headers, body: JSON.stringify({ credential }),
+    });
+    const orbit = async () => (await (await app.request('/api/v1/connectors', { headers })).json())
+      .connectors.find((c: { id: string }) => c.id === 'bookorbit');
+
+    expect((await link({ server: 'https://orbit.test', username: 'reader', password: 'pw' })).status).toBe(200);
+    db.prepare("INSERT INTO connector_matches (user_id, connector_id, document, external_id, confidence, source, updated_at) SELECT user_id, 'bookorbit', 'doc', '12', 1, 'manual', 0 FROM connector_accounts").run();
+    expect(await orbit()).toMatchObject({ linked: true, legacy_login: true });
+
+    expect((await link({ server: 'https://orbit.test', apiKey: 'bok_key' })).status).toBe(200);
+    expect(await orbit()).toMatchObject({ linked: true, legacy_login: false });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM connector_matches WHERE connector_id = 'bookorbit'").get()).toMatchObject({ n: 1 });
+  });
+
   it('rejects a forged loopback Host from a remote peer', async () => {
     const fake = fakeTransport();
     fake.on('graphql', 200, { data: { me: [{ username: 'julia' }] } });

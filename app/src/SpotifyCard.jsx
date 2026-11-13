@@ -20,6 +20,17 @@ export function parseClock(text) {
   return parts.reduce((t, n) => t * 60 + n, 0) * 1000
 }
 
+// Digits fill from the right like a timer, so a number pad can type a time: "301" -> "3:01".
+// `prev` is the field's current value: a backspace that changes nothing (zeros) clears it.
+export function typeClock(text, prev = '') {
+  const d = text.replace(/\D/g, '').replace(/^0+(?=\d{3})/, '').slice(0, 6)
+  if (!d) return ''
+  const s = d.padStart(3, '0')
+  const [h, m, sec] = [s.slice(0, -4), s.slice(-4, -2), s.slice(-2)]
+  const out = h ? `${h}:${m}:${sec}` : `${Number(m)}:${sec}`
+  return out === prev && text.length < prev.length ? '' : out
+}
+
 // "Not the right spot?": line an audiobook up with the reader. Pick the track (and time)
 // that matches where the reader is now; the server maps both directions through it.
 // `service` is the connector's calls: { name, tracks, save, clear } (Spotify's by default).
@@ -69,7 +80,7 @@ export function Calibrate({ session, book, data, onDone, service = spotify, trac
               </option>
             ))}
           </select>
-          <input aria-label="Time in track" value={time} onChange={(e) => setTime(e.target.value)} placeholder="0:00" inputMode="numeric" className={`${field} w-20 text-center font-mono`} />
+          <input aria-label="Time in track" value={time} onChange={(e) => setTime(typeClock(e.target.value, time))} placeholder="0:00" inputMode="numeric" className={`${field} w-20 text-center font-mono`} />
         </div>
       )}
       <div className="flex gap-2">

@@ -43,6 +43,7 @@ export function fontFaces(basePath: string): string {
     `@font-face{font-family:"${family}";src:url(${basePath}/fonts/${file}) format("woff2");font-weight:${weight};font-style:normal;font-display:swap}`;
   return [
     face('InterVariable', 'inter-latin-wght-normal.woff2', '100 900'),
+    face('Lora', 'lora-latin-400-normal.woff2', '400'),
     face('Lora', 'lora-latin-500-normal.woff2', '500'),
     face('Lora', 'lora-latin-600-normal.woff2', '600'),
     face('Lora', 'lora-latin-700-normal.woff2', '700'),
@@ -623,7 +624,7 @@ const HINTS = {
   bookfusion: 'Connect your BookFusion account to sync reading progress. You will approve the request on bookfusion.com.',
   audiobookshelf: 'Sync your reading position to the matching audiobook on your Audiobookshelf server. Create an API key in Audiobookshelf under Settings, Users, API Keys.',
   jellyfin: 'Sync reading progress with books in your Jellyfin library. Requires Jellyfin 12.0 or newer. Sign in with your Jellyfin username and password.',
-  bookorbit: 'Sync reading progress both ways with your BookOrbit server. Import reading time and session history for matched books, including Kindle and other BookOrbit reader history alongside your device stats. Repeated sessions are counted once. Finishing a book marks it Read, and clippings appear as highlights. Sign in with your BookOrbit account.',
+  bookorbit: 'Sync reading progress both ways with your BookOrbit server. Import reading time and session history for matched books, including Kindle and other BookOrbit reader history alongside your device stats. Repeated sessions are counted once. Finishing a book marks it Read, and clippings appear as highlights. Connect with a BookOrbit API key.',
   seekquel: 'Log your reading in your Seekquel library: where you are in each book, the books you finish, and your highlights. You will approve the request in the Seekquel app.',
   readest: 'Sync reading progress both ways with Readest. Clippings become Readest highlights for books in your Readest cloud library. Use this instead of the Readest plugin\u2019s progress sync, which moves your reader off CrossPoint Sync and stops clipping sync. You will approve the request on readest.com.'
 };
@@ -684,8 +685,18 @@ function render(conn) {
       const r = await linkCredential({ token: $('tok').value.trim() });
       if (r.ok) done(); else $('e').textContent = r.data.message || 'Could not link';
     };
+  } else if (ID === 'bookorbit') {
+    f.innerHTML = '<p class="muted" style="margin-top:0">In BookOrbit, open <b>Settings \u2192 API keys</b> and create a <b>Read and write</b> key for CrossPoint Sync. Needs BookOrbit 3.8 or newer.</p>'
+      + '<label>Server URL</label><input id="srv" class="mono" placeholder="https://books.example.com">'
+      + '<div style="margin-top:10px"><label>API key</label><input id="tok" class="mono" type="password" placeholder="bok_\u2026" autocomplete="off"></div>'
+      + '<button class="primary full mt" id="go">Connect BookOrbit</button><div class="err" id="e"></div>';
+    $('go').onclick = async () => {
+      $('e').textContent = '';
+      const r = await linkCredential({ server: $('srv').value.trim(), apiKey: $('tok').value.trim() });
+      if (r.ok) done(); else $('e').textContent = r.data.message || 'Could not connect';
+    };
   } else if (conn.credential_kind === 'kosync' || conn.credential_kind === 'jellyfin') {
-    const srvPh = { bookorbit: 'https://books.example.com', jellyfin: 'https://jellyfin.example.com' }[ID] || 'https://sync.koreader.rocks:443';
+    const srvPh = ID === 'jellyfin' ? 'https://jellyfin.example.com' : 'https://sync.koreader.rocks:443';
     f.innerHTML = '<label>Server URL</label><input id="srv" class="mono" placeholder="' + srvPh + '">'
       + '<div style="margin-top:10px"><label>Username</label><input id="u" autocomplete="off"></div>'
       + '<div style="margin-top:10px"><label>Password</label><input id="p" type="password" autocomplete="off"></div>'

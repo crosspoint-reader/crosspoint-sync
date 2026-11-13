@@ -28,7 +28,7 @@ buildNpmPackage {
   nativeBuildInputs = [ pkgs.makeWrapper ];
 
   meta = {
-    description = "Lightweight KoSync Server for Syncing Crosspoint/CrossInk stats & progress";
+    description = "Reading progress sync, stats and highlights for any KOSync-compatible e-reader";
     homepage = "https://github.com/crosspoint-reader/crosspoint-sync";
     mainProgram = "crosspoint-sync";
   };

@@ -422,3 +422,59 @@ mod tests {
 }
 
 
+
+// Fonts saved on this device for sending later: <app data>/Fonts/<family>/<file>.
+fn fonts_dir(app: &AppHandle, family: Option<&str>) -> Res<PathBuf> {
+  let mut dir = app.path().app_data_dir().map_err(err)?.join("Fonts");
+  if let Some(f) = family {
+    dir = dir.join(safe_name(f)?);
+  }
+  fs::create_dir_all(&dir).map_err(err)?;
+  Ok(dir)
+}
+
+#[derive(Serialize)]
+pub struct SavedFont {
+  family: String,
+  files: Vec<String>,
+}
+
+#[tauri::command]
+pub fn list_saved_fonts(app: AppHandle) -> Res<Vec<SavedFont>> {
+  let mut out = Vec::new();
+  for entry in fs::read_dir(fonts_dir(&app, None)?).map_err(err)?.flatten() {
+    if !entry.path().is_dir() {
+      continue;
+    }
+    let mut files: Vec<String> = fs::read_dir(entry.path())
+      .map_err(err)?
+      .flatten()
+      .filter_map(|f| f.file_name().into_string().ok())
+      .filter(|n| !n.starts_with('.'))
+      .collect();
+    files.sort();
+    if let (Ok(family), false) = (entry.file_name().into_string(), files.is_empty()) {
+      out.push(SavedFont { family, files });
+    }
+  }
+  out.sort_by(|a, b| a.family.to_lowercase().cmp(&b.family.to_lowercase()));
+  Ok(out)
+}
+
+#[tauri::command]
+pub async fn save_font_file(app: AppHandle, request: Request<'_>) -> Res<()> {
+  let header = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok()).and_then(urlencoding_decode).ok_or("missing header");
+  let dir = fonts_dir(&app, Some(&header("x-family")?))?;
+  fs::write(dir.join(safe_name(&header("x-name")?)?), body_bytes(&request)?).map_err(err)
+}
+
+#[tauri::command]
+pub async fn read_font_file(app: AppHandle, family: String, name: String) -> Res<tauri::ipc::Response> {
+  let bytes = fs::read(fonts_dir(&app, Some(&family))?.join(safe_name(&name)?)).map_err(err)?;
+  Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[tauri::command]
+pub fn delete_saved_font(app: AppHandle, family: String) -> Res<()> {
+  fs::remove_dir_all(fonts_dir(&app, Some(&family))?).map_err(err)
+}

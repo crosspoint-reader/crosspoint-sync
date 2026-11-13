@@ -103,7 +103,7 @@ export async function pollConnector(
           const known = clippingTexts(db, userId, match.document);
           const highlights = await conn.pullHighlights(credential, {
             externalId: match.external_id, externalEdition: match.external_edition, confidence: match.confidence,
-          }, http, (t) => known.has(squash(t)));
+          }, http, (t) => known.has(squash(t)), { db, userId, document: match.document });
           options.signal?.throwIfAborted();
           // The slower EPUB/highlight request can outlive an unlink or rematch.
           const accountAfter = getAccount(db, userId, connectorId);

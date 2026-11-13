@@ -25,7 +25,7 @@ class MainActivity : TauriActivity() {
   companion object {
     private val importExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
     private const val DELIVERY_STATE = "crosspoint-import-delivery"
-    private const val PAPER = 0xFFFAFAF9.toInt()
+    private const val PAPER = 0xFFFAF8F3.toInt()
     private const val PAPER_DARK = 0xFF121110.toInt()
   }
 

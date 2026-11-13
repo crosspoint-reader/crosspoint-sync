@@ -172,6 +172,10 @@ export function connectorRoutes(
 ): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
+  const legacyOrbitLogin = (account: NonNullable<ReturnType<typeof getAccount>>) => {
+    try { return !decryptCredential(account).apiKey; } catch { return false; }
+  };
+
   // List available connectors + this user's link status. Stealth (revealable)
   // connectors are listed only once revealed — or linked, which implies reveal.
   app.get('/connectors', (c) => {
@@ -208,6 +212,7 @@ export function connectorRoutes(
           linked: !!account,
           status: account?.status ?? null,
           account: account?.account_label ?? null,
+          ...(conn.id === 'bookorbit' && account ? { legacy_login: legacyOrbitLogin(account) } : {}),
           queue: account ? queueDepth(db, user.id, conn.id) : undefined,
           queue_errors: account ? [...queueErrors(db, user.id, conn.id), ...(conn.id === 'bookorbit' ?
             db.prepare(`SELECT 'reading session' AS kind, e.last_error AS message, COUNT(*) AS count
@@ -844,6 +849,8 @@ export function connectorRoutes(
       if (!(audio > 0 && audio < 1)) return c.json({ code: 2003, message: 'Pick a spot inside the book, not its very start or end' }, 400);
       const anchor = { text: b.readerPct, audio };
       setMatchAnchor(db, b.user.id, 'audiobookshelf', b.document, anchor);
+      // Move ABS to the picked spot now (the queue pushes the reader % through the anchor).
+      backfillConnector(db, b.user.id, 'audiobookshelf', b.document);
       return c.json({ anchor });
     } catch (err) {
       return absFailed(c, b.user.id, err);
@@ -854,6 +861,7 @@ export function connectorRoutes(
     const b = absBook(c);
     if (b.error) return b.error;
     setMatchAnchor(db, b.user.id, 'audiobookshelf', b.document, null);
+    backfillConnector(db, b.user.id, 'audiobookshelf', b.document);
     return c.json({ anchor: null });
   });
 

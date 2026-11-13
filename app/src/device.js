@@ -73,3 +73,45 @@ export const joinPath = (dir, name) => (dir === '/' ? `/${name}` : `${dir}/${nam
 export const renameFile = (base, path, name) => post(base, 'rename', { path, name })
 export const makeFolder = (base, path, name) => post(base, 'mkdir', { path, name })
 export const deleteFiles = (base, paths) => post(base, 'delete', { paths: JSON.stringify(paths) })
+
+// SD-card fonts (CrossPoint and CrossInk share these endpoints). null = firmware without the font API.
+export async function listFonts(base) {
+  const res = await http(`${base}/api/fonts`, { signal: AbortSignal.timeout(8000) })
+  return res.ok ? (await res.json()).families : null
+}
+export async function uploadFont(base, family, file) {
+  const body = new FormData()
+  body.append('family', family)
+  body.append('file', new Blob([file.data]), file.name)
+  const res = await http(`${base}/api/fonts/upload`, { method: 'POST', body })
+  if (!res.ok) throw new Error((await res.text()).trim() || `Couldn't upload ${file.name}`)
+}
+export async function deleteFont(base, family) {
+  const res = await http(`${base}/api/fonts/delete`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ family }),
+  })
+  if (!res.ok) throw new Error((await res.text()).trim() || `Couldn't delete ${family}`)
+}
+
+// TrueType families go straight into /fonts/<family>/ (readers with external RAM load them as-is).
+export const uploadTrueType = (base, family, file) => uploadTo(base, `/fonts/${family}/${file.name}`, file.data)
+
+// Write one file, creating its folders. Replaces an existing file (newer firmware refuses without overwrite=1).
+export async function uploadTo(base, path, data) {
+  const parts = path.split('/').filter(Boolean)
+  const name = parts.pop()
+  // Hidden folders can't be created over HTTP; the reader makes /.crosspoint itself.
+  for (let i = 0; i < parts.length; i++) if (!parts[i].startsWith('.')) await makeFolder(base, `/${parts.slice(0, i).join('/')}`, parts[i]).catch(() => {}) // already exists
+  const body = new FormData()
+  body.append('file', new Blob([data]), name)
+  const res = await http(`${base}/upload?path=${encodeURIComponent(`/${parts.join('/')}`)}&overwrite=1`, { method: 'POST', body })
+  if (!res.ok) throw new Error((await res.text()).trim() || `Couldn't upload ${name}`)
+}
+
+export async function readText(base, path) {
+  const res = await http(`${base}/download?path=${encodeURIComponent(path)}`, { signal: AbortSignal.timeout(8000) })
+  if (!res.ok) throw new Error(`Couldn't read ${path}`)
+  return res.text()
+}

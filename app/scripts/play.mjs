@@ -3,12 +3,13 @@
 //   node scripts/play.mjs upload <app.aab> <track> [name]   upload a signed AAB and release it on <track>
 //   node scripts/play.mjs release <versionCode> <track> [name]   release an already-uploaded build on <track>
 //   node scripts/play.mjs tracks   list every track's releases
+//   node scripts/play.mjs apk <versionCode> <out.apk>   download Play's universal APK (Play-signed, so it updates with the store copy)
 //
 // Tracks: internal, alpha, beta, production. Upload to internal first, then
 // `release` the same versionCode to production. Credentials: a service account
 // JSON at $PLAY_CREDENTIALS (default ~/.android-keys/play-publisher.json).
 // Never put that file in the repo.
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { createSign } from 'node:crypto'
 import { homedir } from 'node:os'
 
@@ -65,8 +66,18 @@ if (command === 'tracks') {
   await call(`${EDIT}/tracks/${track}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ track, releases: [release] }) })
   await call(`${EDIT}:commit`, { method: 'POST' })
   console.log(`released ${versionCode} on ${track}`)
+} else if (command === 'apk' && arg && track) {
+  const out = track
+  const { generatedApks } = await call(`${API}/generatedApks/${arg}`)
+  const id = generatedApks?.[0]?.generatedUniversalApk?.downloadId
+  if (!id) throw new Error(`no universal APK for versionCode ${arg} yet`)
+  const res = await fetch(`${API}/generatedApks/${arg}/downloads/${encodeURIComponent(id)}:download?alt=media`, { headers: auth })
+  if (!res.ok) throw new Error(`download ${res.status}`)
+  writeFileSync(out, Buffer.from(await res.arrayBuffer()))
+  console.log('saved', out)
+  await fetch(EDIT, { method: 'DELETE', headers: auth })
 } else {
-  console.error('usage: play.mjs upload <app.aab> <track> [name] | release <versionCode> <track> [name] | tracks')
+  console.error('usage: play.mjs upload <app.aab> <track> [name] | release <versionCode> <track> [name] | tracks | apk <versionCode> <out.apk>')
   await fetch(EDIT, { method: 'DELETE', headers: auth })
   process.exit(1)
 }
