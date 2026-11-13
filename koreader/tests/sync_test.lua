@@ -320,3 +320,50 @@ assert(posted[2].items[1].xpath == "/p/2")
 assert(coroutine.resume(thread, { code = 200, body = { accepted = 1 } }))
 assert(coroutine.resume(thread, { code = 200, body = { version = 1, document = hash, accepted = 2 } }))
 assert(coroutine.status(thread) == "dead")
+
+-- KOReader leaves looper nil when DUSE_TURBO_LIB is disabled (normal device setup).
+local turbo = require("turbo")
+local shared_loop = UI.looper
+local private_closed, private_started, private_failure
+local private_loop = {
+    add_callback = function(_, callback) queued = callback end,
+    close = function() private_closed = true end,
+    start = function()
+        private_started = true
+        local co = coroutine.create(queued)
+        local ok, result = coroutine.resume(co)
+        assert(ok, result)
+        assert(result == "http-await")
+        assert(coroutine.resume(co, private_failure and { error = true } or {
+            code = 200, body = { version = 1, document = hash, accepted = 2 },
+        }))
+        assert(coroutine.status(co) == "dead")
+    end,
+}
+turbo.ioloop = { IOLoop = function()
+    assert(TURBO_SSL and __TURBO_USE_LUASOCKET__)
+    return private_loop
+end }
+local original_client = turbo.async.HTTPClient
+turbo.async.HTTPClient = function(options, loop, limit)
+    assert(loop == private_loop and limit == 4 * 1024 * 1024)
+    return original_client(options)
+end
+for _, failure in ipairs({ false, true }) do
+    reset()
+    private_closed, private_started, private_failure = false, false, failure
+    UI.looper = nil
+    plugin = instance()
+    plugin:sync(true)
+    assert(private_started and private_closed and not plugin.busy)
+    assert(UI.looper == nil and not timeout)
+    assert(failure and shown[#shown].text:find("could not sync") or not failure and saved.sent[hash])
+end
+reset()
+turbo.ioloop.IOLoop = function() error("network library unavailable") end
+plugin = instance()
+assert(pcall(function() plugin:sync() end))
+assert(not plugin.busy and shown[#shown].text:find("Could not start"))
+UI.looper = shared_loop
+turbo.async.HTTPClient = original_client
+print("KOReader no-Turbo-UI checks passed: private loop, TLS, failures and cleanup.")

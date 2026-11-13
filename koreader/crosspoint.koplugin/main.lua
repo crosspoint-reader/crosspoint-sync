@@ -129,11 +129,28 @@ function CrossPoint:sync(automatic)
         message = InfoMessage:new{ text = _("Syncing history and annotations…") }
         UIManager:show(message)
     end
-    UIManager:initLooper()
-    UIManager.looper:add_callback(function()
+    local looper, private_loop
+    local initialized, init_error = pcall(function()
+        UIManager:initLooper()
+        looper = UIManager.looper
+        if not looper then
+            -- Match KOReader's Turbo setup without changing its UI loop preference.
+            TURBO_SSL = true
+            __TURBO_USE_LUASOCKET__ = true
+            looper = require("turbo").ioloop.IOLoop()
+            private_loop = true
+        end
+    end)
+    if not initialized then
+        self.busy = false
+        if message then UIManager:close(message) end
+        UIManager:show(InfoMessage:new{ text = _("Could not start CrossPoint networking: ") .. tostring(init_error) })
+        return
+    end
+    looper:add_callback(function()
         local conn
         local synced = 0
-        UIManager:setInputTimeout()
+        if not private_loop then UIManager:setInputTimeout() end
         local ok, err = pcall(function()
             -- Flush completed page records; do not manufacture a page turn for the open page.
             if not self.reader_closed and self.ui.statistics then self.ui.statistics:insertDB() end
@@ -141,7 +158,7 @@ function CrossPoint:sync(automatic)
             if self.annotation_error then error(self.annotation_error, 0) end
             if not self.reader_closed then snapshot = Annotations.snapshot(self.ui, md5) end
             local turbo = require("turbo")
-            local client = turbo.async.HTTPClient({ verify_ca = true, ca_path = plugin_dir .. "/cacert.pem" }, nil, 4 * 1024 * 1024)
+            local client = turbo.async.HTTPClient({ verify_ca = true, ca_path = plugin_dir .. "/cacert.pem" }, looper, 4 * 1024 * 1024)
             if snapshot then
                 local previous = self.annotation_sent[snapshot.document] or {}
                 self.annotation_sent[snapshot.document] = previous
@@ -215,7 +232,7 @@ function CrossPoint:sync(automatic)
             end
         end)
         if conn then pcall(function() conn:close() end) end
-        UIManager:resetInputTimeout()
+        if private_loop then looper:close() else UIManager:resetInputTimeout() end
         if message then UIManager:close(message) end
         self.busy = false
         local result = ok and (tostring(synced) .. " books of history synced to CrossPoint; available annotations synced.")
@@ -240,6 +257,15 @@ function CrossPoint:sync(automatic)
             UIManager:nextTick(function() self:sync(true) end)
         end
     end)
+    if private_loop then
+        local started, start_error = pcall(function() looper:start() end)
+        if not started then
+            looper:close()
+            self.busy = false
+            if message then UIManager:close(message) end
+            UIManager:show(InfoMessage:new{ text = _("CrossPoint networking failed: ") .. tostring(start_error) })
+        end
+    end
 end
 
 return CrossPoint

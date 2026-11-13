@@ -35,6 +35,11 @@ an unrelated KOSync server. It never reconnects Wi-Fi after suspend/disconnect.
 If the reader goes offline or a stats upload fails, it retries after the next
 successful progress push while online. Progress sync succeeds independently.
 
+When KOReader's optional Turbo UI loop is disabled, the plugin runs a private
+network loop instead. Sync still follows normal progress pushes, but the reading
+UI pauses until the upload finishes; large history backfills can take a while.
+The plugin does not change KOReader's Turbo setting or disable TLS verification.
+
 Automatic successes are quiet. Failures show a brief notice; open **CrossPoint
 stats sync → Last stats sync result** for details. Use **Sync all reading history
 now** for an explicit full backfill/retry, including after clearing server data.
