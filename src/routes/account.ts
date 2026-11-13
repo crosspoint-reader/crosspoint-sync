@@ -24,6 +24,7 @@ export function deleteKosyncUserData(db: DB, userId: number, username: string, {
       'bookorbit_session_exports',
       'bookorbit_session_destination',
       'reading_sessions',
+      'reader_history_pages',
       'stats_counter_snapshots',
       'stats_counter_days',
       'connector_queue',

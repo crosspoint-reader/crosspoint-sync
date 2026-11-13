@@ -319,3 +319,13 @@ Regression checks: `npm test`, `npm run build`; after building the CrossInk
 simulator, `node test/daily-firmware-smoke.mjs /absolute/path/to/crossink/.pio/build/simulator/program`
 checks manual upload, shared sender/retries/increments, and an old server without
 a daily acknowledgment using only disposable loopback fixtures.
+
+## KOReader reading statistics plugin
+
+For ongoing stats uploads, install the [CrossPoint KOReader plugin](koreader/crosspoint.koplugin/README.md).
+It adds **Sync all reading history now** to KOReader and sends reading time and page
+history to this server, deduplicating repeated uploads and cloud-synced copies.
+Keep the built-in Progress sync for reading positions. Build an installable ZIP
+with `npm run build:koreader`; use a server updated with this plugin's endpoint.
+
+Manual database imports remain available under app Settings → Import reading history.

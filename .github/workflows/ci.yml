@@ -21,6 +21,12 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npm test
+      - name: Test and package KOReader plugin
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y luajit
+          luajit koreader/tests/sync_test.lua
+          npm run build:koreader
 
   docker:
     runs-on: ubuntu-latest

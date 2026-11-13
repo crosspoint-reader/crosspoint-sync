@@ -12,6 +12,7 @@ import { webRoutes, appLinkRoutes } from './routes/web.js';
 import { progressRoutes } from './routes/v1/progress.js';
 import { bookmarkRoutes } from './routes/v1/bookmarks.js';
 import { clippingRoutes } from './routes/v1/clippings.js';
+import { koreaderRoutes } from './routes/v1/koreader.js';
 import { statsRoutes } from './routes/v1/stats.js';
 import { sleepImageRoutes } from './routes/v1/sleep-image.js';
 import { documentRoutes } from './routes/v1/documents.js';
@@ -89,6 +90,7 @@ export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<A
   v1.route('/', bookmarkRoutes(db));
   v1.route('/', clippingRoutes(db));
   v1.route('/', statsRoutes(db, opts.connectorTransport));
+  v1.route('/', koreaderRoutes(db));
   v1.route('/', sleepImageRoutes(db));
   v1.route('/', documentRoutes(db, opts.connectorTransport));
   v1.route('/', connectorRoutes(db, opts.connectorTransport, config.trustProxy, basePath, config.allowHttpLocalhost));

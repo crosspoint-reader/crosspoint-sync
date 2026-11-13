@@ -9,6 +9,8 @@
     "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
     "start": "node dist/index.js",
     "build": "tsc -p tsconfig.json",
+    "build:koreader": "npm run build && node scripts/package-koreader.mjs",
+    "test:koreader": "lua koreader/tests/sync_test.lua",
     "build:frontend": "npm ci --prefix app --ignore-scripts && npm run build --prefix app",
     "test": "vitest run --dir test",
     "test:watch": "vitest",

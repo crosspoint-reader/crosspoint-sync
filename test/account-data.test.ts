@@ -21,6 +21,7 @@ async function seed(s: Awaited<ReturnType<typeof fixture>>) {
   s.db.prepare('INSERT INTO document_aliases VALUES (?, ?, ?, ?, ?)').run(s.id, 'opaque-id', DOC, 12, 1);
   s.db.prepare('UPDATE users SET auto_pause_days = 7, profile_slug = ?, display_name = ? WHERE id = ?').run('source-profile', 'Jane Reader', s.id);
   s.db.prepare('INSERT INTO reading_goals (user_id,year,target) VALUES (?,2026,24)').run(s.id);
+  s.db.prepare('INSERT INTO reader_history_pages VALUES (?, ?, 1, 100, 1760000000, 30)').run(s.id, DOC);
   seedStatsCounters(s.db, s.id);
 }
 const archiveOf = async (s: Awaited<ReturnType<typeof fixture>>) => (await s.app.request('/api/v1/account/export', { headers: s.headers })).json();

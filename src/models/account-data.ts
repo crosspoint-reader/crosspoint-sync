@@ -13,7 +13,7 @@ export const ACCOUNT_TABLES = [
   'bookmarks', 'clippings', 'stats_device_global', 'stats_device_book',
   'stats_device_day', 'stats_device_book_day', 'reading_sessions',
   'reading_goals',
-  'stats_counter_snapshots', 'stats_counter_days',
+  'stats_counter_snapshots', 'stats_counter_days', 'reader_history_pages',
 ] as const;
 const localColumns = new Set(['user_id', 'change_seq', 'server_change_seq', 'revision']);
 type Row = Record<string, string | number | null>;
@@ -47,7 +47,8 @@ export function importAccountData(db: DB, userId: number, input: unknown, replac
   // Optional in older version-1 archives. Replacement removes any old targets.
   const data: Record<string, unknown> = { ...input.data, reading_goals: input.data.reading_goals === undefined ? [] : input.data.reading_goals,
     stats_counter_snapshots: input.data.stats_counter_snapshots === undefined ? [] : input.data.stats_counter_snapshots,
-    stats_counter_days: input.data.stats_counter_days === undefined ? [] : input.data.stats_counter_days };
+    stats_counter_days: input.data.stats_counter_days === undefined ? [] : input.data.stats_counter_days,
+    reader_history_pages: input.data.reader_history_pages === undefined ? [] : input.data.reader_history_pages };
   const { profile } = input;
   const days = profile.auto_pause_days;
   // Older archives have no display name; the destination keeps its own then.

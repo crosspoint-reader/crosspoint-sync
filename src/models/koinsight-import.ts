@@ -11,7 +11,8 @@ import { combineBookStats, HISTORY_BYTES, HISTORY_DAYS, type BookStatsSnapshot }
 import { seedStatsCounters } from './stats-counters.js';
 
 export const MAX_HISTORY_FILE = 50 * 1024 * 1024;
-const DEVICE = 'import:koinsight';
+export const HISTORY_DEVICE = 'import:koinsight';
+const DEVICE = HISTORY_DEVICE;
 const MAX_ROWS = 200_000;
 const fail = (message: string): never => { throw new AccountImportError(message); };
 type Page = { book_md5: string; page: number; total_pages: number; start_time: number; duration: number };
@@ -153,7 +154,8 @@ export function prepareHistory(db: DB, userId: number, history: History, timezon
     const finish = Number(metadata?.finished_date) || (existing.length ? combined.finished_date : snapshot.finished_date);
     const start = Number(metadata?.start_date) || combined.start_date || snapshot.start_date;
     return { document, title: book.title || book.md5, author: book.authors, page_count: book.reference_pages || null, pages, daily, snapshot,
-      existing_history: existing.some(r => r.device_id !== DEVICE),
+      // Re-importing our own history remains safe when firmware stats were added later.
+      existing_history: existing.some(r => r.device_id !== DEVICE) && !existing.some(r => r.device_id === DEVICE),
       start_date: start ? isoDate(start) : null,
       finished_date: finish ? isoDate(finish) : null,
       completed: metadata?.status != null ? metadata.status === 'finished' : existing.length ? combined.completed : snapshot.completed,
@@ -197,6 +199,12 @@ export function importHistory(db: DB, userId: number, prepared: ReturnType<typeo
         continue;
       }
       importedHistory++;
+      const savePage = db.prepare(`INSERT INTO reader_history_pages VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, document, page, total_pages, start_time) DO UPDATE SET duration = MAX(duration, excluded.duration)`);
+      for (const id of statsDocuments(db, userId, b.document)) {
+        db.prepare('DELETE FROM reader_history_pages WHERE user_id = ? AND document = ?').run(userId, id);
+      }
+      for (const p of b.pages) savePage.run(userId, b.document, p.page, p.total_pages, p.start_time, p.duration);
       for (const alias of statsDocuments(db, userId, b.document).slice(1)) {
         db.prepare('DELETE FROM stats_device_book WHERE user_id = ? AND document = ? AND device_id = ?').run(userId, alias, DEVICE);
         db.prepare('DELETE FROM stats_device_book_day WHERE user_id = ? AND document = ? AND device_id = ?').run(userId, alias, DEVICE);
