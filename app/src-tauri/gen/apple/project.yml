@@ -57,7 +57,7 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         CFBundleShortVersionString: 0.1.2
-        CFBundleVersion: "24"
+        CFBundleVersion: "25"
         CFBundleURLTypes:
           - CFBundleURLName: Reading widgets
             CFBundleURLSchemes: [crosspointsync]
@@ -132,7 +132,7 @@ targets:
       properties:
         CFBundleDisplayName: CrossPoint Sync
         CFBundleShortVersionString: 0.1.2
-        CFBundleVersion: "24"
+        CFBundleVersion: "25"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
         # The widget fetches from the sync server itself; a self-hosted one on the LAN may be plain http.
