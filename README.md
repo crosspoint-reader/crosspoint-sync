@@ -1,7 +1,13 @@
 # crosspoint-sync
 
-A lightweight, self-hostable sync server for [CrossPoint / CrossInk](https://github.com) e-readers —
-and any KOReader device.
+Reading progress sync, stats and highlights for any KOSync-compatible e-reader, including
+[KOReader](https://koreader.rocks) and [CrossPoint / CrossInk](https://github.com/crosspoint-reader).
+Self-hostable, with a companion app. Syncs with 3rd party connectors such as Hardcover, Spotify,
+Audiobookshelf, BookOrbit, BookFusion, Readest, and Readwise.
+
+Point your reader at it by changing only the sync server URL. The [companion app](app/README.md) (iOS, Android
+and web) shows your library, stats and clippings, and browses OPDS catalogs. On CrossPoint and CrossInk readers
+it also sends books, fonts, sleep screens and plugins over Wi-Fi.
 
 - **100% KOSync-compatible.** Point stock KOReader or current CrossPoint firmware at it by changing
   only the sync-server URL. Same accounts, same auth, same endpoints as `sync.koreader.rocks`.
@@ -15,7 +21,7 @@ and any KOReader device.
   clippings; per-device reading-stats snapshots with a server-side combined view (streaks included).
 - **KOReader stats plugin.** Reading history uploads after normal KOSync progress pushes.
   See [installation and setup](#koreader-reading-statistics-plugin).
-- **One codebase, one runtime.** A single Node + SQLite server in one Docker image — the hosted
+- **One codebase, one runtime.** A single Node + SQLite server in one Docker image. The hosted
   service and self-hosted installs run the exact same thing. No native dependencies (uses Node's
   built-in `node:sqlite`).
 
@@ -110,7 +116,7 @@ without publishing Sync's port, instead of using the host loopback example above
 
 1. New project → Deploy from this repo (Railway detects the Dockerfile).
 2. Attach a **volume** mounted at `/data`.
-3. That's it — the server listens on Railway's `PORT` automatically.
+3. That's it: the server listens on Railway's `PORT` automatically.
 
 ### NixOS
 Add this repository as a flake input and add the module to your configuration:
@@ -245,7 +251,7 @@ curl -X POST http://localhost:8080/users/create \
   -d '{"username":"justin","password":"'"$(printf '%s' 'my-password' | md5sum | cut -d' ' -f1)"'"}'
 ```
 
-(The `password` field is the MD5 of your password — that's the kosync protocol; the server stores
+(The `password` field is the MD5 of your password (that's the kosync protocol); the server stores
 a salted PBKDF2 of it, never the raw value.)
 
 ## Development
@@ -356,7 +362,19 @@ online. A stats failure does not turn a successful progress push into a failure.
 
 Use **CrossPoint stats sync → Last stats sync result** to check the outcome, or
 **Sync all reading history now** to force a full backfill/retry. Stats failures
-also show a brief notice. Reading positions and highlights are unchanged.
+also show a brief notice. Reading positions stay under normal KOSync.
+
+The plugin also uploads **highlights/clippings, their notes, and bookmarks** from
+the currently opened book after the same successful progress push. Open each book
+and push progress once to backfill its annotations. Edits and deletions of previously
+uploaded annotations follow on later pushes; missing or unopened books are not
+treated as deleted. This is upload-only: server annotations are not downloaded into
+KOReader. Highlights appear in the app and use any configured highlight connectors.
+Bookmark locations are available through the authenticated server API for future
+firmware support; firmware integration is not included here.
+
+Build the current checkout for these annotation additions; the original
+`koreader-v0.1.0` release contains statistics sync only.
 
 See the [plugin guide](koreader/crosspoint.koplugin/README.md) for history-import
 migration, limits, HTTPS, and credential storage. Manual database imports remain

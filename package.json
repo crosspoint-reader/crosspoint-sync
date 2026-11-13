@@ -1,7 +1,7 @@
 {
   "name": "crosspoint-sync",
   "version": "0.1.0",
-  "description": "Lightweight KOSync-compatible sync server for CrossPoint / CrossInk e-readers: reading progress, bookmarks, clippings, and reading stats.",
+  "description": "Reading progress sync, stats and highlights for any KOSync-compatible e-reader. Self-hostable, with a companion app. Syncs with 3rd party connectors such as Hardcover, Spotify, Audiobookshelf, BookOrbit, BookFusion, Readest, and Readwise.",
   "license": "MIT",
   "type": "module",
   "main": "dist/index.js",

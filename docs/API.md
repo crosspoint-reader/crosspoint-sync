@@ -1035,3 +1035,32 @@ These routes require a server version including migration `0049_sleep_background
 All image/background responses are private and not cached. Backgrounds belong to one account, are cleared when its reading data/account is deleted, and are presentation data outside reading-history exports. No external image URL fetching is performed. IANA timezone rules are evaluated at each historical timestamp, including DST offsets. Dates already stored as local calendar days retain their original day. These routes work under `BASE_PATH` using the same prefix as all other APIs.
 
 The sleep images use a reading-journal design: a compact transparent bookplate with serif type and an annual-goal seal tilted approximately ten degrees, or a full-page Custom composition with framed account artwork. Without artwork, Custom draws an original open-book illustration. Top/bottom placement and metric omission work in both modes; short landscape screens use the compact composition. Fonts (Lora regular/semibold/bold) and their SIL OFL license are bundled under `assets/fonts/sleep-journal`; rendering uses pure JavaScript and no runtime downloads or native graphics libraries.
+
+### Bookmark revision cursors (sync version 2)
+
+Firmware and other new clients should start with
+`GET /api/v1/bookmarks/:document?cursor=0&limit=50`, using the normal
+`x-auth-user` and `x-auth-key` headers. Responses include `sync_version: 2`,
+a numeric `cursor`, `more`, and items with individual `revision` values.
+Apply every item (including `deleted: 1` tombstones) and persist the returned
+cursor only after applying the page. Request that cursor again while `more` is
+true, then save it for the next sync. This avoids skipping bookmarks changed in
+the same second. Cursors are server-local; reset to zero when changing servers or
+replacing local state. The legacy `since`/`until` interface remains available,
+but timestamp pagination can miss same-second changes; new firmware should use
+revision cursors.
+
+Upload edits and deletions with the existing
+`PUT /api/v1/bookmarks/:document` batch contract (maximum 50 items). The server
+assigns revisions; clients must not generate them. Bookmark writes remain
+last-write-wins, so an explicit live upload can restore a deleted bookmark.
+Document aliases resolve to their canonical merged book. Account backup imports
+allocate fresh revisions.
+
+The KOReader plugin uses this same API, with IDs prefixed `ko-` derived from
+creation time and location. Clients must preserve received IDs rather than
+recompute them when editing or deleting an imported bookmark. EPUB `xpath`
+values are KOReader XPointers; PDF values are decimal page-number strings.
+The optional firmware `si`/`pc`/`pp` layout hints are absent for KOReader
+bookmarks. Firmware must handle those missing hints and the document's location
+format; server storage alone does not implement firmware navigation.

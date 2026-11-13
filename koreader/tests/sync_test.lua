@@ -60,6 +60,8 @@ package.preload["ui/uimanager"] = function() return UI end
 package.preload["ui/widget/container/widgetcontainer"] = function() return widget end
 package.preload["json"] = function() return { encode = function(value)
     encoded = value
+    if value.id then return (value.text or "") .. (value.note or "") .. (value.xpath or "") end
+    if value.items then encoded_body = "annotation-batch"; return encoded_body end
     encoded_body = value.book.md5 .. ":" .. value.timezone .. ":" .. tostring(value.pages[1].duration)
     return encoded_body
 end, decode = function(value) return value end } end
@@ -70,9 +72,10 @@ package.preload["gettext"] = function() return function(s) return s end end
 package.preload["turbo"] = function() return { async = { HTTPClient = function(options)
     assert(options.verify_ca == true and options.ca_path:match("cacert.pem$"))
     return { fetch = function(_, url, request)
-        assert(url == settings.server .. "/api/v1/stats/koreader")
+        local annotation = url:find("/api/v1/clippings/") or url:find("/api/v1/bookmarks/")
+        assert(annotation or url == settings.server .. "/api/v1/stats/koreader")
         assert(request.allow_redirects == false and request.request_timeout == 30)
-        assert(request.method == "POST" and request.body == encoded_body)
+        assert(request.method == (annotation and "PUT" or "POST") and request.body == encoded_body)
         local headers = { add = function(self, key, value) self[key] = value end }
         request.on_headers(headers)
         assert(headers["x-auth-user"] == "reader" and headers["x-auth-key"] == hash)
@@ -109,7 +112,7 @@ end
 local plugin, thread = start()
 assert(coroutine.resume(thread, { code = 200, body = { version = 1, document = hash, accepted = 2 } }))
 assert(coroutine.status(thread) == "dead" and closed and not timeout and not plugin.busy)
-assert(shown[#shown].text == "1 books synced to CrossPoint.")
+assert(shown[#shown].text == "1 books of history synced to CrossPoint; available annotations synced.")
 
 reset()
 plugin, thread = start()
@@ -223,3 +226,97 @@ Hook.attach(ProgressClient, function() notified = true end)
 ProgressClient.update_progress({ custom_url = settings.server }, settings.username, settings.userkey, hash, "/body", .2, "reader", "id", function() end)
 assert(notified)
 print("KOReader plugin checks passed: manual and automatic sync, callbacks, retries, unchanged books, offline handling and cleanup.")
+
+-- Annotation uploads run through the same authenticated coroutine, in batches,
+-- and only acknowledged batches are remembered.
+local Annotations = dofile("koreader/crosspoint.koplugin/annotations.lua")
+local function annotation_ui(entries)
+    return {
+        doc_settings = { readSetting = function() return hash end },
+        annotation = { annotations = entries },
+        document = {
+            getPageCount = function() return 100 end,
+            getPageFromXPointer = function() return 25 end,
+        },
+    }
+end
+local entries = {
+    { datetime = "2026-11-13 12:00:00", drawer = "lighten", page = "/p/1", pos0 = "/p/1.0", pos1 = "/p/1.9", text = "A quotation", note = "A note" },
+    { datetime = "2026-11-13 12:01:00", page = "/p/2", text = "Bookmark" },
+}
+local ui = annotation_ui(entries)
+local snapshot = Annotations.snapshot(ui, function(value) return value end)
+local clipping_id, clipping = next(snapshot.clippings)
+local bookmark_id, bookmark = next(snapshot.bookmarks)
+assert(clipping.text == "A quotation" and clipping.note == "A note")
+assert(bookmark.xpath == "/p/2" and bookmark.percentage == .25)
+entries[1].text, entries[1].note = "Edited quotation", "Edited note"
+local edited = Annotations.snapshot(ui, function(value) return value end)
+assert(edited.clippings[clipping_id].text == "Edited quotation")
+local encode = function(item) return (item.text or "") .. (item.note or "") .. (item.xpath or "") end
+local identity_hash = function(value) return value end
+local changes, previous = Annotations.changes(snapshot.clippings, {}, encode, identity_hash)
+assert(#changes == 1)
+changes = Annotations.changes(snapshot.clippings, previous, encode, identity_hash)
+assert(#changes == 0)
+changes = Annotations.changes(edited.clippings, previous, encode, identity_hash)
+assert(#changes == 1)
+changes = Annotations.changes({}, previous, encode, identity_hash)
+assert(#changes == 1 and changes[1].deleted == 1 and changes[1].id == clipping_id)
+entries[1].text = string.rep("x", 4097)
+assert(not pcall(Annotations.snapshot, ui, identity_hash))
+assert(Annotations.snapshot({ doc_settings = ui.doc_settings, annotation = {} }, identity_hash) == nil)
+
+reset()
+plugin = instance()
+ui = annotation_ui({})
+for key, value in pairs(ui) do plugin.ui[key] = value end
+for i = 1, 51 do
+    plugin.ui.annotation.annotations[i] = { datetime = tostring(i), page = "/p/" .. i }
+end
+plugin:sync(true)
+thread = coroutine.create(queued)
+assert(coroutine.resume(thread))
+assert(#posted[1].items == 50)
+assert(coroutine.resume(thread, { code = 200, body = { accepted = 50 } }))
+assert(#posted[2].items == 1)
+assert(coroutine.resume(thread, { code = 503, body = {} }))
+local count = 0
+for _ in pairs(saved.annotation_sent[hash].bookmarks) do count = count + 1 end
+assert(count == 50 and not plugin.busy)
+plugin:sync(true)
+thread = coroutine.create(queued)
+assert(coroutine.resume(thread))
+assert(#posted[3].items == 1)
+assert(coroutine.resume(thread, { code = 200, body = { accepted = 1 } }))
+assert(coroutine.resume(thread, { code = 200, body = { version = 1, document = hash, accepted = 2 } }))
+assert(coroutine.status(thread) == "dead")
+plugin.ui.annotation.annotations = {}
+plugin:sync(true)
+thread = coroutine.create(queued)
+assert(coroutine.resume(thread))
+assert(#posted[5].items == 50 and posted[5].items[1].deleted == 1)
+assert(coroutine.resume(thread, { code = 200, body = { accepted = 50 } }))
+assert(coroutine.resume(thread, { code = 200, body = { accepted = 1 } }))
+assert(next(saved.annotation_sent[hash].bookmarks) == nil)
+assert(coroutine.status(thread) == "dead")
+print("KOReader annotation checks passed: stable IDs, edits, deletions, batching, acknowledgments and retries.")
+
+entries[1].text, entries[1].note = "Short text", nil
+local cleared = Annotations.snapshot(annotation_ui(entries), identity_hash)
+assert(cleared.clippings[clipping_id].note == "")
+reset()
+plugin = instance()
+for key, value in pairs(annotation_ui(entries)) do plugin.ui[key] = value end
+plugin:onCloseDocument()
+assert(plugin.annotation_snapshot.bookmarks[bookmark_id])
+plugin.ui.document = nil
+plugin:sync(true)
+thread = coroutine.create(queued)
+assert(coroutine.resume(thread))
+assert(posted[1].items[1].text == "Short text")
+assert(coroutine.resume(thread, { code = 200, body = { accepted = 1 } }))
+assert(posted[2].items[1].xpath == "/p/2")
+assert(coroutine.resume(thread, { code = 200, body = { accepted = 1 } }))
+assert(coroutine.resume(thread, { code = 200, body = { version = 1, document = hash, accepted = 2 } }))
+assert(coroutine.status(thread) == "dead")

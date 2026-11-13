@@ -7,8 +7,10 @@ streaks. Keep KOReader's built-in Progress sync for reading positions.
 After one-time setup, stats sync in the background after successful KOSync progress
 uploads to the same server and account. This includes manual Push progress,
 automatic pushes, and successful queued retries. Pull progress alone does not
-trigger stats. It does not change KOReader's database, upload highlights, change
-reader positions, or send history to linked services.
+trigger sync. It also uploads highlights, their notes, and bookmarks for the open
+book. It does not change KOReader's database or reading position, or send reading
+history to linked services. Uploaded highlights use the server's existing configured
+highlight connectors and microblog posting settings.
 
 ## Install
 
@@ -43,9 +45,38 @@ For books to match existing Progress sync entries, use its binary/content checks
 method rather than filename matching. You can merge pre-existing duplicates in the
 CrossPoint library.
 
-Reading statistics must be enabled in KOReader. The plugin reads the current
+For history uploads, Reading statistics must be enabled in KOReader. The plugin reads the current
 `settings/statistics.sqlite3` schema (`book` and `page_stat_data`). Legacy databases
 must first be upgraded by opening them in a current KOReader release.
+
+## Highlights and bookmarks
+
+Open a book and push progress to upload its annotations. Repeat for older books:
+the all-book statistics backfill does not scan unopened books for annotations.
+Use the manual sync action while a book is open to resend all its live annotations,
+including after clearing server data. No statistics database is required for
+annotation uploads.
+
+Highlights retain text, notes, chapter and color. They appear as clippings in the
+app. Bookmark uploads retain the KOReader location, percentage and a summary
+(up to the server's 256-character limit). EPUB bookmark locations are native
+XPointers; PDF bookmark locations are page numbers encoded as strings. Future
+firmware must interpret the location format for the document. KOReader highlight
+coordinates are not converted to firmware spine/word offsets; text sync does not
+provide on-device highlight placement.
+
+Stable IDs allow edits without duplicates. Only annotations previously acknowledged
+on this reader generate deletion markers when removed. Missing books and unavailable
+annotation lists never delete server data. Uploads are batched in groups of 50;
+acknowledged batches persist, and failures retry after the next successful progress
+push. Highlight text and notes must each fit the server's 4096-byte limit; oversized
+items report an error instead of being silently truncated.
+
+This version uploads only; it does not import server annotations into KOReader.
+The bookmarks API is shared with firmware clients, not specific to the plugin.
+Bookmark conflicts retain the server's last-write-wins behavior, including restores;
+clipping deletion markers cannot be resurrected under the same ID. Recreate a deleted
+highlight in KOReader to give it a new creation identity.
 
 ## What gets counted
 

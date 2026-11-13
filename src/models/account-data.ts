@@ -120,8 +120,8 @@ export function importAccountData(db: DB, userId: number, input: unknown, replac
         for (const source of data[table] as Row[]) {
           const row: Row = { ...source, user_id: userId };
           if (table === 'progress') row.server_change_seq = row.change_seq = nextChangeSeq(db);
-          if (table === 'clippings') {
-            row.revision = db.prepare('UPDATE clipping_sync_clock SET revision = revision + 1 WHERE id = 1 RETURNING revision').get()!.revision as number;
+          if (table === 'clippings' || table === 'bookmarks') {
+            row.revision = db.prepare(`UPDATE ${table === 'clippings' ? 'clipping' : 'bookmark'}_sync_clock SET revision = revision + 1 WHERE id = 1 RETURNING revision`).get()!.revision as number;
           }
           const keys = Object.keys(row);
           db.prepare(`INSERT INTO ${table} (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`).run(...keys.map(k => row[k]));
