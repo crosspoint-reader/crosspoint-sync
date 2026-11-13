@@ -1098,9 +1098,10 @@ function Account({ session, onSession, onLogout }) {
   )
 }
 
-export default function Settings({ session, theme, onSession, onLogout, focusGoals = false }) {
+export default function Settings({ session, theme, onSession, onLogout, onSignIn, focusGoals = false }) {
   useNativeBack('#/')
   useEffect(() => { if (focusGoals) document.getElementById('reading-goals')?.scrollIntoView?.({ block: 'start' }) }, [focusGoals])
+  if (!session) return <GuestSettings theme={theme} onSignIn={onSignIn} />
   const host = new URL(session.server).host
   const section = 'mt-8 font-display text-xl font-semibold text-stone-900'
   return (
@@ -1126,13 +1127,7 @@ export default function Settings({ session, theme, onSession, onLogout, focusGoa
       <p className="mt-1 text-sm text-stone-500">Books your reader synced without a title or author are hidden. Show them to see their progress and last sync, then add the title and author so they match.</p>
       <Card className="mt-3 divide-y divide-stone-100">
         <UntitledBooks />
-        {isApp && (
-          <a href="#/browse/manage" className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-stone-800 active:bg-stone-50">
-            <Server className="size-5 text-stone-500" strokeWidth={1.75} />
-            <span className="flex-1">Catalogs</span>
-            <ChevronRight className="size-4 text-stone-400" />
-          </a>
-        )}
+        {isApp && <CatalogsLink />}
       </Card>
 
       <h2 className={section}>Appearance</h2>
@@ -1169,6 +1164,47 @@ export default function Settings({ session, theme, onSession, onLogout, focusGoa
       >
         <LogOut className="size-4" /> Sign out
       </button>
+    </div>
+  )
+}
+
+function CatalogsLink() {
+  return (
+    <a href="#/browse/manage" className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-stone-800 active:bg-stone-50">
+      <Server className="size-5 text-stone-500" strokeWidth={1.75} />
+      <span className="flex-1">Catalogs</span>
+      <ChevronRight className="size-4 text-stone-400" />
+    </a>
+  )
+}
+
+// Skipped sign-in: only what works without an account.
+function GuestSettings({ theme, onSignIn }) {
+  const section = 'mt-8 font-display text-xl font-semibold text-stone-900'
+  return (
+    <div className="settings-page max-w-2xl px-4 pt-2 pb-8 md:px-8 md:pt-6 lg:px-12">
+      <h1 className="flex min-h-11 items-center font-display text-3xl font-semibold tracking-tight text-stone-900 md:text-4xl">Settings</h1>
+      <Card className="mt-6 p-4">
+        <p className="font-semibold text-stone-900">Not signed in</p>
+        <p className="mt-1 text-sm/6 text-stone-500">Sign in or create an account to sync reading progress, clippings and stats from your reader.</p>
+        <button type="button" onClick={onSignIn} className="mt-4 h-12 w-full rounded-2xl bg-brand-500 text-sm font-semibold text-white active:bg-brand-600">
+          Sign in or create an account
+        </button>
+      </Card>
+
+      {isApp && (
+        <>
+          <h2 className={section}>Library</h2>
+          <Card className="mt-3">
+            <CatalogsLink />
+          </Card>
+        </>
+      )}
+
+      <h2 className={section}>Appearance</h2>
+      <div className="mt-3">
+        <Appearance theme={theme} />
+      </div>
     </div>
   )
 }
