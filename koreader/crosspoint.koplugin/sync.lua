@@ -52,4 +52,13 @@ function Sync.acknowledged(response, payload)
         and response.document == payload.book.md5 and response.accepted == #payload.pages
 end
 
+function Sync.connectionError(response)
+    local failure = response.error
+    local message = type(failure) == "table" and failure.message or failure
+    local code = type(failure) == "table" and failure.code
+    local detail = type(message) == "string" and message:gsub("[%c]", " "):sub(1, 500) or "No transport error details were returned."
+    local suffix = type(code) == "number" and (" (code " .. tostring(code) .. ")") or ""
+    return "Connection failed" .. suffix .. ": " .. detail
+end
+
 return Sync

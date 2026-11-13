@@ -41,7 +41,8 @@ return function(settings, sent, annotation_sent, snapshot, automatic, checkpoint
                                 end,
                             }))
                             local decoded, result = pcall(JSON.decode, response.body or "")
-                            if response.error or response.code ~= 200 or not decoded or type(result) ~= "table" or result.accepted ~= #batch then
+                            if response.error then error(Sync.connectionError(response), 0) end
+                            if response.code ~= 200 or not decoded or type(result) ~= "table" or result.accepted ~= #batch then
                                 error("Could not sync " .. kind .. ". Check your account, server version and connection, then retry.", 0)
                             end
                             previous[kind] = previous[kind] or {}
@@ -84,7 +85,7 @@ return function(settings, sent, annotation_sent, snapshot, automatic, checkpoint
                                 headers:add("x-auth-key", settings.userkey)
                             end,
                         }))
-                        if response.error then error("Connection failed. Check your server, network and device clock, then retry.", 0) end
+                        if response.error then error(Sync.connectionError(response), 0) end
                         local decoded, result = pcall(JSON.decode, response.body or "")
                         if response.code ~= 200 then
                             local detail = decoded and type(result) == "table" and type(result.message) == "string" and result.message:sub(1, 500)

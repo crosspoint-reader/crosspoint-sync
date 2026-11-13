@@ -373,7 +373,7 @@ KOReader. Highlights appear in the app and use any configured highlight connecto
 Bookmark locations are available through the authenticated server API for future
 firmware support; firmware integration is not included here.
 
-Use the **CrossPoint Sync for KOReader 0.2.3** release for annotation sync, with server **v0.2.0**
+Use the **CrossPoint Sync for KOReader 0.2.4** release for annotation sync, with server **v0.2.0**
 or newer. The original `koreader-v0.1.0` release contains statistics sync only.
 
 See the [plugin guide](koreader/crosspoint.koplugin/README.md) for history-import

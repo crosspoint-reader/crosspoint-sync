@@ -46,6 +46,8 @@ Acknowledged batches are checkpointed so interrupted uploads can retry safely.
 Only one worker runs at a time. TLS verification stays enabled.
 Worker failures, suspend cancellations and deadlines are shown separately in
 **CrossPoint Sync → Last sync result**; include that message when reporting a problem.
+Version 0.2.4 also includes the network client's error code and message for connection
+failures. This adds diagnostics; it does not establish or fix every connection cause.
 
 Automatic successes are quiet. Failures show a brief notice; open **CrossPoint Sync → Last sync result** for details. Use **Sync all reading history
 now** for an explicit full backfill/retry, including after clearing server data.

@@ -32,7 +32,11 @@ trap 'rm -f "$notes"' EXIT
 cat > "$notes" <<NOTES
 Install by extracting crosspoint-koreader.zip into KOReader's plugins folder and restarting KOReader. The plugin is now named **CrossPoint Sync**, with **Last sync result** in its menu. Existing account settings are preserved.
 
-Fixes the checkpoint writer's use of an FFI constant not exposed by KOReader, which could cause uploads to report that the background worker stopped without a usable result. Uses KOReader's supported private temporary-file API and reports worker errors, cancellation and deadlines separately.
+This update exposes the network client's actual error code and message in **CrossPoint Sync → Last sync result** for both history and annotation uploads. It replaces the generic connection-failed message so DNS, TLS and timeout problems can be distinguished.
+
+This is a diagnostic update, not a confirmed fix for the reported device connection failure. After installing, retry sync and include the full Last sync result when reporting the problem. TLS verification remains enabled.
+
+Includes the 0.2.3 checkpoint compatibility fix and the CrossPoint Sync rename.
 
 After one-time setup, reading statistics, highlights, notes and bookmarks upload automatically after successful Progress sync to the same CrossPoint server and account. Manual full-history sync is also available.
 

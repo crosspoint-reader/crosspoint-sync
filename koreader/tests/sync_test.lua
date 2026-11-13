@@ -157,6 +157,7 @@ reset()
 plugin, thread = start()
 assert(coroutine.resume(thread, { error = { message = "untrusted certificate" } }))
 assert(closed and not plugin.busy and shown[#shown].text:find("Connection failed"))
+assert(shown[#shown].text:find("untrusted certificate", 1, true))
 
 reset()
 plugin, thread = start()
@@ -371,3 +372,7 @@ for _, enabled in ipairs({ false, true }) do
     assert(not plugin.busy)
 end
 print("KOReader scheduling checks passed: sync returns before network work with Turbo on/off.")
+
+assert(Sync.connectionError({error={code=-5,message="TLS failed\ncertificate verify failed"}}) == "Connection failed (code -5): TLS failed certificate verify failed")
+assert(Sync.connectionError({error={code=-3,message="DNS lookup timed out"}}):find("DNS lookup timed out", 1, true))
+assert(Sync.connectionError({error=true}):find("No transport error details", 1, true))
