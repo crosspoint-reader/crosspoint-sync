@@ -46,6 +46,10 @@ Acknowledged batches are checkpointed so interrupted uploads can retry safely.
 Only one worker runs at a time. TLS verification stays enabled.
 Worker failures, suspend cancellations and deadlines are shown separately in
 **CrossPoint Sync → Last sync result**; include that message when reporting a problem.
+Version 0.2.6 removes the extra CRLF bytes Turbo appends beyond Content-Length.
+Those bytes can trigger a proxy-level HTTP 400 on larger history requests.
+The payload itself is preserved, including any legitimate trailing newlines.
+
 Version 0.2.5 fixes Turbo's handling of partial nonblocking writes: large uploads
 resume from the unsent byte instead of closing the connection on a temporary
 `timeout`/`wantwrite`/`wantread` result. The change applies only in the upload
@@ -173,3 +177,17 @@ release first, then run `npm run release:koreader -- koreader-v0.1.0` with a new
 version. This runs tests, builds the ZIP, creates the tag at that commit, and
 publishes immediately through the authenticated GitHub CLI. See the repository
 README for prerequisites.
+
+### Live transport verification
+
+With Turbo 2.1.5, LuaSocket and LuaSec available in the LuaJIT module paths, run:
+
+```sh
+luajit koreader/tests/live_transport_test.lua https://sync.crosspointreader.com/api/v1/stats/koreader koreader/crosspoint.koplugin/cacert.pem
+```
+
+This opt-in probe sends three synthetic unauthenticated requests (100 bytes,
+100 KB and 500 KB). It expects the application's JSON 401 response, proving
+that the real TLS/HTTP stack reaches authentication without a proxy framing
+error. It does not create an account, upload reader history, or verify an
+authenticated import. It is separate from CI to avoid automatic production traffic.

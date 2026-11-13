@@ -1,6 +1,8 @@
 local ffi = require("ffi")
 local Transport = dofile("koreader/crosspoint.koplugin/transport.lua")
-local turbo = { iostream = { IOStream = {} } }
+local turbo = { iostream = { IOStream = {} }, async = { HTTPClient = {
+    _prepare_http_request = function(client) return client.request end,
+} } }
 Transport.install(turbo)
 local function stream(payload, send)
     local storage = ffi.new("uint8_t[?]", #payload, payload)
@@ -62,3 +64,14 @@ if arg[1] then
     assert(old.closed and not old.completed, "Expected upstream partial-send failure")
     print("Confirmed: unmodified Turbo writer closes on a recoverable partial send.")
 end
+
+-- Match Content-Length exactly, even when the actual payload ends with CRLF.
+for _, body in ipairs({ "", "{}", "café", "text\r\n\r\n", string.rep("x", 500000) }) do
+    local headers = "POST /test HTTP/1.1\r\nContent-Length: " .. #body .. "\r\n\r\n"
+    local client = { kwargs = { body = body }, request = headers .. body .. "\r\n\r\n" }
+    assert(turbo.async.HTTPClient._prepare_http_request(client) == headers .. body)
+    client.request = headers .. body -- Already-correct future Turbo versions.
+    assert(turbo.async.HTTPClient._prepare_http_request(client) == headers .. body)
+end
+assert(turbo.async.HTTPClient._prepare_http_request({kwargs={},request=-1}) == -1)
+print("HTTP framing checks passed: exact Content-Length, UTF-8, trailing payload newlines and already-correct requests.")

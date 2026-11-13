@@ -2,6 +2,19 @@ local ffi = require("ffi")
 local Transport = {}
 
 function Transport.install(turbo)
+    local prepare = turbo.async.HTTPClient._prepare_http_request
+    turbo.async.HTTPClient._prepare_http_request = function(client)
+        local request = prepare(client)
+        if type(request) == "string" and type(client.kwargs.body) == "string" then
+            local _, header_end = request:find("\r\n\r\n", 1, true)
+            local body_end = header_end and header_end + #client.kwargs.body
+            -- Turbo adds CRLFCRLF beyond Content-Length; strict proxies reject it.
+            if body_end and #request == body_end + 4 and request:sub(body_end + 1) == "\r\n\r\n" then
+                return request:sub(1, body_end)
+            end
+        end
+        return request
+    end
     -- KOReader's Turbo LuaSocket writer closes on retryable partial sends.
     -- Apply only inside the upload subprocess, leaving KOReader's client untouched.
     turbo.iostream.IOStream._handle_write_nonconst = function(self)

@@ -32,9 +32,11 @@ trap 'rm -f "$notes"' EXIT
 cat > "$notes" <<NOTES
 Install by extracting crosspoint-koreader.zip into KOReader's plugins folder and restarting KOReader. The plugin is now named **CrossPoint Sync**, with **Last sync result** in its menu. Existing account settings are preserved.
 
-Fixes Turbo's handling of partial nonblocking writes during large uploads. Temporary timeout/wantwrite/wantread results now preserve the sent-byte count and retry the remaining bytes instead of closing the connection. This addresses a transport defect consistent with the history-upload HTTP 499 responses observed in production while smaller highlight uploads succeeded.
+Fixes the HTTP 400 caused by Turbo appending four extra CRLF bytes beyond the declared Content-Length. The plugin now sends exactly the declared body length, preserving the payload and its own trailing newlines.
 
-The workaround applies only inside the background upload process. Real socket errors still fail; request deadlines and TLS verification remain enabled. Transport tests force partial and zero-byte writes and verify exact delivery of a large body. The original Turbo method was separately reproduced closing on the same retryable condition. Device confirmation remains necessary.
+Reproduced with the real Turbo 2.1.5 / LuaSocket / LuaSec stack: 100 KB and 500 KB requests returned a proxy-level 400 before the framing fix. With the fix, 100-byte, 100 KB and 500 KB synthetic unauthenticated requests all reached the application's JSON 401 response. No credentials or reader data were sent. This verifies hosted transport/framing. Separate authenticated imports of 100, 1,000 and 5,000 synthetic page records passed against an ephemeral local server. A full sync on a physical KOReader device still needs verification.
+
+Retains the 0.2.5 partial-write retries and background-process uploads. TLS settings and server data are unchanged.
 
 Connection error codes and messages remain available under **CrossPoint Sync → Last sync result**.
 
