@@ -44,3 +44,15 @@ export async function downloadPrebuilt(baseUrl, font, progress = () => {}) {
   }
   return files
 }
+
+// Picked .cpfont files, grouped by family: "Literata_12.cpfont" -> Literata.
+export async function cpfontFamilies(files) {
+  const families = {}
+  for (const file of files) {
+    const data = new Uint8Array(await file.arrayBuffer())
+    if (String.fromCharCode(...data.slice(0, 6)) !== 'CPFONT') throw new Error(`${file.name} isn't a .cpfont file`)
+    const family = file.name.replace(/(_\d+)?\.cpfont$/i, '')
+    ;(families[family] ??= []).push({ name: file.name, data })
+  }
+  return families
+}

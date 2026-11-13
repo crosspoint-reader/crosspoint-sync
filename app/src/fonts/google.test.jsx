@@ -38,3 +38,11 @@ it('turns saved TrueType files back into styles for conversion', async () => {
   const { styles } = await localFamily(files.map((f) => ({ name: f.name, arrayBuffer: async () => f.data })))
   expect(Object.keys(styles).sort()).toEqual(['bold', 'bolditalic', 'regular'])
 })
+
+it('groups picked .cpfont files by family and rejects other files', async () => {
+  const { cpfontFamilies } = await import('./saved.js')
+  const cp = (name) => file(name, [...'CPFONT'].map((c) => c.charCodeAt(0)).concat([0, 0]))
+  const families = await cpfontFamilies([cp('Literata_12.cpfont'), cp('Literata_14.cpfont'), cp('Bitter_12.cpfont')])
+  expect(Object.fromEntries(Object.entries(families).map(([f, files]) => [f, files.map((x) => x.name)]))).toEqual({ Literata: ['Literata_12.cpfont', 'Literata_14.cpfont'], Bitter: ['Bitter_12.cpfont'] })
+  await expect(cpfontFamilies([file('Fake_12.cpfont')])).rejects.toThrow("isn't a .cpfont file")
+})

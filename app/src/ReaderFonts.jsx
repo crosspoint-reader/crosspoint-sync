@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ChevronRight, Download, FileUp, Loader2, Search, Send as SendIcon, Trash2, Type } from 'lucide-react'
 import { deleteFont, listFonts, uploadFont, uploadTrueType } from './device.js'
 import { convert, downloadFamily, familyName, googleFonts, localFamily, trueTypeFiles } from './fonts/google.js'
-import { crossPointFonts, downloadPrebuilt, forgetFont, isPrebuilt, readFont, saveFont, savedFonts } from './fonts/saved.js'
+import { cpfontFamilies, crossPointFonts, downloadPrebuilt, forgetFont, isPrebuilt, readFont, saveFont, savedFonts } from './fonts/saved.js'
 import { ActionSheet, Card, EmptyState, notify, Toggle } from './ui.jsx'
 
 // X3/X4 (ESP32-C3, no external RAM) need .cpfont; ESP32-S3 readers load TrueType directly.
@@ -98,12 +98,22 @@ export default function ReaderFonts({ base, device }) {
   }
 
   // source: a Google Fonts entry, or font files picked on this device.
+  // Picked .cpfont files are already converted, so they're saved and sent as they are.
+  const addCpfonts = (files) =>
+    run(LOCAL, async (set) => {
+      set('Reading files…')
+      const families = Object.entries(await cpfontFamilies(files))
+      for (const [family, fonts] of families) await saveFont(familyName(family) || 'CustomFont', fonts)
+      await reloadSaved()
+      notify({ title: `Saved ${families.map(([f]) => f).join(', ')}`, detail: base ? 'Ready to send to your reader' : 'Send it when your reader is connected' })
+    }, "Couldn't add those .cpfont files")
+
   const get = (source) =>
     run(source.family ?? LOCAL, async (set) => {
       set(source.files ? 'Reading files…' : 'Downloading…')
       const picked = source.files && (await localFamily(source.files))
       const styles = picked?.styles ?? (await downloadFamily(source))
-      if (!styles.regular) throw new Error('Choose .ttf or .otf files')
+      if (!styles.regular) throw new Error('Choose .ttf, .otf or .cpfont files')
       const family = familyName(picked?.family ?? source.family) || 'CustomFont'
       await saveFont(family, trueTypeFiles(family, styles))
       await reloadSaved()
@@ -146,11 +156,14 @@ export default function ReaderFonts({ base, device }) {
           type="file"
           multiple
           className="hidden"
-          onChange={(e) => {
-            const files = [...e.target.files].filter((f) => /\.(ttf|otf)$/i.test(f.name))
+          onChange={async (e) => {
+            const picked = [...e.target.files]
             e.target.value = ''
-            if (files.length) get({ files })
-            else notify({ error: true, title: 'Choose .ttf or .otf files' })
+            const cpfonts = picked.filter((f) => /\.cpfont$/i.test(f.name))
+            const trueType = picked.filter((f) => /\.(ttf|otf)$/i.test(f.name))
+            if (cpfonts.length) await addCpfonts(cpfonts)
+            if (trueType.length) await get({ files: trueType })
+            if (!cpfonts.length && !trueType.length) notify({ error: true, title: 'Choose .ttf, .otf or .cpfont files' })
           }}
         />
         <button
