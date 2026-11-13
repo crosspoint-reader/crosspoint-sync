@@ -7,11 +7,11 @@ int waitpid(int, int *, int); int kill(int, int);
 int usleep(unsigned int); void _exit(int);
 struct timeval { long tv_sec; int tv_usec; };
 int gettimeofday(struct timeval *, void *);
-int open(const char *, int, ...); int close(int);
+int mkstemps(char *, int); int close(int);
 long write(int, const void *, unsigned long);
 ]]
-ffi.cdef(ffi.os == "OSX" and "enum { O_WRONLY = 1, O_CREAT = 512, O_EXCL = 2048 };"
-    or "enum { O_WRONLY = 1, O_CREAT = 64, O_EXCL = 128 };")
+-- Do not invent constants absent from KOReader's ffi/posix_h.lua.
+assert(not pcall(function() return ffi.C.O_EXCL end))
 local C = ffi.C
 local function now()
     local tv = ffi.new("struct timeval[1]")
@@ -49,8 +49,12 @@ package.preload["ui/uimanager"] = function() return {
     end,
 } end
 package.preload["json"] = function() return {
-    encode = function(result) return result.ok and "complete" or "checkpoint" end,
+    encode = function(result)
+        if result.result and result.result:find("Background sync failed:", 1, true) then return "error:" .. result.result end
+        return result.ok and "complete" or "checkpoint"
+    end,
     decode = function(value)
+        if value:sub(1, 6) == "error:" then return { ok = false, result = value:sub(7) } end
         assert(value == "complete" or value == "checkpoint", "invalid result")
         return { ok = value == "complete", result = value, sent = { acknowledged = true }, annotation_sent = {} }
     end,
@@ -106,6 +110,7 @@ result = nil
 assert(Background.start(function() error("simulated worker crash") end, function(value) result = value end))
 pump(function() return result ~= nil end)
 assert(not result.ok and not result.sent and not Background.running())
+assert(result.result:find("simulated worker crash", 1, true))
 
 -- A hung worker is killed at the whole-job deadline without blocking the parent.
 result = nil
@@ -118,6 +123,15 @@ fake_time = fake_time + 301
 pump(function() return result ~= nil end)
 os.time = original_time
 assert(not result.ok and not Background.running())
+
+-- Reporting a checkpoint failure must not depend on that same broken writer.
+result = nil
+local original_write = process_api.writeToFD
+process_api.writeToFD = function(fd) C.close(fd); return false end
+assert(Background.start(function() return { ok = true } end, function(value) result = value end))
+pump(function() return result ~= nil end)
+assert(not result.ok and result.result:find("Could not write sync checkpoint", 1, true))
+process_api.writeToFD = original_write
 
 process_api.runInSubProcess = function() return false, "fork unavailable" end
 assert(not Background.start(function() end, function() end))

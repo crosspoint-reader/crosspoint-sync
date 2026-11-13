@@ -1,4 +1,4 @@
-# CrossPoint stats sync for KOReader
+# CrossPoint Sync for KOReader
 
 Upload KOReader reading time and page history to CrossPoint Sync. The existing
 CrossPoint dashboard shows daily activity, reading time, estimated sessions and
@@ -18,8 +18,8 @@ highlight connectors and microblog posting settings.
    `/api/v1/stats/koreader` endpoint. Older servers will return an error.
 2. Unzip `crosspoint-koreader.zip` into KOReader's `plugins` folder. You should have
    `koreader/plugins/crosspoint.koplugin/main.lua`, without an extra nested folder.
-3. Restart KOReader. Enable **CrossPoint stats sync** in plugin management if needed.
-4. In KOReader's main menu, open **CrossPoint stats sync → Set up server and account**.
+3. Restart KOReader. Enable **CrossPoint Sync** in plugin management if needed.
+4. In KOReader's main menu, open **CrossPoint Sync → Set up server and account**.
 5. Enter the server root URL (including any deployment path prefix), your
    CrossPoint **sync username and password**, and a reading time zone such as
    `America/New_York`, `Europe/London`, or `UTC`. Use the same time zone on each
@@ -44,9 +44,10 @@ parent process updates plugin settings.
 Suspend/exit cancels the worker, and a five-minute deadline stops stuck jobs.
 Acknowledged batches are checkpointed so interrupted uploads can retry safely.
 Only one worker runs at a time. TLS verification stays enabled.
+Worker failures, suspend cancellations and deadlines are shown separately in
+**CrossPoint Sync → Last sync result**; include that message when reporting a problem.
 
-Automatic successes are quiet. Failures show a brief notice; open **CrossPoint
-stats sync → Last stats sync result** for details. Use **Sync all reading history
+Automatic successes are quiet. Failures show a brief notice; open **CrossPoint Sync → Last sync result** for details. Use **Sync all reading history
 now** for an explicit full backfill/retry, including after clearing server data.
 Acknowledged book fingerprints persist across restarts; the manual action bypasses
 them. You do not need to open the plugin menu for everyday syncing.

@@ -30,7 +30,9 @@ npm run build:koreader
 notes=$(mktemp)
 trap 'rm -f "$notes"' EXIT
 cat > "$notes" <<NOTES
-Install by extracting crosspoint-koreader.zip into KOReader's plugins folder and restarting KOReader.
+Install by extracting crosspoint-koreader.zip into KOReader's plugins folder and restarting KOReader. The plugin is now named **CrossPoint Sync**, with **Last sync result** in its menu. Existing account settings are preserved.
+
+Fixes the checkpoint writer's use of an FFI constant not exposed by KOReader, which could cause uploads to report that the background worker stopped without a usable result. Uses KOReader's supported private temporary-file API and reports worker errors, cancellation and deadlines separately.
 
 After one-time setup, reading statistics, highlights, notes and bookmarks upload automatically after successful Progress sync to the same CrossPoint server and account. Manual full-history sync is also available.
 
@@ -47,4 +49,4 @@ NOTES
 # Keep plugin releases separate from the server's v* releases and Latest pointer.
 gh release create "$tag" dist/crosspoint-koreader.zip \
   --repo "$repo" --target "$commit" --latest=false \
-  --title "KOReader plugin ${tag#koreader-v}" --notes-file "$notes"
+  --title "CrossPoint Sync for KOReader ${tag#koreader-v}" --notes-file "$notes"

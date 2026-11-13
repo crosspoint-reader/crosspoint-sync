@@ -344,11 +344,11 @@ need to open its menu for everyday syncing. Duplicate uploads are counted once.
    the ZIP is written to `dist/crosspoint-koreader.zip`.
 3. Extract the ZIP into KOReader's `plugins` folder so the resulting path is
    `koreader/plugins/crosspoint.koplugin/main.lua`. Restart KOReader and enable
-   **CrossPoint stats sync** in plugin management if needed.
+   **CrossPoint Sync** in plugin management if needed.
 4. Configure KOReader's built-in **Progress sync** with your CrossPoint server
    URL and sync credentials. Use binary/content checksum matching so statistics
    and reading positions refer to the same books.
-5. Open **CrossPoint stats sync → Set up server and account** once. Enter the
+5. Open **CrossPoint Sync → Set up server and account** once. Enter the
    **same HTTPS server URL, sync username and password**, plus your reading time
    zone, such as `America/New_York`, `Europe/London`, or `UTC`.
 6. Use normal **Progress sync → Push progress**. After it succeeds, the plugin
@@ -360,7 +360,7 @@ alone does not trigger stats. The plugin does not reconnect Wi-Fi after a suspen
 or disconnect; unsent records retry on the next successful progress push while
 online. A stats failure does not turn a successful progress push into a failure.
 
-Use **CrossPoint stats sync → Last stats sync result** to check the outcome, or
+Use **CrossPoint Sync → Last sync result** to check the outcome, or
 **Sync all reading history now** to force a full backfill/retry. Stats failures
 also show a brief notice. Reading positions stay under normal KOSync.
 
@@ -373,7 +373,7 @@ KOReader. Highlights appear in the app and use any configured highlight connecto
 Bookmark locations are available through the authenticated server API for future
 firmware support; firmware integration is not included here.
 
-Use the **KOReader plugin 0.2.2** release for annotation sync, with server **v0.2.0**
+Use the **CrossPoint Sync for KOReader 0.2.3** release for annotation sync, with server **v0.2.0**
 or newer. The original `koreader-v0.1.0` release contains statistics sync only.
 
 See the [plugin guide](koreader/crosspoint.koplugin/README.md) for history-import

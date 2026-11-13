@@ -52,16 +52,16 @@ end
 
 function CrossPoint:addToMainMenu(menu_items)
     menu_items.crosspoint = {
-        text = _("CrossPoint stats sync"),
+        text = _("CrossPoint Sync"),
         sub_item_table = {
             { text = _("Set up server and account"), enabled_func = function() return not self.busy end,
               callback = function() self:setup() end },
             { text = _("Sync all reading history now"), enabled_func = function() return not self.busy end,
               callback = function() self:sync() end },
-            { text = _("Last stats sync result"), callback = function()
-                UIManager:show(InfoMessage:new{ text = LuaSettings:open(DataStorage:getSettingsDir() .. "/crosspoint.lua"):readSetting("last_sync", _("No stats sync yet.")) })
+            { text = _("Last sync result"), callback = function()
+                UIManager:show(InfoMessage:new{ text = LuaSettings:open(DataStorage:getSettingsDir() .. "/crosspoint.lua"):readSetting("last_sync", _("No sync yet.")) })
               end },
-            { text = _("About stats sync"), callback = function()
+            { text = _("About CrossPoint Sync"), callback = function()
                 UIManager:show(InfoMessage:new{ text = _("Automatically uploads changed reading history after a successful Progress sync to the same server and account. Use Sync all reading history now for a full backfill. Repeated uploads are deduplicated. Also uploads highlights, notes and bookmarks for the open book, including edits and deletions. Annotations are uploaded only; they are not downloaded to KOReader. Keep using Progress sync for your place in each book.\n\nHistory deleted on your reader is kept on the server. Sessions are estimated from gaps between page records.") })
               end },
         },
@@ -71,7 +71,7 @@ end
 function CrossPoint:setup()
     local dialog
     dialog = MultiInputDialog:new{
-        title = _("CrossPoint stats sync"),
+        title = _("CrossPoint Sync"),
         fields = {
             { text = self.settings.server or "https://sync.crosspointreader.com", hint = _("Server URL") },
             { text = self.settings.username or "", hint = _("Sync username") },
@@ -158,7 +158,7 @@ function CrossPoint:sync(automatic)
         if not automatic then
             UIManager:show(InfoMessage:new{ text = result.result })
         elseif not result.ok then
-            UIManager:show(InfoMessage:new{ text = _("Progress synced, but history or annotations could not sync. See CrossPoint stats sync → Last stats sync result. Sync will retry after the next successful Progress sync."), timeout = 5 })
+            UIManager:show(InfoMessage:new{ text = _("Progress synced, but history or annotations could not sync. See CrossPoint Sync → Last sync result. Sync will retry after the next successful Progress sync."), timeout = 5 })
         end
         if self.pending_auto then
             self.pending_auto = nil
