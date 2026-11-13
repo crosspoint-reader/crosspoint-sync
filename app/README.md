@@ -119,12 +119,19 @@ different account and verify a previously selected book cannot resolve to it.
 
 ### Importing files on mobile
 
-Share or open `.epub`, `.acsm`, `.md`, or `.txt` files in CrossPoint Sync to
-queue them in **Send books**. Imports are copied into app-owned storage and
+Share or open books (`.epub`, `.acsm`, `.md`, `.txt`), fonts (`.ttf`, `.otf`,
+`.cpfont`), and sleep-screen images (`.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`,
+`.bmp`) in CrossPoint Sync to queue them in **Send to your reader**. Imports are copied into app-owned storage and
 survive tab changes, restarts, and an unavailable reader. Tap Send when ready;
 a successful send deletes its queued copy. Failed sends stay queued, and Remove
 deletes only the app's copy. Files with identical names remain separate entries.
-The in-app file picker uses the same persistent queue.
+Book file-picker imports use the same persistent queue. Shared font styles from
+one family are sent together through the existing font APIs; duplicate copies
+of one style remain separate. Raw bold/italic uploads do not replace regular.
+Converting a family to `.cpfont` requires its regular style. Shared images open
+in the sleep-screen editor for sizing/dithering and BMP conversion before send;
+editing or saving a preview leaves the original queued. Mixed batches show
+counts on each Send tab, and imports also work in guest mode.
 
 Android accepts Share (including multiple files) and Open intents. On iOS,
 **Open in CrossPoint Sync** opens the app directly. The **CrossPoint Sync** Share

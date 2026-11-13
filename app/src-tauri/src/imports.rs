@@ -48,7 +48,7 @@ pub fn open(app: &AppHandle, url: &url::Url) {
     let result = (|| {
       let path = url.to_file_path().map_err(|_| "Invalid file URL")?;
       let name = path.file_name().and_then(|s| s.to_str()).ok_or("Invalid file name")?;
-      if !import_store::valid_name(name) { return Err("Choose EPUB, Markdown, text or ACSM files".into()); }
+      if !import_store::valid_name(name) { return Err("Choose books, TTF/OTF/CPFONT fonts, or PNG/JPG/WebP/GIF/BMP sleep screens".into()); }
       let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
       import_store::add(&queue_dir(app)?, name, &bytes).map_err(|e| e.to_string())?;
       Ok(())

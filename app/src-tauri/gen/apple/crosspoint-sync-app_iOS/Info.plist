@@ -76,7 +76,7 @@
 	<array>
 		<dict>
 			<key>CFBundleTypeName</key>
-			<string>Reader documents</string>
+			<string>Reader books, fonts and sleep screens</string>
 			<key>CFBundleTypeRole</key>
 			<string>Viewer</string>
 			<key>LSHandlerRank</key>
@@ -87,6 +87,14 @@
 				<string>com.adobe.adept.acsm</string>
 				<string>net.daringfireball.markdown</string>
 				<string>public.plain-text</string>
+				<string>public.truetype-ttf-font</string>
+				<string>public.opentype-font</string>
+				<string>com.crosspointreader.cpfont</string>
+				<string>public.png</string>
+				<string>public.jpeg</string>
+				<string>org.webmproject.webp</string>
+				<string>com.compuserve.gif</string>
+				<string>com.microsoft.bmp</string>
 			</array>
 		</dict>
 	</array>
@@ -141,6 +149,23 @@
 				<string>md</string>
 				<key>public.mime-type</key>
 				<string>text/markdown</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.crosspointreader.cpfont</string>
+			<key>UTTypeDescription</key>
+			<string>CrossPoint prebuilt font</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<string>cpfont</string>
+				<key>public.mime-type</key>
+				<string>application/vnd.crosspoint.cpfont</string>
 			</dict>
 		</dict>
 	</array>

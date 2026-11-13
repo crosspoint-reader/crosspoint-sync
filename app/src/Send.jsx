@@ -23,6 +23,7 @@ import { DEFAULT_HOST, connect, deleteFiles, folders, isBook, joinPath, listFile
 import { downloads as listDownloads, removeDownload, sendDownload, sendFile } from './catalogs.js'
 import { ActionSheet, Card, EmptyState, folderLabel, notify, Tabs, Toggle } from './ui.jsx'
 import ConversionLog from './ConversionLog.jsx'
+import { importKind } from './importTypes.js'
 import { listImports, addImport, readImport, removeImport } from './importQueue.js'
 import Plugins from './Plugins.jsx'
 import ReaderFonts from './ReaderFonts.jsx'
@@ -415,6 +416,7 @@ export default function Send({ tab = '' }) {
   const [device, setDevice] = useState({ state: 'searching', dirs: [] })
   const [attempt, setAttempt] = useState(0)
   const [files, setFiles] = useState([]) // { file, state: 'queued'|'sending'|'done'|'error', error }
+  const [importCounts, setImportCounts] = useState({})
   const [skipped, setSkipped] = useState(0)
   const [sending, setSending] = useState(false)
   const [dragging, setDragging] = useState(false)
@@ -447,7 +449,13 @@ export default function Send({ tab = '' }) {
       const request = ++latest
       const revision = queueRevision.current
       try {
-        const entries = (await listImports()).filter(isBook)
+        const all = await listImports()
+        const entries = all.filter(isBook)
+        if (live && request === latest) setImportCounts(all.reduce((counts, entry) => {
+          const kind = importKind(entry)
+          if (kind) counts[kind] = (counts[kind] ?? 0) + 1
+          return counts
+        }, {}))
         if (live && request === latest && revision === queueRevision.current) setFiles(cur => {
           if (revision !== queueRevision.current) return cur
           const byId = new Map(cur.map(item => [item.id, item]))
@@ -545,7 +553,7 @@ export default function Send({ tab = '' }) {
         </Card>
       ) : (
         <>
-          <Tabs route="send" tabs={TABS} tab={tab} />
+          <Tabs route="send" tabs={TABS.map(([key, label]) => [key, importCounts[key || 'books'] ? `${label} (${importCounts[key || 'books']})` : label])} tab={tab} />
           {tab === 'wallpaper' ? (
             <Wallpaper />
           ) : (

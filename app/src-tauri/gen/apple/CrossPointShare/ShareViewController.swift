@@ -66,7 +66,7 @@ final class ShareViewController: UIViewController {
             }
             return
         }
-        let supported = ["org.idpf.epub-container", "com.adobe.adept.acsm", "net.daringfireball.markdown", UTType.plainText.identifier]
+        let supported = ["org.idpf.epub-container", "com.adobe.adept.acsm", "net.daringfireball.markdown", UTType.plainText.identifier, "public.truetype-ttf-font", "public.opentype-font", "com.crosspointreader.cpfont", "public.image"]
         guard let type = supported.first(where: { provider.hasItemConformingToTypeIdentifier($0) }) else {
             finish(ImportFailure.unsupported); return
         }
@@ -84,7 +84,7 @@ enum ImportFailure: LocalizedError {
     case unsupported, unreadable, storage
     var errorDescription: String? {
         switch self {
-        case .unsupported: return "Choose EPUB, Markdown, text or ACSM files."
+        case .unsupported: return "Choose books, TTF/OTF/CPFONT fonts, or PNG/JPG/WebP/GIF/BMP sleep screens."
         case .unreadable: return "Couldn't read the shared file."
         case .storage: return "Couldn't access CrossPoint Sync storage."
         }
@@ -95,7 +95,7 @@ enum ImportStore {
     static func validName(_ name: String) -> Bool {
         !name.isEmpty && !name.hasPrefix(".") && !name.contains("/") && !name.contains("\\") &&
             name.rangeOfCharacter(from: .controlCharacters) == nil &&
-            ["epub", "acsm", "md", "txt"].contains((name as NSString).pathExtension.lowercased())
+            ["epub", "acsm", "md", "txt", "ttf", "otf", "cpfont", "png", "jpg", "jpeg", "webp", "gif", "bmp"].contains((name as NSString).pathExtension.lowercased())
     }
 
     static func copy(_ source: URL, suggestedName: String?) throws {

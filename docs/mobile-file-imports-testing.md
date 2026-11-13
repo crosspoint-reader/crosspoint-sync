@@ -58,3 +58,28 @@ Tauri's app data directory (`applicationInfo.dataDir`); iOS uses the shared App
 Group container. No original/source file is deleted. Android delivery receipts
 live in private preferences so restoring an activity cannot reimport a file
 already sent or removed. Files and receipts are local to this app installation.
+
+## Expanded font and image checks
+
+Share TTF, OTF and CPFONT (singular extension), plus PNG, JPG/JPEG, WebP, GIF
+and BMP. Homogeneous batches navigate to Fonts or Sleep screens; mixed batches
+open Send with per-tab counts. Repeat in guest mode.
+
+For fonts, share Regular, Bold and Italic from the same family and send one
+row: the available distinct styles send together. Duplicate files of a style
+stay independent. Check raw mode uses `/fonts/<family>/` uploads, and conversion
+uses `/api/fonts/upload`; prebuilt CPFONT bypasses conversion. A standalone raw
+Bold must not overwrite Regular. Conversion without a regular style must fail
+with an explanation and retain its queued originals.
+
+For images, select Edit sleep screen, preview/crop/dither, and save locally.
+The original must remain queued. A successful send to `/.sleep` (or `/sleep`
+fallback) consumes only that original. A failed send retains it. Removing an
+image while its preview is open must detach the preview from the removed entry.
+
+Native Share predicate regression test (run with access to the system UTI registry):
+
+```
+cd app
+swift -module-cache-path /tmp/crosspoint-swift-cache scripts/import-tests/main.swift
+```

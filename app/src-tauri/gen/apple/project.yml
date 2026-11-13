@@ -45,7 +45,7 @@ targets:
       path: crosspoint-sync-app_iOS/Info.plist
       properties:
         CFBundleDocumentTypes:
-        - CFBundleTypeName: Reader documents
+        - CFBundleTypeName: Reader books, fonts and sleep screens
           CFBundleTypeRole: Viewer
           LSHandlerRank: Alternate
           LSItemContentTypes:
@@ -53,6 +53,14 @@ targets:
           - com.adobe.adept.acsm
           - net.daringfireball.markdown
           - public.plain-text
+          - public.truetype-ttf-font
+          - public.opentype-font
+          - com.crosspointreader.cpfont
+          - public.png
+          - public.jpeg
+          - org.webmproject.webp
+          - com.compuserve.gif
+          - com.microsoft.bmp
         UTImportedTypeDeclarations:
         - UTTypeIdentifier: org.idpf.epub-container
           UTTypeDescription: EPUB book
@@ -75,6 +83,13 @@ targets:
           UTTypeTagSpecification:
             public.filename-extension: md
             public.mime-type: text/markdown
+        - UTTypeIdentifier: com.crosspointreader.cpfont
+          UTTypeDescription: CrossPoint prebuilt font
+          UTTypeConformsTo:
+          - public.data
+          UTTypeTagSpecification:
+            public.filename-extension: cpfont
+            public.mime-type: application/vnd.crosspoint.cpfont
         LSRequiresIPhoneOS: true
         UILaunchStoryboardName: LaunchScreen
         UIRequiredDeviceCapabilities: [arm64, metal]
@@ -202,7 +217,7 @@ targets:
       properties:
         CFBundleDisplayName: CrossPoint Sync
         CFBundleShortVersionString: 0.1.2
-        CFBundleVersion: '17'
+        CFBundleVersion: "28"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.share-services
           NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).ShareViewController"
@@ -211,7 +226,9 @@ targets:
               $attachment, ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.file-url"
               OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "org.idpf.epub-container"
               OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.adobe.adept.acsm"
-              OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.plain-text").@count
+              OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.plain-text"
+              OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.crosspointreader.cpfont" OR ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.font" OR
+              ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.image").@count
               > 0).@count > 0
         UTImportedTypeDeclarations:
         - UTTypeIdentifier: org.idpf.epub-container
@@ -235,6 +252,13 @@ targets:
           UTTypeTagSpecification:
             public.filename-extension: md
             public.mime-type: text/markdown
+        - UTTypeIdentifier: com.crosspointreader.cpfont
+          UTTypeDescription: CrossPoint prebuilt font
+          UTTypeConformsTo:
+          - public.data
+          UTTypeTagSpecification:
+            public.filename-extension: cpfont
+            public.mime-type: application/vnd.crosspoint.cpfont
     entitlements:
       path: CrossPointShare/CrossPointShare.entitlements
       properties:

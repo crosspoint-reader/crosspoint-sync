@@ -19,11 +19,11 @@ export function watchImports(onIncoming, onError) {
     try {
       const entries = await listImports()
       if (!live) return
-      const incoming = entries.some(e => !seen.has(e.id))
-      const changed = incoming || entries.length !== seen.size
+      const incoming = entries.filter(e => !seen.has(e.id))
+      const changed = incoming.length > 0 || entries.length !== seen.size
       seen = new Set(entries.map(e => e.id))
       if (changed) window.dispatchEvent(new Event('crosspoint-imports-changed'))
-      if (incoming) onIncoming()
+      if (incoming.length) onIncoming(incoming)
     } catch (error) { if (live) onError(error) }
     finally { busy = false }
   }

@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { getCurrent, onOpenUrl } from '@tauri-apps/plugin-deep-link'
 import { widgetRoute } from './widgetLinks.js'
 import { watchImports } from './importQueue.js'
+import { importRoute } from './importTypes.js'
 import { listen } from '@tauri-apps/api/event'
 import { ChartColumn, CloudOff, Compass, MessageSquareQuote, Eye, EyeOff, LibraryBig, Loader2, Lock, Send as SendIcon, Server, Settings as SettingsIcon, ShieldCheck, User } from 'lucide-react'
 import { useTheme } from './theme.js'
@@ -394,7 +395,7 @@ function Sidebar({ route, session, nav = NAV }) {
   )
 }
 
-function Home({ session, onSession, onLogout, theme }) {
+function useIncomingFiles() {
   useEffect(() => {
     if (!isApp) return
     let lastError
@@ -404,11 +405,15 @@ function Home({ session, onSession, onLogout, theme }) {
       lastError = detail
       notify({ error: true, title: "Couldn't import files", detail })
     }
-    const stop = watchImports(() => { location.hash = '#/send' }, report)
+    const stop = watchImports(entries => { location.hash = importRoute(entries) }, report)
     let live = true, unlisten
     listen('import-error', event => report(event.payload)).then(fn => { if (live) unlisten = fn; else fn() }).catch(report)
     return () => { live = false; stop(); unlisten?.() }
   }, [])
+}
+
+function Home({ session, onSession, onLogout, theme }) {
+  useIncomingFiles()
   useEffect(() => {
     if (!isApp) return
     let live = true, stop
@@ -551,6 +556,7 @@ function Home({ session, onSession, onLogout, theme }) {
 }
 
 function Guest({ theme, onSignIn }) {
+  useIncomingFiles()
   const [parts] = useHash()
   const [route, id] = parts
   const page = route === 'send' ? <Send tab={id ?? ''} />

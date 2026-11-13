@@ -3,6 +3,8 @@ import { ChevronRight, Download, FileUp, Loader2, Search, Send as SendIcon, Tras
 import { deleteFont, listFonts, uploadFont, uploadTrueType } from './device.js'
 import { convert, downloadFamily, familyName, googleFonts, localFamily, trueTypeFiles } from './fonts/google.js'
 import { cpfontFamilies, crossPointFonts, downloadPrebuilt, forgetFont, isPrebuilt, readFont, saveFont, savedFonts } from './fonts/saved.js'
+import ImportedAssets from './ImportedAssets.jsx'
+import { groupFontEntries, sendImportedFonts } from './fonts/sendImported.js'
 import { ActionSheet, Card, EmptyState, notify, Toggle } from './ui.jsx'
 
 // X3/X4 (ESP32-C3, no external RAM) need .cpfont; ESP32-S3 readers load TrueType directly.
@@ -145,10 +147,20 @@ export default function ReaderFonts({ base, device }) {
       setTick((t) => t + 1)
     }, `Couldn't send ${font.family}`)
 
+  const sendShared = async (file, _entry, files) => {
+    try {
+      setJob({ family: file.name, label: 'Sending…' })
+      await sendImportedFonts(files, { base, trueType, progress: label => setJob({ family: file.name, label }) })
+      setTick(t => t + 1)
+      notify({ title: `Sent ${file.name}`, detail: 'Pick it in Settings › Reader › Font Family' })
+    } finally { setJob(null) }
+  }
+
   const status = (family, fallback) => (job?.family === family ? job.label : fallback)
 
   return (
     <section className="mt-6">
+      <ImportedAssets groupEntries={groupFontEntries} kind="fonts" actionLabel="Send" onAction={sendShared} disabled={!base || !!job} />
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm/6 text-stone-500">Get fonts any time, then send them when your reader is connected.</p>
         <input
@@ -278,12 +290,14 @@ export default function ReaderFonts({ base, device }) {
               </div>
             ))}
           </Card>
-          <div className="mt-3 flex items-center gap-3">
-            <p className="min-w-0 flex-1 text-sm font-medium text-stone-900">Convert to .cpfont</p>
-            <Toggle label="Convert to .cpfont" checked={!trueType} onChange={(convert) => setTrueType(!convert)} />
-          </div>
+
         </>
       )}
+
+      <div className="mt-3 flex items-center gap-3">
+        <p className="min-w-0 flex-1 text-sm font-medium text-stone-900">Convert to .cpfont</p>
+        <Toggle label="Convert to .cpfont" checked={!trueType} onChange={value => setTrueType(!value)} />
+      </div>
 
       <h3 className="mt-5 text-sm font-semibold text-stone-600">On your reader</h3>
       <Card className="mt-2 divide-y divide-stone-100">

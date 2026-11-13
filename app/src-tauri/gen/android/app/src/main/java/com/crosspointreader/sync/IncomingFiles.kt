@@ -42,7 +42,7 @@ internal object IncomingFiles {
       }
     } else null
     val name = displayName ?: uri.lastPathSegment ?: throw IllegalArgumentException("Missing file name")
-    require(validName(name)) { "Choose EPUB, Markdown, text or ACSM files: $name" }
+    require(validName(name)) { "Choose books, TTF/OTF/CPFONT fonts, or PNG/JPG/WebP/GIF/BMP sleep screens: $name" }
     // Tauri PathPlugin.getDataDir resolves applicationInfo.dataDir, not filesDir.
     val staging = File(root, ".$id")
     staging.deleteRecursively() // Retry an incomplete copy after process death.
@@ -61,5 +61,5 @@ internal object IncomingFiles {
 
   private fun validName(name: String): Boolean =
     name.isNotEmpty() && !name.startsWith('.') && name.none { it == '/' || it == '\\' || it.isISOControl() } &&
-      name.substringAfterLast('.', "").lowercase() in setOf("epub", "acsm", "md", "txt")
+      name.substringAfterLast('.', "").lowercase() in setOf("epub", "acsm", "md", "txt", "ttf", "otf", "cpfont", "png", "jpg", "jpeg", "webp", "gif", "bmp")
 }
