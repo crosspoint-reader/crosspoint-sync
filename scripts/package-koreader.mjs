@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { buildZip } from '../dist/kindle-zip.js';
 
-const files = ['_meta.lua', 'main.lua', 'sync.lua', 'annotations.lua', 'progress_hook.lua', 'cacert.pem', 'README.md'];
+const files = ['_meta.lua', 'main.lua', 'background.lua', 'worker.lua', 'sync.lua', 'annotations.lua', 'progress_hook.lua', 'cacert.pem', 'README.md'];
 const entries = files.map(name => ({
   name: `crosspoint.koplugin/${name}`,
   data: readFileSync(new URL(`../koreader/crosspoint.koplugin/${name}`, import.meta.url)),

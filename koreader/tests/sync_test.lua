@@ -93,6 +93,39 @@ local ProgressClient = { update_progress = function(_, ...)
 end }
 package.preload["KOSyncClient"] = function() return ProgressClient end
 conn.close = function() closed = true end
+-- Transport/state tests drive the worker coroutine deterministically.
+-- Real fork and delayed-worker responsiveness are covered in background_test.lua.
+local in_worker, active_worker = false, false
+local background = {
+    running = function() return active_worker end,
+    start = function(work, complete)
+        active_worker = true
+        queued = function()
+            in_worker = true
+            local result = work(function() end)
+            in_worker, active_worker = false, false
+            complete(result)
+        end
+        return true
+    end,
+    cancel = function() active_worker = false end,
+}
+local real_dofile = dofile
+dofile = function(path)
+    if path:match("/background.lua$") then return background end
+    return real_dofile(path)
+end
+require("turbo").ioloop = { IOLoop = function()
+    assert(in_worker, "Network loop started on UI thread")
+    local callback
+    return {
+        add_callback = function(_, fn) callback = fn end,
+        start = function() callback() end,
+        close = function() end,
+    }
+end }
+UI.initLooper = function() error("Plugin must not start the UI network loop") end
+UI.setInputTimeout = function() error("Plugin must not change UI input timeouts") end
 local Plugin = dofile("koreader/crosspoint.koplugin/main.lua")
 local function instance()
     local plugin = Plugin:new{ ui = { menu = { registerToMainMenu = function() end }, statistics = { insertDB = function() end } } }
@@ -106,7 +139,7 @@ local function start()
     local thread = coroutine.create(queued)
     local ok, result = coroutine.resume(thread)
     assert(ok, result)
-    assert(result == "http-await" and timeout)
+    assert(result == "http-await" and not timeout)
     return plugin, thread
 end
 local plugin, thread = start()
@@ -321,49 +354,20 @@ assert(coroutine.resume(thread, { code = 200, body = { accepted = 1 } }))
 assert(coroutine.resume(thread, { code = 200, body = { version = 1, document = hash, accepted = 2 } }))
 assert(coroutine.status(thread) == "dead")
 
--- KOReader leaves looper nil when DUSE_TURBO_LIB is disabled (normal device setup).
-local turbo = require("turbo")
-local shared_loop = UI.looper
-local private_closed, private_started, private_failure
-local private_loop = {
-    add_callback = function(_, callback) queued = callback end,
-    close = function() private_closed = true end,
-    start = function()
-        private_started = true
-        local co = coroutine.create(queued)
-        local ok, result = coroutine.resume(co)
-        assert(ok, result)
-        assert(result == "http-await")
-        assert(coroutine.resume(co, private_failure and { error = true } or {
-            code = 200, body = { version = 1, document = hash, accepted = 2 },
-        }))
-        assert(coroutine.status(co) == "dead")
-    end,
-}
-turbo.ioloop = { IOLoop = function()
-    assert(TURBO_SSL and __TURBO_USE_LUASOCKET__)
-    return private_loop
-end }
-local original_client = turbo.async.HTTPClient
-turbo.async.HTTPClient = function(options, loop, limit)
-    assert(loop == private_loop and limit == 4 * 1024 * 1024)
-    return original_client(options)
-end
-for _, failure in ipairs({ false, true }) do
+
+-- Returning from sync must not run the network worker, with or without a UI loop.
+for _, enabled in ipairs({ false, true }) do
     reset()
-    private_closed, private_started, private_failure = false, false, failure
-    UI.looper = nil
+    UI.looper = enabled and {} or nil
     plugin = instance()
     plugin:sync(true)
-    assert(private_started and private_closed and not plugin.busy)
-    assert(UI.looper == nil and not timeout)
-    assert(failure and shown[#shown].text:find("could not sync") or not failure and saved.sent[hash])
+    assert(plugin.busy and queued and #posted == 0 and not in_worker)
+    local heartbeat = 0
+    for _ = 1, 10 do heartbeat = heartbeat + 1 end
+    assert(heartbeat == 10)
+    thread = coroutine.create(queued)
+    assert(coroutine.resume(thread))
+    assert(coroutine.resume(thread, { code = 200, body = { version = 1, document = hash, accepted = 2 } }))
+    assert(not plugin.busy)
 end
-reset()
-turbo.ioloop.IOLoop = function() error("network library unavailable") end
-plugin = instance()
-assert(pcall(function() plugin:sync() end))
-assert(not plugin.busy and shown[#shown].text:find("Could not start"))
-UI.looper = shared_loop
-turbo.async.HTTPClient = original_client
-print("KOReader no-Turbo-UI checks passed: private loop, TLS, failures and cleanup.")
+print("KOReader scheduling checks passed: sync returns before network work with Turbo on/off.")

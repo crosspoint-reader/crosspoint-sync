@@ -35,10 +35,15 @@ an unrelated KOSync server. It never reconnects Wi-Fi after suspend/disconnect.
 If the reader goes offline or a stats upload fails, it retries after the next
 successful progress push while online. Progress sync succeeds independently.
 
-When KOReader's optional Turbo UI loop is disabled, the plugin runs a private
-network loop instead. Sync still follows normal progress pushes, but the reading
-UI pauses until the upload finishes; large history backfills can take a while.
-The plugin does not change KOReader's Turbo setting or disable TLS verification.
+Uploads run in a separate background process, whether KOReader's optional Turbo
+UI loop is enabled or disabled. You can keep reading while slow network requests
+finish. The UI captures the current book's annotations before starting the worker;
+the worker reads history through its own read-only SQLite connection. Only the
+parent process updates plugin settings.
+
+Suspend/exit cancels the worker, and a five-minute deadline stops stuck jobs.
+Acknowledged batches are checkpointed so interrupted uploads can retry safely.
+Only one worker runs at a time. TLS verification stays enabled.
 
 Automatic successes are quiet. Failures show a brief notice; open **CrossPoint
 stats sync → Last stats sync result** for details. Use **Sync all reading history
@@ -144,10 +149,14 @@ npm run test:koreader
 npx vitest run test/koreader-sync.test.ts test/koinsight-import.test.ts
 ```
 
-The ZIP is written to `dist/crosspoint-koreader.zip`. The plugin tests need `lua`
-(or run `luajit koreader/tests/sync_test.lua` for KOReader's LuaJIT runtime).
-Tests mock KOReader's UI and transport. Real-device installation, menu placement,
-Wi-Fi, and TLS behavior still need device testing before a public release.
+The ZIP is written to `dist/crosspoint-koreader.zip`. Tests require Lua and LuaJIT.
+The sync suite mocks UI and HTTP responses, including retries and partial batches.
+The background suite uses real OS child processes and a delayed worker to verify
+that UI polling continues, plus cancellation, deadlines, worker crashes, checkpoint
+recovery, and cleanup. Both suites run in CI and the release script.
+
+These checks do not emulate Kobo hardware or exercise KOReader's full UI, network,
+and TLS stack. Real-device page turns, Wi-Fi and suspend/resume still need testing.
 
 To publish an installable ZIP as a tagged GitHub release, commit and push the
 release first, then run `npm run release:koreader -- koreader-v0.1.0` with a new

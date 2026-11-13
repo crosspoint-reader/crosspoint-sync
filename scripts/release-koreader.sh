@@ -36,9 +36,9 @@ After one-time setup, reading statistics, highlights, notes and bookmarks upload
 
 Annotations upload from the open book, including edits and deletions. Open each older book and push progress to backfill its annotations. Annotation sync is upload-only; downloading annotations into KOReader and firmware integration are not included.
 
-Supports KOReader with its optional Turbo UI loop disabled, fixing the nil-looper crash when syncing after Wi-Fi connects. On those devices, a private network loop uploads synchronously; the reading UI pauses until sync finishes. TLS certificate verification remains enabled.
+Fixes the UI freeze in plugin 0.2.1: uploads now run in a separate background process with Turbo UI mode enabled or disabled. Slow requests no longer occupy the reading UI. Suspend cancels uploads, stuck jobs have a five-minute deadline, and acknowledged batches are checkpointed for retries. TLS certificate verification remains enabled.
 
-Validated with server tests and Lua/LuaJIT plugin checks. Real-device testing is still needed.
+Validated with Lua/LuaJIT sync checks and real-process responsiveness tests covering delayed work, cancellation, worker crashes, deadlines and checkpoint recovery. Full KOReader emulator and real-device testing are still needed.
 
 [Setup and usage instructions](https://github.com/$repo/blob/$tag/koreader/crosspoint.koplugin/README.md)
 
