@@ -143,7 +143,7 @@ export default function ReaderFonts({ base, device }) {
       }
       notify({ title: `Sent ${family}`, detail: 'Pick it in Settings › Reader › Font Family' })
       setTick((t) => t + 1)
-    }, `Couldn't send ${family}`)
+    }, `Couldn't send ${font.family}`)
 
   const status = (family, fallback) => (job?.family === family ? job.label : fallback)
 
