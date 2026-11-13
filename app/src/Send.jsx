@@ -42,7 +42,7 @@ function Device({ prefs, setPrefs, device, onRetry }) {
   const [host, setHost] = useState(prefs.host)
   const { state, status, error, dirs } = device
   return (
-    <Card className="mt-6 p-4">
+    <Card className="mt-8 p-4">
       <div className="flex items-start gap-3">
         <div className={`grid size-10 shrink-0 place-items-center rounded-full ${state === 'ok' ? 'bg-brand-50 text-brand-600' : 'bg-stone-100 text-stone-500'}`}>
           {state === 'searching' ? <Loader2 className="size-5 animate-spin" /> : state === 'ok' ? <Wifi className="size-5" /> : <WifiOff className="size-5" />}
@@ -495,15 +495,13 @@ export default function Send({ tab = '' }) {
           {tab === 'wallpaper' ? (
             <Wallpaper />
           ) : (
-            <div className="md:grid md:grid-cols-2 md:items-start md:gap-8">
-              <Device prefs={prefs} setPrefs={setPrefs} device={device} onRetry={() => setAttempt((a) => a + 1)} />
-
+            <div className="max-w-3xl">
               {tab === 'fonts' ? (
                 <ReaderFonts base={device.base} device={device.status?.device} />
               ) : tab === 'plugins' ? (
                 <Plugins base={device.base} />
               ) : (
-                <div className="md:mt-6">
+                <div>
                   <input
                     ref={input}
                     type="file"
@@ -596,6 +594,7 @@ export default function Send({ tab = '' }) {
                   {device.state === 'ok' && <ReaderFiles base={device.base} onFoldersChanged={() => folders(device.base).then((dirs) => setDevice((d) => ({ ...d, dirs })), () => {})} />}
                 </div>
               )}
+              <Device prefs={prefs} setPrefs={setPrefs} device={device} onRetry={() => setAttempt((a) => a + 1)} />
             </div>
           )}
         </>
