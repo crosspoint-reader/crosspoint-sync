@@ -179,6 +179,35 @@ describe('kosync protocol compatibility', () => {
     expect(body.device_id).toBe('bbbb');
   });
 
+  it('a device cannot move a book backwards (a reader opening at the cover)', async () => {
+    const { app, db } = makeTestApp();
+    const { headers } = await registerUser(app);
+    const put = (percentage: number, device_id: string) =>
+      app.request('/syncs/progress', {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ document: DOC, progress: `at-${percentage}`, percentage, device: device_id, device_id }),
+      });
+    await put(0.36, 'aaaa');
+    const res = await put(0, 'bbbb');
+    expect(res.status).toBe(200);
+    expect((await res.json()).document).toBe(DOC);
+    expect((await put(0.2, 'aaaa')).status).toBe(200);
+    const body = await (await app.request(`/syncs/progress/${DOC}`, { headers })).json();
+    expect(body.percentage).toBe(0.36);
+    expect(body.device_id).toBe('aaaa');
+    // Backdate so the next write is strictly newer within the same second.
+    db.prepare('UPDATE progress SET updated_at = updated_at - 100').run();
+    await put(0.4, 'bbbb');
+    expect((await (await app.request(`/syncs/progress/${DOC}`, { headers })).json()).percentage).toBe(0.4);
+    // A finished book stays finished too.
+    db.prepare('UPDATE progress SET updated_at = updated_at - 100').run();
+    await put(1, 'bbbb');
+    db.prepare('UPDATE progress SET updated_at = updated_at - 100').run();
+    await put(0.01, 'aaaa');
+    expect((await (await app.request(`/syncs/progress/${DOC}`, { headers })).json()).percentage).toBe(1);
+  });
+
   it('PUT without device_id falls back to device name (KOReader configs vary)', async () => {
     const { app } = makeTestApp();
     const { headers } = await registerUser(app);

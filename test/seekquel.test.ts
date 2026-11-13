@@ -276,8 +276,9 @@ describe('seekquel connector (end to end)', () => {
     const fake = fakeTransport();
     const { app, db, headers, linked } = await linkSeekquel(fake);
     expect(linked).toBe(true);
-    const sync = async (percentage: number) => {
-      await app.request('/syncs/progress', {
+    // Devices only move forward; going back is an explicit PUT /api/v1/progress.
+    const sync = async (percentage: number, path = '/syncs/progress') => {
+      await app.request(path, {
         method: 'PUT',
         headers,
         body: JSON.stringify({ document: DOC, progress: '/body/p[9]', percentage, device_id: 'd1', metadata: { title: 'Piranesi', authors: 'Susanna Clarke' } }),
@@ -290,7 +291,7 @@ describe('seekquel connector (end to end)', () => {
     expect(statusCalls()).toBe(1);
     await sync(1);
     expect(statusCalls()).toBe(1);
-    await sync(0.1);
+    await sync(0.1, '/api/v1/progress');
     expect(statusCalls()).toBe(1);
     await sync(1);
     expect(statusCalls()).toBe(2);

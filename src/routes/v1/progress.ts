@@ -70,13 +70,16 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
       records.push(parsed.record);
     }
     const accepted: { document: string; timestamp: number }[] = [];
+    const stored: ProgressUpsert[] = [];
     withTransaction(db, () => {
       for (const record of records) {
-        accepted.push({ document: writeDeviceProgress(db, record), timestamp: record.updatedAt });
+        const written = writeDeviceProgress(db, record);
+        accepted.push({ document: written.document, timestamp: record.updatedAt });
+        if (written.stored) stored.push(record);
       }
     });
     // External services only after every row is stored.
-    for (const record of records) fanOutDeviceProgress(db, record);
+    for (const record of stored) fanOutDeviceProgress(db, record);
     return c.json({ accepted: accepted.length, items: accepted });
   });
 

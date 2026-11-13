@@ -369,10 +369,23 @@ function clientTime(value: unknown): number {
  * out to connected services. Returns the hash the client sent, which responses
  * echo so the device recognizes them. Shared by the kosync PUT and the batch
  * route, so both writes behave identically.
+ *
+ * Devices only move a book forward: a position behind the book's current one
+ * (a reader opening the file at its cover, say) is dropped, `stored` is false,
+ * and the device finds the further position on its next pull. That holds for
+ * a finished book too. Moving a book back on purpose (a re-read) goes through
+ * PUT /api/v1/progress or a progress reset.
  */
-export function writeDeviceProgress(db: DB, record: ProgressUpsert): string {
+export function writeDeviceProgress(db: DB, record: ProgressUpsert): { document: string; stored: boolean } {
   const clientDocument = record.document;
   record.document = adoptFilenameTwin(db, record.userId, clientDocument, record.metadata?.filename ?? null, record.updatedAt);
+  const current = db
+    .prepare(
+      `SELECT percentage FROM progress WHERE user_id = ? AND document = ?
+       ORDER BY updated_at DESC, device_id LIMIT 1`
+    )
+    .get(record.userId, record.document) as { percentage: number } | undefined;
+  if (current && record.percentage < current.percentage) return { document: clientDocument, stored: false };
   upsertProgress(db, record);
   // Harvest this real device position as a (percentage -> position) sample so
   // fan-in can later replay a real position for a percentage-only update.
@@ -385,7 +398,7 @@ export function writeDeviceProgress(db: DB, record: ProgressUpsert): string {
     record.position,
     record.updatedAt
   );
-  return clientDocument;
+  return { document: clientDocument, stored: true };
 }
 
 export function fanOutDeviceProgress(db: DB, record: ProgressUpsert): void {
@@ -456,9 +469,9 @@ export function kosyncRoutes(db: DB, config: Config, refreshProgress: ProgressRe
     }
     // A merged document stores under its canonical hash; echo the client's own
     // hash back so the device recognizes the response.
-    const clientDocument = writeDeviceProgress(db, parsed.record);
-    fanOutDeviceProgress(db, parsed.record);
-    return c.json({ document: clientDocument, timestamp: parsed.record.updatedAt });
+    const written = writeDeviceProgress(db, parsed.record);
+    if (written.stored) fanOutDeviceProgress(db, parsed.record);
+    return c.json({ document: written.document, timestamp: parsed.record.updatedAt });
   });
 
   app.get('/syncs/progress/:document', auth, async (c) => {
