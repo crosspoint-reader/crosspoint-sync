@@ -23,7 +23,7 @@ import { createProgressRefresh } from './connectors/refresh.js';
 import type { HttpTransport } from './connectors/types.js';
 
 // Injected at build time via package.json; read lazily to keep this file dependency-free.
-export const VERSION = process.env.npm_package_version ?? '0.1.0';
+export const VERSION = process.env.npm_package_version ?? '0.2.0';
 
 export interface AppOptions {
   /** Override the connector HTTP transport (tests inject a fake). */

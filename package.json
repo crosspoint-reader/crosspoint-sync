@@ -1,6 +1,6 @@
 {
   "name": "crosspoint-sync",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Reading progress sync, stats and highlights for any KOSync-compatible e-reader. Self-hostable, with a companion app. Syncs with 3rd party connectors such as Hardcover, Spotify, Audiobookshelf, BookOrbit, BookFusion, Readest, and Readwise.",
   "license": "MIT",
   "type": "module",

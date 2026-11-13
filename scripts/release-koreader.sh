@@ -32,11 +32,15 @@ trap 'rm -f "$notes"' EXIT
 cat > "$notes" <<NOTES
 Install by extracting crosspoint-koreader.zip into KOReader's plugins folder and restarting KOReader.
 
-After one-time setup, stats upload automatically after successful Progress sync to the same CrossPoint server and account. Manual full-history sync is also available.
+After one-time setup, reading statistics, highlights, notes and bookmarks upload automatically after successful Progress sync to the same CrossPoint server and account. Manual full-history sync is also available.
+
+Annotations upload from the open book, including edits and deletions. Open each older book and push progress to backfill its annotations. Annotation sync is upload-only; downloading annotations into KOReader and firmware integration are not included.
+
+Validated with server tests and Lua/LuaJIT plugin checks. Real-device testing is still needed.
 
 [Setup and usage instructions](https://github.com/$repo/blob/$tag/koreader/crosspoint.koplugin/README.md)
 
-Requires a CrossPoint Sync server with the /api/v1/stats/koreader endpoint. Plugin installation alone does not update the server.
+Use CrossPoint Sync server v0.2.0 or newer for this release. Plugin installation alone does not update the server.
 NOTES
 # Keep plugin releases separate from the server's v* releases and Latest pointer.
 gh release create "$tag" dist/crosspoint-koreader.zip \
