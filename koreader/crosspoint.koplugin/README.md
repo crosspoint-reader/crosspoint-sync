@@ -46,6 +46,11 @@ Acknowledged batches are checkpointed so interrupted uploads can retry safely.
 Only one worker runs at a time. TLS verification stays enabled.
 Worker failures, suspend cancellations and deadlines are shown separately in
 **CrossPoint Sync → Last sync result**; include that message when reporting a problem.
+Version 0.2.5 fixes Turbo's handling of partial nonblocking writes: large uploads
+resume from the unsent byte instead of closing the connection on a temporary
+`timeout`/`wantwrite`/`wantread` result. The change applies only in the upload
+subprocess. Genuine socket errors still stop the request.
+
 Version 0.2.4 also includes the network client's error code and message for connection
 failures. This adds diagnostics; it does not establish or fix every connection cause.
 
@@ -156,7 +161,9 @@ The ZIP is written to `dist/crosspoint-koreader.zip`. Tests require Lua and LuaJ
 The sync suite mocks UI and HTTP responses, including retries and partial batches.
 The background suite uses real OS child processes and a delayed worker to verify
 that UI polling continues, plus cancellation, deadlines, worker crashes, checkpoint
-recovery, and cleanup. Both suites run in CI and the release script.
+recovery, and cleanup. A transport suite forces partial writes and checks that large request bodies arrive
+exactly once without dropped bytes, while genuine failures still close the socket.
+All suites run in CI and the release script.
 
 These checks do not emulate Kobo hardware or exercise KOReader's full UI, network,
 and TLS stack. Real-device page turns, Wi-Fi and suspend/resume still need testing.

@@ -27,6 +27,7 @@ jobs:
           sudo apt-get install -y luajit
           luajit koreader/tests/sync_test.lua
           luajit koreader/tests/background_test.lua
+          luajit koreader/tests/transport_test.lua
           npm run build:koreader
 
   docker:

@@ -32,9 +32,11 @@ trap 'rm -f "$notes"' EXIT
 cat > "$notes" <<NOTES
 Install by extracting crosspoint-koreader.zip into KOReader's plugins folder and restarting KOReader. The plugin is now named **CrossPoint Sync**, with **Last sync result** in its menu. Existing account settings are preserved.
 
-This update exposes the network client's actual error code and message in **CrossPoint Sync → Last sync result** for both history and annotation uploads. It replaces the generic connection-failed message so DNS, TLS and timeout problems can be distinguished.
+Fixes Turbo's handling of partial nonblocking writes during large uploads. Temporary timeout/wantwrite/wantread results now preserve the sent-byte count and retry the remaining bytes instead of closing the connection. This addresses a transport defect consistent with the history-upload HTTP 499 responses observed in production while smaller highlight uploads succeeded.
 
-This is a diagnostic update, not a confirmed fix for the reported device connection failure. After installing, retry sync and include the full Last sync result when reporting the problem. TLS verification remains enabled.
+The workaround applies only inside the background upload process. Real socket errors still fail; request deadlines and TLS verification remain enabled. Transport tests force partial and zero-byte writes and verify exact delivery of a large body. The original Turbo method was separately reproduced closing on the same retryable condition. Device confirmation remains necessary.
+
+Connection error codes and messages remain available under **CrossPoint Sync → Last sync result**.
 
 Includes the 0.2.3 checkpoint compatibility fix and the CrossPoint Sync rename.
 

@@ -5,6 +5,7 @@ local lfs = require("libs/libkoreader-lfs")
 local md5 = require("ffi/sha2").md5
 local plugin_dir = debug.getinfo(1, "S").source:sub(2):match("^(.*)/")
 local Sync = dofile(plugin_dir .. "/sync.lua")
+local Transport = dofile(plugin_dir .. "/transport.lua")
 local Annotations = dofile(plugin_dir .. "/annotations.lua")
 
 -- This function runs only in a child process; it never accesses UI or reader objects.
@@ -19,6 +20,7 @@ return function(settings, sent, annotation_sent, snapshot, automatic, checkpoint
         TURBO_SSL = true
         __TURBO_USE_LUASOCKET__ = true
         local turbo = require("turbo")
+        Transport.install(turbo)
         looper = turbo.ioloop.IOLoop()
         looper:add_callback(function()
             local uploaded, upload_error = pcall(function()

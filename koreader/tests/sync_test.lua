@@ -113,6 +113,7 @@ local background = {
 local real_dofile = dofile
 dofile = function(path)
     if path:match("/background.lua$") then return background end
+    if path:match("/transport.lua$") then return { install = function() assert(in_worker) end } end
     return real_dofile(path)
 end
 require("turbo").ioloop = { IOLoop = function()
