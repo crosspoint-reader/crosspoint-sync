@@ -24,6 +24,7 @@ import { DEFAULT_HOST, connect, deleteFiles, folders, isBook, joinPath, listFile
 import { downloads as listDownloads, removeDownload, sendDownload, sendFile } from './catalogs.js'
 import { ActionSheet, Card, EmptyState, folderLabel, notify, Toggle } from './ui.jsx'
 import ConversionLog from './ConversionLog.jsx'
+import ReaderFonts from './ReaderFonts.jsx'
 import { transferProgress } from './epub/log.js'
 
 const size = (n) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`)
@@ -293,7 +294,7 @@ function ReaderFiles({ base, onFoldersChanged }) {
   return (
     <section className="mt-8">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="font-display text-xl font-semibold text-stone-900">On your reader</h2>
+        <h2 className="font-display text-xl font-semibold text-stone-900">Files on your reader</h2>
         <button
           disabled={locked}
           onClick={() => setCreatingIn(path)}
@@ -471,20 +472,21 @@ export default function Send() {
 
   return (
     <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
-      <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">Send books</h1>
+      <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">Send to your reader</h1>
       <p className="mt-2 max-w-xl text-sm/6 text-stone-500">
-        Send EPUB, Markdown, text or ACSM files over Wi-Fi.
+        Books, fonts and sleep screens, straight to your reader over Wi-Fi.
       </p>
 
       {!isApp ? (
         <Card className="mt-6 p-4 text-sm/6 text-stone-600">
-          Sending books needs the CrossPoint Sync app: a browser can&apos;t talk to your reader on the local network.
+          Sending to your reader needs the CrossPoint Sync app: a browser can&apos;t talk to your reader on the local network.
         </Card>
       ) : (
         <div className="md:grid md:grid-cols-2 md:items-start md:gap-8">
           <Device prefs={prefs} setPrefs={setPrefs} device={device} onRetry={() => setAttempt((a) => a + 1)} />
 
           <div>
+            <h2 className="mt-8 font-display text-xl font-semibold text-stone-900 md:mt-6">Books</h2>
             <input
               ref={input}
               type="file"
@@ -509,7 +511,7 @@ export default function Send() {
                 setDragging(false)
                 add(e.dataTransfer.files)
               }}
-              className={`mt-6 flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed px-4 py-8 text-center transition active:scale-[0.99] ${
+              className={`mt-3 flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed px-4 py-8 text-center transition active:scale-[0.99] ${
                 dragging ? 'border-brand-400 bg-brand-50' : 'border-stone-300 bg-surface/60'
               }`}
             >
@@ -574,23 +576,27 @@ export default function Send() {
             )}
 
             <Shelf prefs={prefs} ready={device.state === 'ok'} />
+            <section className="mt-8">
+              <h2 className="font-display text-xl font-semibold text-stone-900">Sleep screens</h2>
+              <a
+                href="#/send/wallpaper"
+                className="mt-3 flex items-center gap-3 rounded-xl bg-surface px-4 py-3 shadow-sm ring-1 ring-stone-950/5 transition active:scale-[0.99] md:hover:bg-stone-50"
+              >
+                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600">
+                  <ImagePlus className="size-5" strokeWidth={1.75} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-stone-900">Make a sleep screen</span>
+                  <span className="block truncate text-xs text-stone-500">Turn a photo into a wallpaper for your reader</span>
+                </span>
+                <ChevronRight className="size-5 text-stone-400" />
+              </a>
+            </section>
+            <ReaderFonts base={device.base} device={device.status?.device} />
             {device.state === 'ok' && <ReaderFiles base={device.base} onFoldersChanged={() => folders(device.base).then((dirs) => setDevice((d) => ({ ...d, dirs })), () => {})} />}
           </div>
         </div>
       )}
-      <a
-        href="#/send/wallpaper"
-        className="mt-5 flex max-w-xl items-center gap-3 rounded-xl bg-surface px-4 py-3 shadow-sm ring-1 ring-stone-950/5 transition active:scale-[0.99] md:hover:bg-stone-50"
-      >
-        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600">
-          <ImagePlus className="size-5" strokeWidth={1.75} />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-sm font-semibold text-stone-900">Make a sleep screen</span>
-          <span className="block truncate text-xs text-stone-500">Turn a photo into a wallpaper for your reader</span>
-        </span>
-        <ChevronRight className="size-5 text-stone-400" />
-      </a>
     </div>
   )
 }

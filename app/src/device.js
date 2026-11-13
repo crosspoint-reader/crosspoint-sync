@@ -73,3 +73,33 @@ export const joinPath = (dir, name) => (dir === '/' ? `/${name}` : `${dir}/${nam
 export const renameFile = (base, path, name) => post(base, 'rename', { path, name })
 export const makeFolder = (base, path, name) => post(base, 'mkdir', { path, name })
 export const deleteFiles = (base, paths) => post(base, 'delete', { paths: JSON.stringify(paths) })
+
+// SD-card fonts (CrossPoint and CrossInk share these endpoints). null = firmware without the font API.
+export async function listFonts(base) {
+  const res = await http(`${base}/api/fonts`, { signal: AbortSignal.timeout(8000) })
+  return res.ok ? (await res.json()).families : null
+}
+export async function uploadFont(base, family, file) {
+  const body = new FormData()
+  body.append('family', family)
+  body.append('file', new Blob([file.data]), file.name)
+  const res = await http(`${base}/api/fonts/upload`, { method: 'POST', body })
+  if (!res.ok) throw new Error((await res.text()).trim() || `Couldn't upload ${file.name}`)
+}
+export async function deleteFont(base, family) {
+  const res = await http(`${base}/api/fonts/delete`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ family }),
+  })
+  if (!res.ok) throw new Error((await res.text()).trim() || `Couldn't delete ${family}`)
+}
+
+// TrueType families go straight into /fonts/<family>/ (readers with external RAM load them as-is).
+export async function uploadTrueType(base, family, file) {
+  for (const [dir, name] of [['/', 'fonts'], ['/fonts', family]]) await makeFolder(base, dir, name).catch(() => {}) // already exists
+  const body = new FormData()
+  body.append('file', new Blob([file.data]), file.name)
+  const res = await http(`${base}/upload?path=${encodeURIComponent(`/fonts/${family}`)}`, { method: 'POST', body })
+  if (!res.ok) throw new Error((await res.text()).trim() || `Couldn't upload ${file.name}`)
+}
