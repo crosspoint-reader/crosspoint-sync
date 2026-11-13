@@ -43,6 +43,7 @@ export function fontFaces(basePath: string): string {
     `@font-face{font-family:"${family}";src:url(${basePath}/fonts/${file}) format("woff2");font-weight:${weight};font-style:normal;font-display:swap}`;
   return [
     face('InterVariable', 'inter-latin-wght-normal.woff2', '100 900'),
+    face('Lora', 'lora-latin-400-normal.woff2', '400'),
     face('Lora', 'lora-latin-500-normal.woff2', '500'),
     face('Lora', 'lora-latin-600-normal.woff2', '600'),
     face('Lora', 'lora-latin-700-normal.woff2', '700'),

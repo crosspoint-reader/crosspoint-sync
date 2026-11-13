@@ -118,8 +118,8 @@ fn set_appearance(window: tauri::WebviewWindow, pref: String, dark: bool) -> Res
       use objc2::{class, msg_send, runtime::AnyObject};
       let view = &*(webview.inner() as *const AnyObject);
       let win: *mut AnyObject = msg_send![view, window];
-      // theme.js PAGE: #fafaf9 light, #121110 dark.
-      let (r, g, b) = if dark { (0x12, 0x11, 0x10) } else { (0xfa, 0xfa, 0xf9) };
+      // theme.js PAGE: #faf8f3 light, #121110 dark.
+      let (r, g, b) = if dark { (0x12, 0x11, 0x10) } else { (0xfa, 0xf8, 0xf3) };
       let page: *mut AnyObject = msg_send![class!(UIColor), colorWithRed: r as f64 / 255.0, green: g as f64 / 255.0, blue: b as f64 / 255.0, alpha: 1.0f64];
       let _: () = msg_send![view, setBackgroundColor: page];
       let _: () = msg_send![view, setUnderPageBackgroundColor: page];

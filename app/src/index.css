@@ -12,8 +12,21 @@
   --font-eink: "Noto Serif", serif;
   --font-hand: "Caveat", cursive;
 
-  /* Corners: cards and floating surfaces rounded-xl, large touch controls (h-12/h-14)
-   rounded-2xl, chips and small buttons rounded-full, sheets 28px. */
+  /* Paper and olive neutrals shared with the CrossPoint landing page. */
+  --color-stone-50: #faf8f3;
+  --color-stone-100: #ebe7de;
+  --color-stone-200: #dfdfd2;
+  --color-stone-300: #c8c9bb;
+  --color-stone-400: #858a7d;
+  --color-stone-500: #62675d;
+  --color-stone-600: #555b50;
+  --color-stone-700: #41483d;
+  --color-stone-800: #33392f;
+  --color-stone-900: #242820;
+  --color-stone-950: #151a13;
+  --radius-xl: 0.375rem;
+  --radius-2xl: 0.375rem;
+  --radius-3xl: 0.5rem;
 
   /* Forest green, the single accent color */
   --color-brand-50: #f0f5f3;
@@ -41,6 +54,12 @@
 }
 
 html { color-scheme: light; }
+
+:is(h1, h2, h3).font-display {
+  font-weight: 400;
+  letter-spacing: -0.045em;
+  text-wrap: balance;
+}
 
 /* Chromium paints a select's open list with the select's own background, so a
    bg-transparent select drops a see-through list over the page. */

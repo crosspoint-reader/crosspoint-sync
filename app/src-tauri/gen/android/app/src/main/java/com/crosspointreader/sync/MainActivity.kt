@@ -23,7 +23,7 @@ import java.io.File
 
 class MainActivity : TauriActivity() {
   companion object {
-    private const val PAPER = 0xFFFAFAF9.toInt()
+    private const val PAPER = 0xFFFAF8F3.toInt()
     private const val PAPER_DARK = 0xFF121110.toInt()
   }
 
