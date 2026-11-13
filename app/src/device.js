@@ -96,10 +96,22 @@ export async function deleteFont(base, family) {
 }
 
 // TrueType families go straight into /fonts/<family>/ (readers with external RAM load them as-is).
-export async function uploadTrueType(base, family, file) {
-  for (const [dir, name] of [['/', 'fonts'], ['/fonts', family]]) await makeFolder(base, dir, name).catch(() => {}) // already exists
+export const uploadTrueType = (base, family, file) => uploadTo(base, `/fonts/${family}/${file.name}`, file.data)
+
+// Write one file, creating its folders. Replaces an existing file (newer firmware refuses without overwrite=1).
+export async function uploadTo(base, path, data) {
+  const parts = path.split('/').filter(Boolean)
+  const name = parts.pop()
+  // Hidden folders can't be created over HTTP; the reader makes /.crosspoint itself.
+  for (let i = 0; i < parts.length; i++) if (!parts[i].startsWith('.')) await makeFolder(base, `/${parts.slice(0, i).join('/')}`, parts[i]).catch(() => {}) // already exists
   const body = new FormData()
-  body.append('file', new Blob([file.data]), file.name)
-  const res = await http(`${base}/upload?path=${encodeURIComponent(`/fonts/${family}`)}`, { method: 'POST', body })
-  if (!res.ok) throw new Error((await res.text()).trim() || `Couldn't upload ${file.name}`)
+  body.append('file', new Blob([data]), name)
+  const res = await http(`${base}/upload?path=${encodeURIComponent(`/${parts.join('/')}`)}&overwrite=1`, { method: 'POST', body })
+  if (!res.ok) throw new Error((await res.text()).trim() || `Couldn't upload ${name}`)
+}
+
+export async function readText(base, path) {
+  const res = await http(`${base}/download?path=${encodeURIComponent(path)}`, { signal: AbortSignal.timeout(8000) })
+  if (!res.ok) throw new Error(`Couldn't read ${path}`)
+  return res.text()
 }

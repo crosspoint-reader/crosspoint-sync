@@ -10,7 +10,6 @@ import {
   FileText,
   Folder,
   ImageDown,
-  ImagePlus,
   Loader2,
   RefreshCw,
   Send as SendIcon,
@@ -22,9 +21,11 @@ import {
 import { isApp } from './api.js'
 import { DEFAULT_HOST, connect, deleteFiles, folders, isBook, joinPath, listFiles, loadDevicePrefs, makeFolder, renameFile, saveDevicePrefs } from './device.js'
 import { downloads as listDownloads, removeDownload, sendDownload, sendFile } from './catalogs.js'
-import { ActionSheet, Card, EmptyState, folderLabel, notify, Toggle } from './ui.jsx'
+import { ActionSheet, Card, EmptyState, folderLabel, notify, Tabs, Toggle } from './ui.jsx'
 import ConversionLog from './ConversionLog.jsx'
+import Plugins from './Plugins.jsx'
 import ReaderFonts from './ReaderFonts.jsx'
+import Wallpaper from './Wallpaper.jsx'
 import { transferProgress } from './epub/log.js'
 
 const size = (n) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`)
@@ -399,7 +400,14 @@ function ReaderFiles({ base, onFoldersChanged }) {
   )
 }
 
-export default function Send() {
+const TABS = [
+  ['', 'Books'],
+  ['fonts', 'Fonts'],
+  ['wallpaper', 'Sleep screens'],
+  ['plugins', 'Plugins'],
+]
+
+export default function Send({ tab = '' }) {
   const [prefs, setPrefsState] = useState(loadDevicePrefs)
   const [device, setDevice] = useState({ state: 'searching', dirs: [] })
   const [attempt, setAttempt] = useState(0)
@@ -474,7 +482,7 @@ export default function Send() {
     <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
       <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">Send to your reader</h1>
       <p className="mt-2 max-w-xl text-sm/6 text-stone-500">
-        Books, fonts and sleep screens, straight to your reader over Wi-Fi.
+        Books, fonts, sleep screens and plugins, straight to your reader over Wi-Fi.
       </p>
 
       {!isApp ? (
@@ -482,120 +490,115 @@ export default function Send() {
           Sending to your reader needs the CrossPoint Sync app: a browser can&apos;t talk to your reader on the local network.
         </Card>
       ) : (
-        <div className="md:grid md:grid-cols-2 md:items-start md:gap-8">
-          <Device prefs={prefs} setPrefs={setPrefs} device={device} onRetry={() => setAttempt((a) => a + 1)} />
+        <>
+          <Tabs route="send" tabs={TABS} tab={tab} />
+          {tab === 'wallpaper' ? (
+            <Wallpaper />
+          ) : (
+            <div className="md:grid md:grid-cols-2 md:items-start md:gap-8">
+              <Device prefs={prefs} setPrefs={setPrefs} device={device} onRetry={() => setAttempt((a) => a + 1)} />
 
-          <div>
-            <h2 className="mt-8 font-display text-xl font-semibold text-stone-900 md:mt-6">Books</h2>
-            <input
-              ref={input}
-              type="file"
-              multiple
-              // Native type filters can disable unknown extensions such as ACSM on iOS.
-              // Validate supported extensions in add() after selection instead.
-              className="hidden"
-              onChange={(e) => {
-                add(e.target.files)
-                e.target.value = ''
-              }}
-            />
-            <button
-              onClick={() => input.current?.click()}
-              onDragOver={(e) => {
-                e.preventDefault()
-                setDragging(true)
-              }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={(e) => {
-                e.preventDefault()
-                setDragging(false)
-                add(e.dataTransfer.files)
-              }}
-              className={`mt-3 flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed px-4 py-8 text-center transition active:scale-[0.99] ${
-                dragging ? 'border-brand-400 bg-brand-50' : 'border-stone-300 bg-surface/60'
-              }`}
-            >
-              <BookUp className="size-8 text-brand-500" strokeWidth={1.5} />
-              <span className="font-semibold text-stone-900">Choose books from this device</span>
-              <span className="text-xs text-stone-500">
-                .epub, .md, .txt or .acsm <span className="hidden md:inline">· or drop them here</span>
-              </span>
-            </button>
-            {skipped > 0 && (
-              <p className="mt-2 text-xs text-stone-500">
-                Skipped {skipped} file{skipped === 1 ? '' : 's'}: choose EPUB, Markdown, text or ACSM files.
-              </p>
-            )}
+              {tab === 'fonts' ? (
+                <ReaderFonts base={device.base} device={device.status?.device} />
+              ) : tab === 'plugins' ? (
+                <Plugins base={device.base} />
+              ) : (
+                <div className="md:mt-6">
+                  <input
+                    ref={input}
+                    type="file"
+                    multiple
+                    // Native type filters can disable unknown extensions such as ACSM on iOS.
+                    // Validate supported extensions in add() after selection instead.
+                    className="hidden"
+                    onChange={(e) => {
+                      add(e.target.files)
+                      e.target.value = ''
+                    }}
+                  />
+                  <button
+                    onClick={() => input.current?.click()}
+                    onDragOver={(e) => {
+                      e.preventDefault()
+                      setDragging(true)
+                    }}
+                    onDragLeave={() => setDragging(false)}
+                    onDrop={(e) => {
+                      e.preventDefault()
+                      setDragging(false)
+                      add(e.dataTransfer.files)
+                    }}
+                    className={`mt-6 flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed px-4 py-8 text-center transition active:scale-[0.99] ${
+                      dragging ? 'border-brand-400 bg-brand-50' : 'border-stone-300 bg-surface/60'
+                    }`}
+                  >
+                    <BookUp className="size-8 text-brand-500" strokeWidth={1.5} />
+                    <span className="font-semibold text-stone-900">Choose books from this device</span>
+                    <span className="text-xs text-stone-500">
+                      .epub, .md, .txt or .acsm <span className="hidden md:inline">· or drop them here</span>
+                    </span>
+                  </button>
+                  {skipped > 0 && (
+                    <p className="mt-2 text-xs text-stone-500">
+                      Skipped {skipped} file{skipped === 1 ? '' : 's'}: choose EPUB, Markdown, text or ACSM files.
+                    </p>
+                  )}
 
-            {files.length > 0 && (
-              <Card className="mt-4 divide-y divide-stone-100">
-                {files.map(({ file, state, error, sentAs, progress, logs }) => (
-                  <div key={file.name} className="px-4 py-3">
-                    <ConversionLog entries={logs}>
-                      {(details) => (
-                        <div className="flex items-center gap-3">
-                          <FileText className="size-5 shrink-0 text-stone-400" strokeWidth={1.75} />
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium text-stone-900">{file.name}</p>
-                            <p className="flex min-w-0 items-center text-xs text-stone-500">
-                              <span className="truncate">
-                                {state === 'queued' ? size(file.size) : <Status state={state} error={error} sentAs={sentAs} progress={progress} />}
-                              </span>
-                              {details}
-                            </p>
-                          </div>
-                          {state === 'queued' ? (
-                            !sending && (
-                              <button
-                                onClick={() => setFiles((cur) => cur.filter((f) => f.file !== file))}
-                                className="-mr-2 grid size-9 place-items-center rounded-full text-stone-400 active:bg-stone-100"
-                                aria-label={`Remove ${file.name}`}
-                              >
-                                <X className="size-4" />
-                              </button>
-                            )
-                          ) : (
-                            <StatusIcon state={state} />
-                          )}
+                  {files.length > 0 && (
+                    <Card className="mt-4 divide-y divide-stone-100">
+                      {files.map(({ file, state, error, sentAs, progress, logs }) => (
+                        <div key={file.name} className="px-4 py-3">
+                          <ConversionLog entries={logs}>
+                            {(details) => (
+                              <div className="flex items-center gap-3">
+                                <FileText className="size-5 shrink-0 text-stone-400" strokeWidth={1.75} />
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-sm font-medium text-stone-900">{file.name}</p>
+                                  <p className="flex min-w-0 items-center text-xs text-stone-500">
+                                    <span className="truncate">
+                                      {state === 'queued' ? size(file.size) : <Status state={state} error={error} sentAs={sentAs} progress={progress} />}
+                                    </span>
+                                    {details}
+                                  </p>
+                                </div>
+                                {state === 'queued' ? (
+                                  !sending && (
+                                    <button
+                                      onClick={() => setFiles((cur) => cur.filter((f) => f.file !== file))}
+                                      className="-mr-2 grid size-9 place-items-center rounded-full text-stone-400 active:bg-stone-100"
+                                      aria-label={`Remove ${file.name}`}
+                                    >
+                                      <X className="size-4" />
+                                    </button>
+                                  )
+                                ) : (
+                                  <StatusIcon state={state} />
+                                )}
+                              </div>
+                            )}
+                          </ConversionLog>
                         </div>
-                      )}
-                    </ConversionLog>
-                  </div>
-                ))}
-              </Card>
-            )}
+                      ))}
+                    </Card>
+                  )}
 
-            {pending > 0 && (
-              <button
-                disabled={sending || device.state !== 'ok'}
-                onClick={sendAll}
-                className="mt-4 flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-brand-500 text-base font-semibold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-50"
-              >
-                {sending ? <Loader2 className="size-5 animate-spin" /> : `Send ${pending} book${pending === 1 ? '' : 's'}`}
-              </button>
-            )}
+                  {pending > 0 && (
+                    <button
+                      disabled={sending || device.state !== 'ok'}
+                      onClick={sendAll}
+                      className="mt-4 flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-brand-500 text-base font-semibold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-50"
+                    >
+                      {sending ? <Loader2 className="size-5 animate-spin" /> : `Send ${pending} book${pending === 1 ? '' : 's'}`}
+                    </button>
+                  )}
 
-            <Shelf prefs={prefs} ready={device.state === 'ok'} />
-            <section className="mt-8">
-              <h2 className="font-display text-xl font-semibold text-stone-900">Sleep screens</h2>
-              <a
-                href="#/send/wallpaper"
-                className="mt-3 flex items-center gap-3 rounded-xl bg-surface px-4 py-3 shadow-sm ring-1 ring-stone-950/5 transition active:scale-[0.99] md:hover:bg-stone-50"
-              >
-                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600">
-                  <ImagePlus className="size-5" strokeWidth={1.75} />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-semibold text-stone-900">Make a sleep screen</span>
-                  <span className="block truncate text-xs text-stone-500">Turn a photo into a wallpaper for your reader</span>
-                </span>
-                <ChevronRight className="size-5 text-stone-400" />
-              </a>
-            </section>
-            <ReaderFonts base={device.base} device={device.status?.device} />
-            {device.state === 'ok' && <ReaderFiles base={device.base} onFoldersChanged={() => folders(device.base).then((dirs) => setDevice((d) => ({ ...d, dirs })), () => {})} />}
-          </div>
-        </div>
+                  <Shelf prefs={prefs} ready={device.state === 'ok'} />
+                  {device.state === 'ok' && <ReaderFiles base={device.base} onFoldersChanged={() => folders(device.base).then((dirs) => setDevice((d) => ({ ...d, dirs })), () => {})} />}
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   )

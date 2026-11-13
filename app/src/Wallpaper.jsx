@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, Download, ImagePlus, Loader2, RotateCcw, RotateCw, Search, Send as SendIcon, Sparkles, Tablet, Wand2 } from 'lucide-react'
+import { Download, ImagePlus, Loader2, RotateCcw, RotateCw, Search, Send as SendIcon, Sparkles, Tablet, Wand2 } from 'lucide-react'
 import { isApp } from './api.js'
 import { reader, sendFile } from './catalogs.js'
 import { connect, folders, loadDevicePrefs, makeFolder } from './device.js'
 import { findReader, readerFor, readers, refreshReaders } from './readers.js'
 import { saveImage } from './shareCard.js'
-import { Card, EmptyState, Eyebrow, notify } from './ui.jsx'
-import { useNativeBack } from './tabbar.js'
+import { Card, EmptyState, notify } from './ui.jsx'
 import { CATEGORIES, canFilter, communityPage, fullImage } from './wallpaper/community.js'
 import { DEFAULTS, DITHERS, autoLevels, placement, renderWallpaper, toBmp } from './wallpaper/render.js'
 
@@ -188,7 +187,6 @@ function Community({ onPick }) {
 const baseName = (name) => name.replace(/\.[^.]+$/, '').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'wallpaper'
 
 export default function Wallpaper() {
-  useNativeBack('#/send')
   const [img, setImg] = useState(null) // { el, name }
   const [s, setS] = useState(loadPrefs)
   const [devices, setDevices] = useState(readers)
@@ -346,18 +344,8 @@ export default function Wallpaper() {
   const actionBase = 'flex h-12 items-center justify-center gap-2 rounded-2xl text-sm font-semibold transition active:scale-[0.98] disabled:opacity-50'
 
   return (
-    <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
-      <div className="mb-6 flex h-11 items-center md:mb-0">
-        <a
-          href="#/send"
-          className="native-hide -ml-2 flex h-11 items-center gap-1.5 rounded-full pr-4 pl-2 text-lg font-semibold text-brand-600 transition active:bg-stone-200/70 md:hover:bg-stone-100"
-        >
-          <ArrowLeft className="size-6" strokeWidth={2} /> Send
-        </a>
-      </div>
-      <Eyebrow className="md:mt-4">Sleep screen</Eyebrow>
-      <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:text-4xl">Wallpaper</h1>
-      <p className="mt-2 max-w-xl text-sm/6 text-stone-500">
+    <div className="mt-6">
+      <p className="max-w-xl text-sm/6 text-stone-500">
         Turn a photo into a sleep screen, dithered to your reader&apos;s four shades of grey.
       </p>
 

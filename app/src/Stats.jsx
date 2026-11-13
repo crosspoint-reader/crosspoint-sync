@@ -3,7 +3,7 @@ import { BookOpen, CalendarDays, ChevronLeft, ChevronRight, CircleCheck } from '
 import ShareSheet from './ShareSheet.jsx'
 import { ReadingGoalCard } from './ReadingGoals.jsx'
 import { renderCalendarCard, renderStatsCard } from './shareCard.js'
-import { Card, Cover, EmptyState, ProgressBar, ShareIcon, ViaHardcover, duration, pct } from './ui.jsx'
+import { Card, Cover, EmptyState, ProgressBar, ShareIcon, Tabs, ViaHardcover, duration, pct } from './ui.jsx'
 import { isPace, moodEmoji } from './moods.js'
 import { decodeHistory, hasReadingTime, localDay, longestReadingStreak, readingStreak, shadeLevels } from './readingHistory.js'
 
@@ -734,29 +734,10 @@ function StatsShare({ summary, activity, books, onClose }) {
   )
 }
 
-// Overview / Timeline tabs, kept in the URL (#/stats, #/stats/timeline) so back returns to the same tab.
 const TABS = [
   ['', 'Overview'],
   ['timeline', 'Timeline'],
 ]
-function StatsTabs({ tab }) {
-  return (
-    <nav className="mt-5 flex gap-6 border-b border-stone-200">
-      {TABS.map(([id, label]) => (
-        <a
-          key={id}
-          href={id ? `#/stats/${id}` : '#/stats'}
-          aria-current={tab === id ? 'page' : undefined}
-          className={`-mb-px border-b-2 pb-2.5 text-sm font-semibold transition ${
-            tab === id ? 'border-brand-500 text-stone-900' : 'border-transparent text-stone-500 hover:text-stone-800'
-          }`}
-        >
-          {label}
-        </a>
-      ))}
-    </nav>
-  )
-}
 
 const dayDate = (day) => new Date(`${day}T12:00`)
 const shortDate = (d) =>
@@ -908,7 +889,7 @@ export default function Stats({ session, tab = '', summary, activity, books, goa
   const header = (
     <>
       <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">How you read</h1>
-      <StatsTabs tab={tab} />
+      <Tabs route="stats" tabs={TABS} tab={tab} />
       {activityError && (
         <div role={activity ? 'status' : 'alert'} className="mt-4 flex items-center gap-3 rounded-lg bg-surface px-3 py-1 text-xs text-stone-500 ring-1 ring-stone-950/10">
           <p className="min-w-0 flex-1">{activity

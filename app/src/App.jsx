@@ -10,7 +10,6 @@ import Library from './Library.jsx'
 import Book from './Book.jsx'
 import Stats from './Stats.jsx'
 import Send from './Send.jsx'
-import Wallpaper from './Wallpaper.jsx'
 import Settings, { Matches } from './Settings.jsx'
 import Browse from './Browse.jsx'
 import Clippings from './Clippings.jsx'
@@ -454,7 +453,7 @@ function Home({ session, onSession, onLogout, theme }) {
 
   let page
   if (route === 'settings') page = id && id !== 'goals' ? <Matches session={session} id={id} /> : <Settings session={session} theme={theme} onSession={onSession} onLogout={onLogout} focusGoals={id === 'goals'} />
-  else if (route === 'send' && isApp) page = id === 'wallpaper' ? <Wallpaper /> : <Send />
+  else if (route === 'send' && isApp) page = <Send tab={id ?? ''} />
   else if (route === 'browse' && isApp) page = <Browse parts={parts} />
   else if (error) page = <ErrorNote error={error} />
   else if (!books) page = <PageSkeleton route={route} />

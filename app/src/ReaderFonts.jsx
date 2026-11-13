@@ -111,9 +111,9 @@ export default function ReaderFonts({ base, device }) {
   const status = (family, fallback) => (job?.family === family ? job.label : fallback)
 
   return (
-    <section className="mt-8">
+    <section className="mt-6">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="font-display text-xl font-semibold text-stone-900">Fonts</h2>
+        <p className="text-sm/6 text-stone-500">Get fonts any time, then send them when your reader is connected.</p>
         <input
           ref={picker}
           type="file"
@@ -143,7 +143,7 @@ export default function ReaderFonts({ base, device }) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search fonts"
-          aria-label="Search Google Fonts"
+          aria-label="Search fonts"
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck={false}

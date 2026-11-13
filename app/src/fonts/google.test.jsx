@@ -28,8 +28,7 @@ it('lets you get fonts before a reader connects', async () => {
   const { render, screen } = await import('@testing-library/react')
   const { default: ReaderFonts } = await import('../ReaderFonts.jsx')
   render(<ReaderFonts />)
-  expect(screen.getByText('Fonts')).toBeTruthy()
-  expect(screen.getByLabelText('Search Google Fonts')).toBeTruthy()
+  expect(screen.getByLabelText('Search fonts')).toBeTruthy()
   expect(screen.getByText(/get fonts now and send them later/)).toBeTruthy()
 })
 
