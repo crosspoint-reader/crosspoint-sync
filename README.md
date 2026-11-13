@@ -13,6 +13,8 @@ and any KOReader device.
   paragraph, anchor, page hints), not just a lossy xpath + percentage.
 - **Bookmarks, clippings, and reading stats.** Delta sync with tombstones for bookmarks and
   clippings; per-device reading-stats snapshots with a server-side combined view (streaks included).
+- **KOReader stats plugin.** Reading history uploads after normal KOSync progress pushes.
+  See [installation and setup](#koreader-reading-statistics-plugin).
 - **One codebase, one runtime.** A single Node + SQLite server in one Docker image — the hosted
   service and self-hosted installs run the exact same thing. No native dependencies (uses Node's
   built-in `node:sqlite`).
@@ -322,10 +324,57 @@ a daily acknowledgment using only disposable loopback fixtures.
 
 ## KOReader reading statistics plugin
 
-For ongoing stats uploads, install the [CrossPoint KOReader plugin](koreader/crosspoint.koplugin/README.md).
-It adds **Sync all reading history now** to KOReader and sends reading time and page
-history to this server, deduplicating repeated uploads and cloud-synced copies.
-Keep the built-in Progress sync for reading positions. Build an installable ZIP
-with `npm run build:koreader`; use a server updated with this plugin's endpoint.
+The plugin uploads reading time, daily activity and page history **automatically
+after a successful normal KOSync progress upload**. Configure it once; there is no
+need to open its menu for everyday syncing. Duplicate uploads are counted once.
 
-Manual database imports remain available under app Settings → Import reading history.
+### Install and configure
+
+1. Update your CrossPoint Sync server to a version with the
+   `/api/v1/stats/koreader` endpoint. Installing the plugin does not update the server.
+2. Download `crosspoint-koreader.zip` from a **KOReader plugin** release on the
+   [GitHub releases page](https://github.com/crosspoint-reader/crosspoint-sync/releases).
+   To build from this checkout instead, run `npm ci && npm run build:koreader`;
+   the ZIP is written to `dist/crosspoint-koreader.zip`.
+3. Extract the ZIP into KOReader's `plugins` folder so the resulting path is
+   `koreader/plugins/crosspoint.koplugin/main.lua`. Restart KOReader and enable
+   **CrossPoint stats sync** in plugin management if needed.
+4. Configure KOReader's built-in **Progress sync** with your CrossPoint server
+   URL and sync credentials. Use binary/content checksum matching so statistics
+   and reading positions refer to the same books.
+5. Open **CrossPoint stats sync → Set up server and account** once. Enter the
+   **same HTTPS server URL, sync username and password**, plus your reading time
+   zone, such as `America/New_York`, `Europe/London`, or `UTC`.
+6. Use normal **Progress sync → Push progress**. After it succeeds, the plugin
+   uploads stats in the background. KOSync's automatic pushes trigger stats too.
+
+The first automatic upload includes historical reading for all books. Later
+uploads skip books whose history has already been acknowledged. **Pull progress**
+alone does not trigger stats. The plugin does not reconnect Wi-Fi after a suspend
+or disconnect; unsent records retry on the next successful progress push while
+online. A stats failure does not turn a successful progress push into a failure.
+
+Use **CrossPoint stats sync → Last stats sync result** to check the outcome, or
+**Sync all reading history now** to force a full backfill/retry. Stats failures
+also show a brief notice. Reading positions and highlights are unchanged.
+
+See the [plugin guide](koreader/crosspoint.koplugin/README.md) for history-import
+migration, limits, HTTPS, and credential storage. Manual database imports remain
+available under app Settings → Import reading history.
+
+### Publish a plugin release
+
+Install Node dependencies, Lua (or provide `lua` on PATH), and the
+[GitHub CLI](https://cli.github.com/), then sign in with `gh auth login`.
+Commit and push the intended release commit first; the working tree must be clean.
+
+```sh
+npm run release:koreader -- koreader-v0.1.0
+```
+
+Use a new `koreader-vMAJOR.MINOR.PATCH` tag each time. The script checks that the
+commit is on GitHub and the tag is unused, runs the plugin tests, builds the ZIP,
+then **creates the tag and publishes a GitHub release with the ZIP attached**.
+It targets the repository selected by `gh` for this checkout. Plugin releases do
+not replace the server release marked Latest. This command publishes immediately;
+use `npm run build:koreader` when you only want a local ZIP.

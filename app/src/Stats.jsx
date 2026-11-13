@@ -299,6 +299,8 @@ const SCALES = [
 ]
 const mondayOf = (d) => new Date(d.getTime() - ((d.getDay() + 6) % 7) * DAY_MS)
 const fmt = (d, o) => d.toLocaleDateString(undefined, o)
+// Earlier / later arrows for the timeline and the share sheet's period.
+const arrow = 'grid size-9 place-items-center rounded-full text-stone-600 active:bg-stone-100 md:hover:bg-stone-100 disabled:opacity-30'
 
 // Weeks (Monday dates) shown for a scale, `back` periods before now, plus the visible day range.
 function calendarRange(scale, back, today) {
@@ -453,7 +455,6 @@ function ReadingCalendar({ summary, activity, books = [] }) {
     })
   }
   const { box, handlers, bubble } = useCellTip()
-  const arrow = 'grid size-9 place-items-center rounded-full text-stone-600 active:bg-stone-100 md:hover:bg-stone-100 disabled:opacity-30'
   return (
     <Card className="mt-4 p-4">
       {sharing && (
@@ -638,30 +639,40 @@ const PERIODS = [
   ['year', 'Year'],
 ]
 
-// The period so far, as local days, with chart bars: days for a week or month, months for a year.
-export function sharePeriod(period, now = new Date()) {
+// A period as local days, with chart bars: days for a week or month, months for a year.
+// back = 0 is the period so far; back = 1 the whole previous one, and so on.
+export function sharePeriod(period, now = new Date(), back = 0) {
   const today = new Date(now)
   today.setHours(12, 0, 0, 0)
   const start = new Date(today)
-  if (period === 'week') start.setDate(start.getDate() - ((start.getDay() + 6) % 7))
-  else if (period === 'month') start.setDate(1)
-  else start.setMonth(0, 1)
-  const year = today.getFullYear()
+  if (period === 'week') start.setDate(start.getDate() - ((start.getDay() + 6) % 7) - 7 * back)
+  else if (period === 'month') start.setMonth(start.getMonth() - back, 1)
+  else start.setFullYear(start.getFullYear() - back, 0, 1)
+  const end = new Date(start)
+  if (period === 'week') end.setDate(end.getDate() + 6)
+  else if (period === 'month') end.setMonth(end.getMonth() + 1, 0)
+  else end.setMonth(11, 31)
+  const to = back ? end : today
+  const year = start.getFullYear()
   const name = {
-    week: 'This week',
-    month: fmt(today, { month: 'long' }),
+    week: back === 0 ? 'This week' : back === 1 ? 'Last week' : `Week of ${fmt(start, { month: 'short', day: 'numeric', ...(year !== today.getFullYear() && { year: 'numeric' }) })}`,
+    month: fmt(start, { month: 'long', ...(year !== today.getFullYear() && { year: 'numeric' }) }),
     year: String(year),
   }[period]
+  const current = (key) => back === 0 && key === (period === 'year' ? localDay(today).slice(0, 7) : localDay(today))
   const slots =
     period === 'year'
-      ? Array.from({ length: 12 }, (_, m) => ({ key: `${year}-${String(m + 1).padStart(2, '0')}`, current: m === today.getMonth() }))
-      : Array.from({ length: period === 'week' ? 7 : new Date(year, today.getMonth() + 1, 0).getDate() }, (_, i) => {
+      ? Array.from({ length: 12 }, (_, m) => {
+          const key = `${year}-${String(m + 1).padStart(2, '0')}`
+          return { key, current: current(key) }
+        })
+      : Array.from({ length: period === 'week' ? 7 : end.getDate() }, (_, i) => {
           const key = localDay(new Date(start.getTime() + i * DAY_MS))
-          return { key, current: key === localDay(today) }
+          return { key, current: current(key) }
         })
   return {
     from: localDay(start),
-    to: localDay(today),
+    to: localDay(to),
     name,
     chartLabel: period === 'year' ? 'PAGES PER MONTH' : 'PAGES PER DAY',
     // A day key falls in a month slot by its YYYY-MM prefix.
@@ -670,9 +681,25 @@ export function sharePeriod(period, now = new Date()) {
   }
 }
 
+// Longest run of consecutive reading days among sorted YYYY-MM-DD days.
+export function longestRun(days) {
+  let longest = 0, run = 0, previous
+  for (const day of days) {
+    const time = Date.parse(`${day}T00:00:00Z`)
+    run = time - previous === DAY_MS ? run + 1 : 1
+    longest = Math.max(longest, run)
+    previous = time
+  }
+  return longest
+}
+
 function StatsShare({ summary, activity, books, onClose }) {
   const [period, setPeriod] = useState('year')
-  const p = sharePeriod(period)
+  const [back, setBack] = useState(0) // periods before the current one
+  const p = sharePeriod(period, new Date(), back)
+  // Stop paging back once a period ends before the first recorded reading.
+  const first = activity.days.reduce((min, d) => (d.day < min ? d.day : min), localDay(new Date()))
+  const earlier = sharePeriod(period, new Date(), back + 1)
   const inPeriod = (day) => day >= p.from && day <= p.to
   const shown = new Map(books.map((b) => [b.document, b]))
   const finished = activity.books
@@ -685,12 +712,12 @@ function StatsShare({ summary, activity, books, onClose }) {
   const daily = summary?.daily ?? []
   const seconds = daily.filter((d) => inPeriod(d.date)).reduce((n, d) => n + d.seconds, 0)
   const tiles = [
-    [period === 'week' ? 'finished this week' : `finished in ${p.name}`, finished.length],
+    [period === 'week' ? `finished ${back ? (back === 1 ? 'last week' : 'that week') : 'this week'}` : `finished in ${p.name}`, finished.length],
     ['pages read', pages.toLocaleString()],
     ...(daily.length
       ? [
           ['hours read', Math.round(seconds / 3600).toLocaleString()],
-          ['day streak', readingStreak(summary, activity)],
+          back ? ['longest streak', longestRun(days.filter((d) => d.pages > 0).map((d) => d.day).sort())] : ['day streak', readingStreak(summary, activity)],
         ]
       : [['days read', days.filter((d) => d.pages > 0).length]]),
   ]
@@ -701,7 +728,7 @@ function StatsShare({ summary, activity, books, onClose }) {
   for (const d of days) totals.set(p.slotOf(d.day), (totals.get(p.slotOf(d.day)) ?? 0) + d.pages)
   const chart = { label: p.chartLabel, bars: p.slots.map((s) => ({ pages: totals.get(s.key) ?? 0, current: s.current })) }
   const heading = `${p.name} in books`
-  const mine = period === 'week' ? 'My week in books' : `My ${p.name} in books`
+  const mine = period === 'week' ? (back ? `My ${p.name.toLowerCase()} in books` : 'My week in books') : `My ${p.name} in books`
   const meta = {
     title: heading,
     postTitle: mine,
@@ -712,7 +739,7 @@ function StatsShare({ summary, activity, books, onClose }) {
     <ShareSheet
       heading="Share your stats"
       meta={meta}
-      renderKey={`${period}-${p.to}-${pages}-${finished.length}-${seconds}-${readingStreak(summary, activity)}-${moods.join()}`}
+      renderKey={`${period}-${back}-${p.to}-${pages}-${finished.length}-${seconds}-${readingStreak(summary, activity)}-${moods.join()}`}
       onClose={onClose}
       render={() => renderStatsCard({ heading, tiles, covers, chart, moods })}
     >
@@ -723,12 +750,24 @@ function StatsShare({ summary, activity, books, onClose }) {
             type="button"
             role="radio"
             aria-checked={period === v}
-            onClick={() => setPeriod(v)}
+            onClick={() => {
+              setPeriod(v)
+              setBack(0)
+            }}
             className={`h-9 rounded-lg text-sm font-semibold transition ${period === v ? 'bg-raised text-stone-900 shadow-sm' : 'text-stone-500 active:bg-stone-200'}`}
           >
             {label}
           </button>
         ))}
+      </div>
+      <div className="mt-2 flex items-center justify-between">
+        <button type="button" className={arrow} onClick={() => setBack(back + 1)} disabled={earlier.to < first} aria-label="Earlier">
+          <ChevronLeft className="size-5" strokeWidth={1.75} />
+        </button>
+        <p className="text-sm font-semibold text-stone-800" aria-live="polite">{p.name}</p>
+        <button type="button" className={arrow} onClick={() => setBack(back - 1)} disabled={back === 0} aria-label="Later">
+          <ChevronRight className="size-5" strokeWidth={1.75} />
+        </button>
       </div>
     </ShareSheet>
   )

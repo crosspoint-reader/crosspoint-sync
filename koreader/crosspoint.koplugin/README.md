@@ -4,8 +4,11 @@ Upload KOReader reading time and page history to CrossPoint Sync. The existing
 CrossPoint dashboard shows daily activity, reading time, estimated sessions and
 streaks. Keep KOReader's built-in Progress sync for reading positions.
 
-This first version syncs manually. It does not change KOReader's database, upload
-highlights, change reader positions, or send history to linked services.
+After one-time setup, stats sync in the background after successful KOSync progress
+uploads to the same server and account. This includes manual Push progress,
+automatic pushes, and successful queued retries. Pull progress alone does not
+trigger stats. It does not change KOReader's database, upload highlights, change
+reader positions, or send history to linked services.
 
 ## Install
 
@@ -19,9 +22,22 @@ highlights, change reader positions, or send history to linked services.
    CrossPoint **sync username and password**, and a reading time zone such as
    `America/New_York`, `Europe/London`, or `UTC`. Use the same time zone on each
    reader. These are the credentials used by Progress sync, not a recovery token.
-6. Choose **Sync all reading history now**. This explicitly includes historical
-   reading on every book in the statistics database. Repeat after reading to send
-   new activity. A first sync can take a while for a large library.
+6. Keep using normal **Progress sync → Push progress**. After a successful push,
+   stats upload automatically, including historical reading for all books on the
+   first sync. Later uploads skip books whose history has already been acknowledged.
+   A first sync can take a while for a large library.
+
+Configure Progress sync with the same server URL and account as this plugin.
+Automatic stats sync only follows matching uploads; it does not send history to
+an unrelated KOSync server. It never reconnects Wi-Fi after suspend/disconnect.
+If the reader goes offline or a stats upload fails, it retries after the next
+successful progress push while online. Progress sync succeeds independently.
+
+Automatic successes are quiet. Failures show a brief notice; open **CrossPoint
+stats sync → Last stats sync result** for details. Use **Sync all reading history
+now** for an explicit full backfill/retry, including after clearing server data.
+Acknowledged book fingerprints persist across restarts; the manual action bypasses
+them. You do not need to open the plugin menu for everyday syncing.
 
 For books to match existing Progress sync entries, use its binary/content checksum
 method rather than filename matching. You can merge pre-existing duplicates in the
@@ -96,3 +112,9 @@ The ZIP is written to `dist/crosspoint-koreader.zip`. The plugin tests need `lua
 (or run `luajit koreader/tests/sync_test.lua` for KOReader's LuaJIT runtime).
 Tests mock KOReader's UI and transport. Real-device installation, menu placement,
 Wi-Fi, and TLS behavior still need device testing before a public release.
+
+To publish an installable ZIP as a tagged GitHub release, commit and push the
+release first, then run `npm run release:koreader -- koreader-v0.1.0` with a new
+version. This runs tests, builds the ZIP, creates the tag at that commit, and
+publishes immediately through the authenticated GitHub CLI. See the repository
+README for prerequisites.
