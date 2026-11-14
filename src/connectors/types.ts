@@ -159,6 +159,11 @@ export interface OutboundEvent {
      * beyond it began, or when the history was taken if there is none.
      */
     baseline?: { seconds: number; pages: number; at: number };
+    /**
+     * The source's total before this upload, when it had one. Never sent: it is what a
+     * replaced or first-time event is measured from. `at` is when that total was stored.
+     */
+    since?: { seconds: number; pages: number; at: number };
   };
 }
 

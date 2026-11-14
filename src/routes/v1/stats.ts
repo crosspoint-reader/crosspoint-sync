@@ -24,7 +24,7 @@ import { parseReadingSession } from '../../models/reading-sessions.js';
 import { combineReadingStreak } from '../../models/reading-streak.js';
 import { importBookorbitStats } from '../../connectors/bookorbit-stats.js';
 import { seedStatsCounters, storeStatsDays, storeStatsSnapshot } from '../../models/stats-counters.js';
-import { bookStatsFor, fanOutBookStats } from '../../connectors/fanout.js';
+import { bookStatsFor, fanOutBookStats, statsSince } from '../../connectors/fanout.js';
 
 const MAX_BOOK_BATCH = 20;
 // Books per GET /stats/activity/books request.
@@ -233,7 +233,7 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     }
     const user = c.get('user');
     const now = nowSeconds();
-    const before = parsed.map((p) => bookStatsFor(db, user.id, p.document, deviceId)?.book ?? null);
+    const since = parsed.map((p) => statsSince(bookStatsFor(db, user.id, p.document, deviceId)));
     withTransaction(db, () => {
       for (const p of parsed) {
         seedStatsCounters(db, user.id, deviceId, p.document);
@@ -242,7 +242,7 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
       }
     });
     const device = typeof o.device === 'string' ? o.device.slice(0, 128) : '';
-    parsed.forEach((p, i) => fanOutBookStats(db, user.id, p.document, deviceId, device, now, undefined, before[i]));
+    parsed.forEach((p, i) => fanOutBookStats(db, user.id, p.document, deviceId, device, now, undefined, since[i]));
     return c.json({ until: now, accepted: parsed.length, accepted_daily: parsed.reduce((n, p) => n + p.daily.length, 0), counter_ids: 1 });
   });
 

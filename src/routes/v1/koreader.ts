@@ -5,7 +5,7 @@ import type { AppEnv } from '../../auth/middleware.js';
 import { AccountImportError } from '../../models/account-data.js';
 import { HISTORY_DEVICE, importHistory, prepareHistory, type History } from '../../models/koinsight-import.js';
 import { resolveDocument, statsDocuments } from '../../models/merge.js';
-import { bookStatsFor, fanOutBookStats, type StatsBaseline } from '../../connectors/fanout.js';
+import { bookStatsFor, fanOutBookStats, statsSince, type StatsBaseline } from '../../connectors/fanout.js';
 
 const MAX_PAGES = 20_000;
 const HISTORY_LABEL = 'KOReader';
@@ -36,7 +36,8 @@ export function koreaderRoutes(db: DB): Hono<AppEnv> {
     try {
       let records = 0;
       let synced = '';
-      let before: { seconds: number; pages: number } | null = null;
+      let before: StatsBaseline | undefined;
+      let recentPages = 0;
       let oldAdded = false;
       let recentSeconds = 0;
       let recentSince = now;
@@ -50,7 +51,7 @@ export function koreaderRoutes(db: DB): Hono<AppEnv> {
         if (legacy) {
           throw new AccountImportError('Re-import the original KOReader/KOInsight history file in app Settings before syncing this book. Its older import has no source records to reconcile safely.', 409);
         }
-        before = bookStatsFor(db, userId, document, HISTORY_DEVICE)?.book ?? null;
+        before = statsSince(bookStatsFor(db, userId, document, HISTORY_DEVICE));
         // What this upload adds, split into history and recent reading. Records already
         // stored add nothing, so the plugin resending a whole book is neither.
         const known = new Map<string, number>(stored.map(p => [`${p.page}:${p.total_pages}:${p.start_time}`, Number(p.duration)]));
@@ -64,6 +65,7 @@ export function koreaderRoutes(db: DB): Hono<AppEnv> {
           else {
             recentSeconds += p.duration - had;
             recentSince = Math.min(recentSince, p.start_time);
+            if (!known.has(key) && had === 0) recentPages++;
           }
         }
         const unique = new Map<string, History['pages'][number]>();
@@ -87,7 +89,7 @@ export function koreaderRoutes(db: DB): Hono<AppEnv> {
         synced = document;
       });
       // Set inside the transaction's callback, which the compiler cannot see through.
-      const prior = before as { seconds: number; pages: number } | null;
+      const prior = before as StatsBaseline | undefined;
       let baseline: StatsBaseline | undefined;
       if (oldAdded) {
         // The history is everything but the recent reading; that is credited from when it began.
@@ -95,7 +97,7 @@ export function koreaderRoutes(db: DB): Hono<AppEnv> {
         if (after) {
           baseline = {
             seconds: Math.min(Math.max(after.seconds - recentSeconds, prior?.seconds ?? 0), after.seconds),
-            pages: recentSeconds > 0 ? Math.min(prior?.pages ?? 0, after.pages) : after.pages,
+            pages: Math.min(Math.max(after.pages - recentPages, prior?.pages ?? 0), after.pages),
             at: recentSeconds > 0 ? recentSince : now,
           };
         }

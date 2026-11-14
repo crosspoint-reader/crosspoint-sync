@@ -67,8 +67,16 @@ export function claimReady(db: DB, limit: number, now = nowSeconds()): QueueRow[
     .all(now, limit) as unknown as QueueRow[];
 }
 
-export function markDone(db: DB, id: number, now = nowSeconds()): void {
-  db.prepare(`UPDATE connector_queue SET status = 'done', updated_at = ? WHERE id = ?`).run(now, id);
+/**
+ * A row carries the payload it was claimed with: an event that replaced it while it was
+ * being delivered is a different payload, and stays pending instead of being marked done.
+ */
+export function markDone(db: DB, row: number | Pick<QueueRow, 'id' | 'payload'>, now = nowSeconds()): void {
+  if (typeof row === 'number') {
+    db.prepare(`UPDATE connector_queue SET status = 'done', updated_at = ? WHERE id = ?`).run(now, row);
+    return;
+  }
+  db.prepare(`UPDATE connector_queue SET status = 'done', updated_at = ? WHERE id = ? AND payload = ?`).run(now, row.id, row.payload);
 }
 
 /** Record a failed attempt: reschedule with backoff, or dead-letter past the cap. */
@@ -82,14 +90,14 @@ export function markFailed(
   const attempts = row.attempts + 1;
   if (!retryable || attempts >= MAX_ATTEMPTS) {
     db.prepare(
-      `UPDATE connector_queue SET status = 'dead', attempts = ?, last_error = ?, updated_at = ? WHERE id = ?`
-    ).run(attempts, error.slice(0, 500), now, row.id);
+      `UPDATE connector_queue SET status = 'dead', attempts = ?, last_error = ?, updated_at = ? WHERE id = ? AND payload = ?`
+    ).run(attempts, error.slice(0, 500), now, row.id, row.payload);
     return;
   }
   const backoff = BACKOFF[Math.min(attempts - 1, BACKOFF.length - 1)];
   db.prepare(
-    `UPDATE connector_queue SET attempts = ?, last_error = ?, next_try_at = ?, updated_at = ? WHERE id = ?`
-  ).run(attempts, error.slice(0, 500), now + backoff, now, row.id);
+    `UPDATE connector_queue SET attempts = ?, last_error = ?, next_try_at = ?, updated_at = ? WHERE id = ? AND payload = ?`
+  ).run(attempts, error.slice(0, 500), now + backoff, now, row.id, row.payload);
 }
 
 /** Drop a queued row entirely (e.g. connector unlinked). */
