@@ -10,13 +10,18 @@ end
 
 function Annotations.snapshot(ui, hash)
     if not ui.doc_settings or not ui.annotation or type(ui.annotation.annotations) ~= "table" then return end
-    local document = ui.doc_settings:readSetting("partial_md5_checksum")
+    return Annotations.fromSaved(ui.doc_settings:readSetting("partial_md5_checksum"),
+        ui.annotation.annotations, ui.document:getPageCount(), hash,
+        function(a) return type(a.page) == "string" and ui.document:getPageFromXPointer(a.page) or a.page end)
+end
+
+function Annotations.fromSaved(document, entries, page_count, hash, resolve_page)
     if type(document) ~= "string" or #document ~= 32 or not document:match("^[%x]+$") then
         error("Missing book checksum. Run Progress sync before syncing annotations.")
     end
     local result = { document = document:lower(), clippings = {}, bookmarks = {} }
-    local page_count = ui.document:getPageCount()
-    for _, a in ipairs(ui.annotation.annotations or {}) do
+    assert(type(entries) == "table", "No modern annotations found. Open this book once in KOReader to migrate its saved annotations.")
+    for _, a in ipairs(entries) do
         local highlight = a.drawer ~= nil
         local kind = highlight and "clippings" or "bookmarks"
         -- Text and notes can change; creation time and anchors identify the annotation.
@@ -33,8 +38,8 @@ function Annotations.snapshot(ui, hash)
             item.xpath = position(a.page)
             assert(#item.xpath > 0 and #item.xpath <= 512, "Bookmark location is missing or too long.")
             local page = a.pageno or (type(a.page) == "number" and a.page)
-            if type(a.page) == "string" then page = ui.document:getPageFromXPointer(a.page) end
-            assert(type(page) == "number" and page_count > 0, "Cannot resolve bookmark page.")
+            if resolve_page then page = resolve_page(a) end
+            assert(type(page) == "number" and type(page_count) == "number" and page_count > 0, "Cannot resolve bookmark page.")
             item.percentage = math.max(0, math.min(1, page / page_count))
             item.summary = a.note or a.text or a.chapter or ""
         end
@@ -43,7 +48,7 @@ function Annotations.snapshot(ui, hash)
     return result
 end
 
-function Annotations.changes(items, previous, encode, hash, force)
+function Annotations.changes(items, previous, encode, hash, force, keep_missing)
     local changes, next_state = {}, {}
     for id, item in pairs(items) do
         local fingerprint = hash(encode(item))
@@ -51,7 +56,7 @@ function Annotations.changes(items, previous, encode, hash, force)
         if force or previous[id] ~= fingerprint then changes[#changes + 1] = item end
     end
     for id in pairs(previous) do
-        if not items[id] then changes[#changes + 1] = { id = id, deleted = 1 } end
+        if not keep_missing and not items[id] then changes[#changes + 1] = { id = id, deleted = 1 } end
     end
     table.sort(changes, function(a, b) return a.id < b.id end)
     return changes, next_state

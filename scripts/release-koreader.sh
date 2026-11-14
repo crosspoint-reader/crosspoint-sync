@@ -32,6 +32,10 @@ trap 'rm -f "$notes"' EXIT
 cat > "$notes" <<NOTES
 Install by extracting crosspoint-koreader.zip into KOReader's plugins folder and restarting KOReader. The plugin is now named **CrossPoint Sync**, with **Last sync result** in its menu. Existing account settings are preserved.
 
+Adds **Sync all highlights and bookmarks**: background upload of saved annotations from books in KOReader's retained reading history, without opening each document or requiring Reading statistics. Uses live annotations for the open book and saved page numbers for other books. Missing, unreadable, legacy or incomplete metadata is skipped and reported. Saved files are read-only; the backfill never infers deletions, and acknowledged unchanged annotations are not resent on retry.
+
+Sync results now show annotation books checked and acknowledged changes instead of claiming available annotations synced when none were inspected. Books removed from KOReader's reading history are outside the scan. Legacy annotation files require opening once in a current KOReader version to migrate.
+
 Fixes missing TLS Server Name Indication (SNI) in Turbo's LuaSocket backend. The plugin now supplies the hostname before the TLS handshake, allowing reverse proxies to select the correct certificate. Reproduced the previous code -5 / 10-second connect timeout against an SNI-required local TLS server; the patched transport reached HTTP authentication with 100-byte, 100 KB and 500 KB requests. Certificate-chain verification stays enabled, and private CAs must still be added to cacert.pem. This addresses a possible cause of discussion #102; the reporter's device and network have not been verified.
 
 Skips books with existing history-import conflicts (HTTP 409) and continues syncing the rest of the library. Last sync result lists skipped books. Automatic sync does not show a failure popup for these conflicts. Existing history is preserved; skipped books are not marked uploaded and can retry later. No re-import is required to sync other books. Progress and available annotations continue independently.
@@ -48,7 +52,7 @@ Includes the 0.2.3 checkpoint compatibility fix and the CrossPoint Sync rename.
 
 After one-time setup, reading statistics, highlights, notes and bookmarks upload automatically after successful Progress sync to the same CrossPoint server and account. Manual full-history sync is also available.
 
-Annotations upload from the open book, including edits and deletions. Open each older book and push progress to backfill its annotations. Annotation sync is upload-only; downloading annotations into KOReader and firmware integration are not included.
+Automatic annotations upload from the open book, including edits and deletions. Use the new backfill action for saved books. Annotation sync is upload-only; downloading annotations into KOReader and firmware integration are not included.
 
 Fixes the UI freeze in plugin 0.2.1: uploads now run in a separate background process with Turbo UI mode enabled or disabled. Slow requests no longer occupy the reading UI. Suspend cancels uploads, stuck jobs have a five-minute deadline, and acknowledged batches are checkpointed for retries. TLS certificate verification remains enabled.
 

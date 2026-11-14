@@ -110,8 +110,10 @@ local background = {
     end,
     cancel = function() active_worker = false end,
 }
+local library_scan
 local real_dofile = dofile
 dofile = function(path)
+    if path:match("/library_annotations.lua$") and library_scan then return { each = library_scan } end
     if path:match("/background.lua$") then return background end
     if path:match("/transport.lua$") then return { install = function() assert(in_worker) end } end
     return real_dofile(path)
@@ -146,7 +148,8 @@ end
 local plugin, thread = start()
 assert(coroutine.resume(thread, { code = 200, body = { version = 1, document = hash, accepted = 2 } }))
 assert(coroutine.status(thread) == "dead" and closed and not timeout and not plugin.busy)
-assert(shown[#shown].text == "1 books of history synced to CrossPoint; available annotations synced.")
+assert(shown[#shown].text:find("1 books of history synced to CrossPoint.", 1, true))
+assert(shown[#shown].text:find("Annotation books checked: 0; acknowledged changes: 0.", 1, true))
 
 reset()
 plugin, thread = start()
@@ -399,3 +402,51 @@ print("KOReader scheduling checks passed: sync returns before network work with 
 assert(Sync.connectionError({error={code=-5,message="TLS failed\ncertificate verify failed"}}) == "Connection failed (code -5): TLS failed certificate verify failed")
 assert(Sync.connectionError({error={code=-3,message="DNS lookup timed out"}}):find("DNS lookup timed out", 1, true))
 assert(Sync.connectionError({error=true}):find("No transport error details", 1, true))
+
+-- Bulk annotations reuse batching/checkpoints, never synthesize deletions, and skip stats.
+reset()
+plugin = instance()
+local first_snapshot = Annotations.snapshot(annotation_ui({
+    { datetime = "first", drawer = "lighten", page = "/a", text = "First quote" },
+}), identity_hash)
+local second_snapshot = Annotations.snapshot(annotation_ui({
+    { datetime = "second", page = "/b", pageno = 25 },
+}), identity_hash)
+second_snapshot.document = string.rep("b", 32)
+plugin.annotation_sent[hash] = { clippings = { missing = "preserve" } }
+library_scan = function(current, digest, upload, skipped)
+    assert(in_worker and not current)
+    upload(first_snapshot, true)
+    skipped[#skipped + 1] = "missing.epub: Book file is missing"
+    upload(second_snapshot, true)
+end
+local menu = {}
+plugin:addToMainMenu(menu)
+menu.crosspoint.sub_item_table[3].callback()
+assert(plugin.busy and #posted == 0)
+thread = coroutine.create(queued)
+assert(coroutine.resume(thread))
+assert(#posted[1].items == 1 and not posted[1].items[1].deleted)
+assert(coroutine.resume(thread, { code = 200, body = { accepted = 1 } }))
+assert(#posted == 2 and posted[2].items[1].xpath == "/b")
+assert(coroutine.resume(thread, { code = 503, body = {} }))
+assert(not plugin.busy and plugin.annotation_sent[hash].clippings.missing == "preserve")
+assert(next(plugin.annotation_sent[second_snapshot.document].bookmarks or {}) == nil)
+posted = {}
+plugin:sync(false, true)
+thread = coroutine.create(queued)
+assert(coroutine.resume(thread))
+assert(#posted == 1 and posted[1].items[1].xpath == "/b")
+assert(coroutine.resume(thread, { code = 200, body = { accepted = 1 } }))
+assert(coroutine.status(thread) == "dead" and #posted == 1)
+assert(shown[#shown].text:find("Annotation backfill complete.", 1, true))
+assert(shown[#shown].text:find("Annotation books checked: 2; acknowledged changes: 1.", 1, true))
+assert(shown[#shown].text:find("missing.epub", 1, true))
+-- Repeated backfills don't repost unchanged quotes to downstream connectors.
+posted = {}
+plugin:sync(false, true)
+thread = coroutine.create(queued)
+assert(coroutine.resume(thread))
+assert(coroutine.status(thread) == "dead" and #posted == 0)
+library_scan = nil
+print("Bulk annotation checks passed: menu, background work, no stats, no deletions, partial failure, retry and unchanged uploads.")

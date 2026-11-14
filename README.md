@@ -365,15 +365,17 @@ Use **CrossPoint Sync → Last sync result** to check the outcome, or
 also show a brief notice. Reading positions stay under normal KOSync.
 
 The plugin also uploads **highlights/clippings, their notes, and bookmarks** from
-the currently opened book after the same successful progress push. Open each book
-and push progress once to backfill its annotations. Edits and deletions of previously
+the currently opened book after the same successful progress push. Use **Sync all
+highlights and bookmarks** to backfill saved annotations from books retained in
+KOReader reading history, without opening each book. Missing or unreadable metadata
+is skipped and reported. The backfill uploads additions and edits only. Edits and deletions of previously
 uploaded annotations follow on later pushes; missing or unopened books are not
 treated as deleted. This is upload-only: server annotations are not downloaded into
 KOReader. Highlights appear in the app and use any configured highlight connectors.
 Bookmark locations are available through the authenticated server API for future
 firmware support; firmware integration is not included here.
 
-Use the **CrossPoint Sync for KOReader 0.2.8** release for annotation sync, with server **v0.2.0**
+Use the **CrossPoint Sync for KOReader 0.2.9** release for annotation sync, with server **v0.2.0**
 or newer. The original `koreader-v0.1.0` release contains statistics sync only.
 
 See the [plugin guide](koreader/crosspoint.koplugin/README.md) for history-import

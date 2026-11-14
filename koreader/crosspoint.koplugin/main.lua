@@ -58,11 +58,13 @@ function CrossPoint:addToMainMenu(menu_items)
               callback = function() self:setup() end },
             { text = _("Sync all reading history now"), enabled_func = function() return not self.busy end,
               callback = function() self:sync() end },
+            { text = _("Sync all highlights and bookmarks"), enabled_func = function() return not self.busy end,
+              callback = function() self:sync(false, true) end },
             { text = _("Last sync result"), callback = function()
                 UIManager:show(InfoMessage:new{ text = LuaSettings:open(DataStorage:getSettingsDir() .. "/crosspoint.lua"):readSetting("last_sync", _("No sync yet.")) })
               end },
             { text = _("About CrossPoint Sync"), callback = function()
-                UIManager:show(InfoMessage:new{ text = _("Automatically uploads changed reading history after a successful Progress sync to the same server and account. Use Sync all reading history now for a full backfill. Repeated uploads are deduplicated. Also uploads highlights, notes and bookmarks for the open book, including edits and deletions. Annotations are uploaded only; they are not downloaded to KOReader. Keep using Progress sync for your place in each book.\n\nHistory deleted on your reader is kept on the server. Sessions are estimated from gaps between page records.") })
+                UIManager:show(InfoMessage:new{ text = _("Automatically uploads changed reading history after a successful Progress sync to the same server and account. Use Sync all reading history now for a full backfill. Repeated uploads are deduplicated. Also uploads highlights, notes and bookmarks for the open book, including edits and deletions. Use Sync all highlights and bookmarks to backfill saved annotations from books in KOReader reading history. Annotations are uploaded only; they are not downloaded to KOReader. Keep using Progress sync for your place in each book.\n\nHistory deleted on your reader is kept on the server. Sessions are estimated from gaps between page records.") })
               end },
         },
     }
@@ -110,7 +112,7 @@ function CrossPoint:setup()
     dialog:onShowKeyboard()
 end
 
-function CrossPoint:sync(automatic)
+function CrossPoint:sync(automatic, all_annotations)
     if self.busy then
         if automatic then self.pending_auto = true end
         return
@@ -121,7 +123,7 @@ function CrossPoint:sync(automatic)
     end
     if automatic then
         if not NetworkMgr:isOnline() then return end
-    elseif NetworkMgr:willRerunWhenOnline(function() self:sync() end) then return end
+    elseif NetworkMgr:willRerunWhenOnline(function() self:sync(false, all_annotations) end) then return end
     if Background.running() then
         if not automatic then UIManager:show(InfoMessage:new{ text = _("A CrossPoint sync is already running."), timeout = 3 }) end
         return
@@ -140,7 +142,7 @@ function CrossPoint:sync(automatic)
     self.busy = true
     local settings = self.settings
     local started, start_error = Background.start(function(checkpoint)
-        return Worker(settings, self.sent, self.annotation_sent, snapshot, automatic, checkpoint)
+        return Worker(settings, self.sent, self.annotation_sent, snapshot, automatic, checkpoint, all_annotations)
     end, function(result)
         self.busy = false
         local config = LuaSettings:open(DataStorage:getSettingsDir() .. "/crosspoint.lua")

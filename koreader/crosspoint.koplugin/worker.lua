@@ -9,10 +9,11 @@ local Transport = dofile(plugin_dir .. "/transport.lua")
 local Annotations = dofile(plugin_dir .. "/annotations.lua")
 
 -- This function runs only in a child process; it never accesses UI or reader objects.
-return function(settings, sent, annotation_sent, snapshot, automatic, checkpoint)
+return function(settings, sent, annotation_sent, snapshot, automatic, checkpoint, all_annotations)
     local conn, looper, ok_result, error_result
     local synced = 0
-    local skipped = {}
+    local skipped, annotation_skipped = {}, {}
+    local annotation_books, annotation_updates = 0, 0
     local function acknowledged()
         checkpoint({ ok = false, result = "Sync interrupted. Retry after the next Progress sync.",
             sent = sent, annotation_sent = annotation_sent })
@@ -26,11 +27,11 @@ return function(settings, sent, annotation_sent, snapshot, automatic, checkpoint
         looper:add_callback(function()
             local uploaded, upload_error = pcall(function()
                 local client = turbo.async.HTTPClient({ verify_ca = true, ca_path = plugin_dir .. "/cacert.pem" }, looper, 4 * 1024 * 1024)
-                if snapshot then
+                local function uploadAnnotations(snapshot, keep_missing)
                     local previous = annotation_sent[snapshot.document] or {}
                     annotation_sent[snapshot.document] = previous
                     for _, kind in ipairs({ "clippings", "bookmarks" }) do
-                        local changes, next_state = Annotations.changes(snapshot[kind], previous[kind] or {}, JSON.encode, md5, not automatic)
+                        local changes, next_state = Annotations.changes(snapshot[kind], previous[kind] or {}, JSON.encode, md5, not automatic and not all_annotations, keep_missing)
                         for first = 1, #changes, 50 do
                             local batch = {}
                             for i = first, math.min(first + 49, #changes) do batch[#batch + 1] = changes[i] end
@@ -50,9 +51,16 @@ return function(settings, sent, annotation_sent, snapshot, automatic, checkpoint
                             end
                             previous[kind] = previous[kind] or {}
                             for _, item in ipairs(batch) do previous[kind][item.id] = next_state[item.id] end
+                            annotation_updates = annotation_updates + #batch
                             acknowledged()
                         end
                     end
+                    annotation_books = annotation_books + 1
+                end
+                if snapshot then uploadAnnotations(snapshot, all_annotations) end
+                if all_annotations then
+                    dofile(plugin_dir .. "/library_annotations.lua").each(snapshot, md5, uploadAnnotations, annotation_skipped)
+                    return
                 end
                 local path = DataStorage:getSettingsDir() .. "/statistics.sqlite3"
                 if not lfs.attributes(path, "mode") then
@@ -113,10 +121,19 @@ return function(settings, sent, annotation_sent, snapshot, automatic, checkpoint
     if conn then pcall(function() conn:close() end) end
     if looper then pcall(function() looper:close() end) end
     if ok then ok, err = ok_result, error_result end
-    local result = ok and (tostring(synced) .. " books of history synced to CrossPoint; available annotations synced.")
+    local result = ok and (all_annotations and "Annotation backfill complete." or (tostring(synced) .. " books of history synced to CrossPoint."))
         or (tostring(synced) .. " books synced before stopping.\n\n" .. tostring(err or "Upload worker stopped unexpectedly.") .. "\n\nYour history is still on this reader. Retry Sync now; already received records will not be counted twice.")
+    if not ok and all_annotations then
+        result = "Annotation backfill stopped.\n\n" .. tostring(err or "Upload worker stopped unexpectedly.")
+            .. "\n\nReader data is unchanged. Run Sync all highlights and bookmarks again; acknowledged batches will not be resent."
+    end
     if #skipped > 0 then
         result = result .. "\n\nSkipped history for " .. tostring(#skipped) .. " books with existing import conflicts: " .. table.concat(skipped, "; ") .. ". Their saved history is unchanged."
+    end
+    result = result .. "\n\nAnnotation books checked: " .. annotation_books .. "; acknowledged changes: " .. annotation_updates .. "."
+    if not all_annotations then result = result .. " Only the open book is checked for annotations; use Sync all highlights and bookmarks for saved books." end
+    if #annotation_skipped > 0 then
+        result = result .. "\n\nSkipped annotation books (saved data unchanged):\n" .. table.concat(annotation_skipped, "\n")
     end
     return { ok = ok == true, result = result, sent = sent, annotation_sent = annotation_sent }
 end

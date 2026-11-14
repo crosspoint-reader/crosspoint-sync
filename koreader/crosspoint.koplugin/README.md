@@ -78,11 +78,29 @@ must first be upgraded by opening them in a current KOReader release.
 
 ## Highlights and bookmarks
 
-Open a book and push progress to upload its annotations. Repeat for older books:
-the all-book statistics backfill does not scan unopened books for annotations.
-Use the manual sync action while a book is open to resend all its live annotations,
-including after clearing server data. No statistics database is required for
-annotation uploads.
+Open a book and push progress to upload its annotations automatically.
+
+For saved books, choose **CrossPoint Sync → Sync all highlights and bookmarks**.
+This runs in the background and scans the books listed in KOReader's saved reading
+history, without opening their documents or requiring Reading statistics. It uses
+saved metadata beside the book or in KOReader's configured metadata location.
+The open book uses its live annotations so unsaved highlights are included.
+
+The result reports annotation books checked, acknowledged changes, and skipped
+files. Unchanged annotations are not resent. If interrupted, run the action again;
+acknowledged batches are remembered. This backfill uploads additions and edits
+only: it never infers deletions from saved files. Normal open-book sync still
+uploads deletions of previously acknowledged annotations.
+
+Missing books/metadata, unreadable files, older annotation formats, and bookmarks
+without saved page numbers are skipped, leaving both reader and server data intact.
+Open an older book once in a current KOReader release to migrate its annotations.
+Books removed from KOReader's saved reading history are outside the scan; open them
+once to add them back. KOReader may limit how many history entries it retains.
+
+The **Sync all reading history now** action still backfills reading statistics and
+checks only the open book's annotations. Use it while a book is open to force a
+resend of its annotations, including after clearing server data.
 
 Highlights retain text, notes, chapter and color. They appear as clippings in the
 app. Bookmark uploads retain the KOReader location, percentage and a summary
