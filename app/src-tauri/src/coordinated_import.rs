@@ -3,6 +3,9 @@ use objc2::rc::Retained;
 use objc2_foundation::{NSString, NSURL};
 use std::path::Path;
 
+// All Open In workers share one slot, including workers from separate batches.
+static IMPORT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub struct ScopedSource {
   url: Retained<NSURL>,
   accessed: bool,
@@ -18,6 +21,10 @@ impl ScopedSource {
   pub fn import_into(&self, root: &Path, name: &str) -> Result<crate::import_store::Entry, String> {
     use objc2_foundation::{NSFileCoordinator, NSFileCoordinatorReadingOptions};
     use std::{cell::RefCell, ptr::NonNull};
+    // Acquire before coordination/reading and retain through publication and
+    // buffer disposal. The worker continues owning its source grant while waiting.
+    // This mutex protects scheduling only, so a prior panic cannot corrupt state.
+    let _serial = IMPORT_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let outcome = RefCell::new(None);
     let reader = block2::StackBlock::new(|readable: NonNull<NSURL>| {
       // The coordinator may supply a different URL; read only its accessor URL
@@ -55,7 +62,7 @@ mod tests {
   }
 
   #[test]
-  fn waits_for_a_coordinated_writer_and_publishes_only_complete_content() {
+  fn waits_for_a_coordinated_writer_and_serializes_other_imports() {
     autoreleasepool(|_| {
       let root = root();
       let input = root.join("source.epub");
@@ -84,12 +91,27 @@ mod tests {
       }));
       let early = done_rx.recv_timeout(Duration::from_millis(150));
       let before_publish = crate::import_store::list(&queue).unwrap();
+      // While the first import waits on its provider, a different source must
+      // not start buffering its contents or publish ahead of that import.
+      let second_path = root.join("second.txt");
+      fs::write(&second_path, b"second complete file").unwrap();
+      let second = ScopedSource::acquire(&url::Url::from_file_path(&second_path).unwrap()).unwrap();
+      let destination = queue.clone();
+      let (second_tx, second_rx) = mpsc::channel();
+      let second_reader = thread::spawn(move || autoreleasepool(|_| {
+        second_tx.send(second.import_into(&destination, "second.txt")).unwrap();
+      }));
+      let concurrent = second_rx.recv_timeout(Duration::from_millis(150));
       release_tx.send(()).unwrap();
       writer.join().unwrap();
       reader.join().unwrap();
+      second_reader.join().unwrap();
+      let second_result = if let Ok(result) = concurrent.as_ref() { result.as_ref().unwrap().clone() } else { second_rx.recv_timeout(Duration::from_secs(5)).unwrap().unwrap() };
       let result = if let Ok(result) = early.as_ref() { result.as_ref().unwrap().clone() } else { done_rx.recv_timeout(Duration::from_secs(5)).unwrap().unwrap() };
       assert!(early.is_err(),"import completed while the provider still owned its write");
       assert!(before_publish.is_empty(),"partial provider content was published");
+      assert!(concurrent.is_err(), "a second import buffered and published while the first was still coordinating");
+      assert_eq!(crate::import_store::read(&queue,&second_result.id).unwrap(),b"second complete file");
       assert_eq!(crate::import_store::read(&queue,&result.id).unwrap(),b"complete provider content");
       fs::remove_dir_all(root).unwrap();
     });
