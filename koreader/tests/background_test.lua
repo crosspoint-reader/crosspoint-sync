@@ -7,6 +7,7 @@ int waitpid(int, int *, int); int kill(int, int);
 int usleep(unsigned int); void _exit(int);
 struct timeval { long tv_sec; int tv_usec; };
 int gettimeofday(struct timeval *, void *);
+char *mkdtemp(char *); int rmdir(const char *);
 int mkstemps(char *, int); int close(int);
 long write(int, const void *, unsigned long);
 ]]
@@ -18,7 +19,7 @@ local function now()
     assert(C.gettimeofday(tv, nil) == 0)
     return tonumber(tv[0].tv_sec) + tonumber(tv[0].tv_usec) / 1000000
 end
-local processes, tasks, paths = {}, {}, {}
+local processes, tasks = {}, {}
 local process_api = {
     writeToFD = function(fd, data, close_fd)
         local written = C.write(fd, data, #data)
@@ -59,11 +60,17 @@ package.preload["json"] = function() return {
         return { ok = value == "complete", result = value, sent = { acknowledged = true }, annotation_sent = {} }
     end,
 } end
-local original_tmpname = os.tmpname
+local template = (os.getenv("TMPDIR") or "/tmp") .. "/crosspoint-settings-XXXXXX"
+local directory = ffi.new("char[?]", #template + 1, template)
+assert(C.mkdtemp(directory) ~= nil)
+local settings_dir = ffi.string(directory)
+local missing_dir = settings_dir .. "/missing"
+local current_settings_dir = missing_dir
+package.preload["datastorage"] = function() return {
+    getSettingsDir = function() return current_settings_dir end,
+} end
 os.tmpname = function()
-    local path = original_tmpname()
-    paths[#paths + 1] = path
-    return path
+    error("System temporary directory unavailable on Android")
 end
 local Background = dofile("koreader/crosspoint.koplugin/background.lua")
 local function pump(until_done)
@@ -80,6 +87,11 @@ local function pump(until_done)
     end
     return heartbeat
 end
+local created, message = Background.start(function() end, function() end)
+assert(not created and message:find("Could not create a sync result file", 1, true))
+assert(#processes == 0 and not Background.running())
+current_settings_dir = settings_dir
+
 local result
 local started = now()
 assert(Background.start(function(checkpoint)
@@ -139,7 +151,5 @@ assert(not Background.running())
 for _, pid in ipairs(processes) do
     assert(C.waitpid(pid, nil, 1) == -1, "Unreaped child process")
 end
-for _, path in ipairs(paths) do
-    assert(io.open(path, "r") == nil and io.open(path .. ".new", "r") == nil, "Leaked result file")
-end
+assert(C.rmdir(settings_dir) == 0, "Leaked result or checkpoint file")
 print("Background process checks passed: delayed worker, UI heartbeat, overlap, cancellation, checkpoints, crash, deadline and cleanup.")
