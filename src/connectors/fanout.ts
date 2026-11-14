@@ -216,22 +216,32 @@ function withFloor(db: DB, userId: number, connectorId: string, ev: OutboundEven
     if (stats.baseline || !stats.since || stats.since.seconds > stats.book.seconds) return ev;
     return { ...ev, stats: { ...stats, baseline: stats.since, since: undefined } };
   }
-  if (row.status === 'done') return ev;
-  let waiting: NonNullable<OutboundEvent['stats']> | undefined;
+  let last: OutboundEvent | undefined;
   try {
-    waiting = (JSON.parse(row.payload) as OutboundEvent).stats;
+    last = JSON.parse(row.payload) as OutboundEvent;
   } catch {
-    waiting = undefined;
+    last = undefined;
   }
-  const theirs = waiting?.baseline ?? waiting?.since;
-  if (!waiting || !theirs) return ev;
+  const waiting = last?.stats;
+  if (row.status === 'done') {
+    // The total grew without an upload (a copy with its own stats was merged in, a
+    // history file was imported): what was added that way is history.
+    if (stats.baseline || !stats.since || !waiting || stats.since.seconds <= waiting.book.seconds) return ev;
+    return { ...ev, stats: { ...stats, baseline: stats.since, since: undefined } };
+  }
+  if (!last || !waiting) return ev;
+  // A waiting event with no floor is the source's first total, which the service takes as
+  // its starting point: it is kept as history so the reading after it is still credited.
+  const first = !waiting.baseline && !waiting.since;
+  const theirs = waiting.baseline ?? waiting.since
+    ?? { seconds: waiting.book.seconds, pages: waiting.book.pages, at: last.timestamp };
   const mine = stats.baseline ?? stats.since ?? { seconds: stats.book.seconds, pages: stats.book.pages, at: ev.timestamp };
   const floor: StatsBaseline = {
     seconds: between(mine.seconds - Math.max(0, waiting.book.seconds - theirs.seconds), 0, stats.book.seconds),
     pages: between(mine.pages - Math.max(0, waiting.book.pages - theirs.pages), 0, stats.book.pages),
     at: Math.min(theirs.at, mine.at),
   };
-  return stats.baseline || waiting.baseline
+  return stats.baseline || waiting.baseline || first
     ? { ...ev, stats: { ...stats, baseline: floor, since: undefined } }
     : { ...ev, stats: { ...stats, since: floor } };
 }

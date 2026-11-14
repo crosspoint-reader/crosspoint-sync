@@ -281,7 +281,7 @@ async function pushStats(c: SeekquelCred, m: Match, ev: OutboundEvent, http: Htt
     const res = await send(baseline.seconds, baseline.pages, baseline.at, true);
     if (res.status === NOT_FOUND) return { ok: true };
     if (res.status < 200 || res.status >= 300) return failure(res.status, 'stats');
-    if (book.seconds <= baseline.seconds) return { ok: true };
+    if (book.seconds <= baseline.seconds && book.pages <= baseline.pages) return { ok: true };
   }
   const res = await send(book.seconds, book.pages, ev.timestamp, false);
   if (res.status === NOT_FOUND) return { ok: true };

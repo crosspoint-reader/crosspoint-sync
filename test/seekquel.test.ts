@@ -218,9 +218,14 @@ describe('seekquel connector (unit)', () => {
     expect(fake.calls[0].headers?.['x-auth-user']).toBe(CRED.key);
     expect(body(fake.calls[0])).toEqual({ device_id: 'crossink-9F8E7D6C', device: 'CrossInk', recorded_at: 1_760_000_000, baseline: false, items: [{ document: DOC, ...BOOK_STATS }] });
 
+    const pageOnly: OutboundEvent = { ...event, stats: { ...event.stats!, baseline: { seconds: BOOK_STATS.seconds, pages: BOOK_STATS.pages - 1, at: 1_759_999_000 } } };
+    const pagesBefore = fake.calls.length;
+    expect(await seekquelConnector.push(CRED, MATCH, pageOnly, fake.transport)).toEqual({ ok: true });
+    expect(fake.calls.slice(pagesBefore).map((c) => body(c).baseline)).toEqual([true, false]);
+
     const absurd: OutboundEvent = { ...event, stats: { ...event.stats!, book: { ...BOOK_STATS, seconds: 2 ** 40 } } };
     await seekquelConnector.push(CRED, MATCH, absurd, fake.transport);
-    expect(body(fake.calls[1]).items[0].seconds).toBe(2147483647);
+    expect(body(fake.calls.at(-1)!).items[0].seconds).toBe(2147483647);
 
     fake.on('/api/v1/stats/books', 404, {});
     expect(await seekquelConnector.push(CRED, MATCH, event, fake.transport)).toEqual({ ok: true });
@@ -434,9 +439,12 @@ describe('seekquel connector (end to end)', () => {
     await drainQueue(db, fake.transport, 10);
 
     const sent = fake.calls.filter((c) => c.url.endsWith('/api/v1/stats/books')).map(body);
-    expect(sent).toHaveLength(2);
-    expect(sent.find((s) => s.device_id === 'crossink-aaaa')).toMatchObject({ device: 'CrossInk', items: [{ document: DOC, seconds: 900 }] });
-    expect(sent.find((s) => s.device_id === 'crossink-bbbb')).toMatchObject({ items: [{ document: DOC, seconds: 300 }] });
+    // The first reader's two uploads arrive as its first total, kept as the starting point, then the latest.
+    const first = sent.filter((s) => s.device_id === 'crossink-aaaa');
+    expect(first).toHaveLength(2);
+    expect(first[0]).toMatchObject({ device: 'CrossInk', baseline: true, items: [{ document: DOC, seconds: 600 }] });
+    expect(first[1]).toMatchObject({ baseline: false, items: [{ document: DOC, seconds: 900 }] });
+    expect(sent.filter((s) => s.device_id === 'crossink-bbbb')).toEqual([expect.objectContaining({ baseline: false, items: [expect.objectContaining({ document: DOC, seconds: 300 })] })]);
   });
 
   it('forwards the reading time a KOReader history sync adds, as one running total for that source', async () => {
@@ -625,6 +633,56 @@ describe('seekquel connector (end to end)', () => {
     expect(sent).toHaveLength(2);
     expect(sent[0]).toMatchObject({ baseline: true, items: [{ document: DOC, seconds: 600 }] });
     expect(sent[1]).toMatchObject({ baseline: false, items: [{ document: DOC, seconds: 900 }] });
+  });
+
+  it('treats a copy merged in after the link as history, and sends both hashes of one book once', async () => {
+    const fake = fakeTransport();
+    const { app, db, headers } = await linkSeekquel(fake);
+    const alias = 'b'.repeat(32);
+    const userId = Number((db.prepare('SELECT id FROM users LIMIT 1').get() as { id: number }).id);
+    const put = (items: { document: string; seconds: number }[]) => app.request('/api/v1/stats/books', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ device_id: 'crossink-aaaa', device: 'CrossInk', items: items.map((i) => ({ ...BOOK_STATS, pages: 10, ...i })) }),
+    });
+    expect((await put([{ document: alias, seconds: 5000 }])).status).toBe(200);
+    expect((await put([{ document: DOC, seconds: 600 }])).status).toBe(200);
+    await drainQueue(db, fake.transport, 10);
+    db.prepare("DELETE FROM connector_queue WHERE document = ?").run(alias);
+    db.prepare('INSERT INTO document_aliases (user_id, alias, document, created_at, merge_stats) VALUES (?, ?, ?, ?, 1)')
+      .run(userId, alias, DOC, 1);
+
+    const before = fake.calls.length;
+    expect((await put([{ document: DOC, seconds: 900 }, { document: alias, seconds: 5000 }])).status).toBe(200);
+    await drainQueue(db, fake.transport, 10);
+    const sent = fake.calls.slice(before).filter((c) => c.url.endsWith('/api/v1/stats/books')).map(body);
+    expect(sent).toHaveLength(2);
+    // The merged copy's 5000 is history; only the 300 read since is new.
+    expect(sent[0]).toMatchObject({ baseline: true, items: [{ document: DOC, seconds: 5600 }] });
+    expect(sent[1]).toMatchObject({ baseline: false, items: [{ document: DOC, seconds: 5900 }] });
+  });
+
+  it('keeps a first total that is still waiting as the starting point for the next one', async () => {
+    const fake = fakeTransport();
+    const { app, db, headers } = await linkSeekquel(fake);
+    const put = (seconds: number, pages: number) => app.request('/api/v1/stats/books', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ device_id: 'crossink-aaaa', device: 'CrossInk', items: [{ document: DOC, ...BOOK_STATS, seconds, pages }] }),
+    });
+    fake.on('/api/v1/stats/books', 503, {});
+    expect((await put(600, 20)).status).toBe(200);
+    await drainQueue(db, fake.transport, 10);
+    expect((await put(900, 30)).status).toBe(200);
+
+    const before = fake.calls.length;
+    fake.on('/api/v1/stats/books', 200, {});
+    db.prepare("UPDATE connector_queue SET next_try_at = 0 WHERE status = 'pending'").run();
+    await drainQueue(db, fake.transport, 10);
+    const sent = fake.calls.slice(before).filter((c) => c.url.endsWith('/api/v1/stats/books')).map(body);
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).toMatchObject({ baseline: true, items: [{ document: DOC, seconds: 600, pages: 20 }] });
+    expect(sent[1]).toMatchObject({ baseline: false, items: [{ document: DOC, seconds: 900, pages: 30 }] });
   });
 
   it('sends a merged copy\'s totals under the book\'s own id, added to the rest', async () => {

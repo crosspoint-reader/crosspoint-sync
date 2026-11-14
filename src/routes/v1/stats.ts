@@ -242,7 +242,14 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
       }
     });
     const device = typeof o.device === 'string' ? o.device.slice(0, 128) : '';
-    parsed.forEach((p, i) => fanOutBookStats(db, user.id, p.document, deviceId, device, now, undefined, since[i]));
+    // Two hashes of one stats-merged book share a total: it is sent once, from where it stood before the batch.
+    const sent = new Set<string>();
+    parsed.forEach((p, i) => {
+      const canonical = resolveDocument(db, user.id, p.document);
+      if (sent.has(canonical)) return;
+      sent.add(canonical);
+      fanOutBookStats(db, user.id, p.document, deviceId, device, now, undefined, since[i]);
+    });
     return c.json({ until: now, accepted: parsed.length, accepted_daily: parsed.reduce((n, p) => n + p.daily.length, 0), counter_ids: 1 });
   });
 
