@@ -23,6 +23,8 @@ import { DEFAULT_HOST, connect, deleteFiles, folders, isBook, joinPath, listFile
 import { downloads as listDownloads, removeDownload, sendDownload, sendFile } from './catalogs.js'
 import { ActionSheet, Card, EmptyState, folderLabel, notify, Tabs, Toggle } from './ui.jsx'
 import ConversionLog from './ConversionLog.jsx'
+import { importKind } from './importTypes.js'
+import { listImports, addImport, readImport, removeImport } from './importQueue.js'
 import Plugins from './Plugins.jsx'
 import ReaderFonts from './ReaderFonts.jsx'
 import Wallpaper from './Wallpaper.jsx'
@@ -400,6 +402,8 @@ function ReaderFiles({ base, onFoldersChanged }) {
   )
 }
 
+const activeImports = new Set()
+
 const TABS = [
   ['', 'Books'],
   ['fonts', 'Fonts'],
@@ -412,10 +416,12 @@ export default function Send({ tab = '' }) {
   const [device, setDevice] = useState({ state: 'searching', dirs: [] })
   const [attempt, setAttempt] = useState(0)
   const [files, setFiles] = useState([]) // { file, state: 'queued'|'sending'|'done'|'error', error }
+  const [importCounts, setImportCounts] = useState({})
   const [skipped, setSkipped] = useState(0)
   const [sending, setSending] = useState(false)
   const [dragging, setDragging] = useState(false)
   const input = useRef(null)
+  const queueRevision = useRef(0)
   const setPrefs = (p) => {
     setPrefsState(p)
     saveDevicePrefs(p)
@@ -436,31 +442,99 @@ export default function Send({ tab = '' }) {
     }
   }, [prefs.host, attempt])
 
-  function add(list) {
+  useEffect(() => {
+    if (!isApp) return
+    let live = true, latest = 0, retry, reported = false
+    const schedule = delay => {
+      clearTimeout(retry)
+      retry = setTimeout(load, delay)
+    }
+    const load = async () => {
+      clearTimeout(retry)
+      const request = ++latest
+      const revision = queueRevision.current
+      try {
+        const all = await listImports()
+        if (!live || request !== latest) return
+        if (revision !== queueRevision.current) { schedule(0); return }
+        reported = false
+        const entries = all.filter(isBook)
+        setImportCounts(all.reduce((counts, entry) => {
+          const kind = importKind(entry)
+          if (kind) counts[kind] = (counts[kind] ?? 0) + 1
+          return counts
+        }, {}))
+        setFiles(cur => {
+          if (revision !== queueRevision.current) return cur
+          const byId = new Map(cur.map(item => [item.id, item]))
+          return entries.map(entry => {
+            const current = byId.get(entry.id)
+            if (activeImports.has(entry.id)) return current ?? { id: entry.id, file: entry, state: 'sending' }
+            return current?.state !== 'sending' && current ? current : { id: entry.id, file: entry, state: 'queued' }
+          })
+        })
+      } catch (error) {
+        if (!live || request !== latest) return
+        if (!reported) notify({ error: true, title: "Couldn't load queued files", detail: String(error) })
+        reported = true
+        schedule(1000)
+      }
+    }
+    load()
+    window.addEventListener('crosspoint-imports-changed', load)
+    return () => { live = false; clearTimeout(retry); window.removeEventListener('crosspoint-imports-changed', load) }
+  }, [])
+
+  async function add(list) {
     const all = [...list]
     const books = all.filter(isBook)
     setSkipped(all.length - books.length)
-    setFiles((cur) => [
-      ...cur.filter((f) => f.state !== 'done'),
-      ...books.filter((b) => !cur.some((f) => f.file.name === b.name)).map((file) => ({ file, state: 'queued' })),
-    ])
+    for (const file of books) {
+      try {
+        const entry = await addImport(file)
+        queueRevision.current += 1
+        setFiles(cur => cur.some(item => item.id === entry.id) ? cur : [...cur, { id: entry.id, file: entry, state: 'queued' }])
+        window.dispatchEvent(new Event('crosspoint-imports-changed'))
+      } catch (error) {
+        notify({ error: true, title: `Couldn't queue ${file.name}`, detail: String(error) })
+      }
+    }
+  }
+
+  async function remove(item) {
+    try {
+      await removeImport(item.id)
+      queueRevision.current += 1
+      setFiles(cur => cur.filter(f => f.id !== item.id))
+      window.dispatchEvent(new Event('crosspoint-imports-changed'))
+    } catch (error) {
+      notify({ error: true, title: "Couldn't remove queued file", detail: String(error) })
+    }
   }
 
   async function sendAll() {
+    const batch = files.filter(item => item.state !== 'done' && !activeImports.has(item.id))
+    if (!batch.length) return
+    for (const item of batch) activeImports.add(item.id)
     setSending(true)
     const sent = []
     const failed = []
-    for (const item of files) {
-      if (item.state === 'done') continue
+    for (const item of batch) {
       const update = (patch) => setFiles((cur) => cur.map((f) => (f.file === item.file ? { ...f, ...patch } : f)))
       update({ state: 'sending', error: null, progress: null, logs: [] })
       try {
-        const used = await sendFile(item.file, prefs, (event) => setFiles((cur) => cur.map((f) => f.file === item.file ? transferProgress(f, event) : f)))
+        const file = await readImport({ ...item.file, id: item.id })
+        const used = await sendFile(file, prefs, (event) => setFiles((cur) => cur.map((f) => f.file === item.file ? transferProgress(f, event) : f)))
+        await removeImport(item.id)
+        queueRevision.current += 1
         update({ state: 'done', sentAs: used !== item.file.name ? used : null })
         sent.push(used)
       } catch (e) {
         update({ state: 'error', error: String(e) })
         failed.push(String(e))
+      } finally {
+        activeImports.delete(item.id)
+        window.dispatchEvent(new Event('crosspoint-imports-changed'))
       }
     }
     setSending(false)
@@ -476,6 +550,7 @@ export default function Send({ tab = '' }) {
     }
   }
 
+  const busy = sending || files.some(item => item.state === 'sending' || activeImports.has(item.id))
   const pending = files.filter((f) => f.state !== 'done').length
 
   return (
@@ -491,7 +566,7 @@ export default function Send({ tab = '' }) {
         </Card>
       ) : (
         <>
-          <Tabs route="send" tabs={TABS} tab={tab} />
+          <Tabs route="send" tabs={TABS.map(([key, label]) => [key, importCounts[key || 'books'] ? `${label} (${importCounts[key || 'books']})` : label])} tab={tab} />
           {tab === 'wallpaper' ? (
             <Wallpaper />
           ) : (
@@ -544,8 +619,8 @@ export default function Send({ tab = '' }) {
 
                   {files.length > 0 && (
                     <Card className="mt-4 divide-y divide-stone-100">
-                      {files.map(({ file, state, error, sentAs, progress, logs }) => (
-                        <div key={file.name} className="px-4 py-3">
+                      {files.map(({ id, file, state, error, sentAs, progress, logs }) => (
+                        <div key={id} className="px-4 py-3">
                           <ConversionLog entries={logs}>
                             {(details) => (
                               <div className="flex items-center gap-3">
@@ -559,10 +634,10 @@ export default function Send({ tab = '' }) {
                                     {details}
                                   </p>
                                 </div>
-                                {state === 'queued' ? (
-                                  !sending && (
+                                {state === 'queued' || state === 'error' ? (
+                                  !busy && (
                                     <button
-                                      onClick={() => setFiles((cur) => cur.filter((f) => f.file !== file))}
+                                      onClick={() => remove({ id })}
                                       className="-mr-2 grid size-9 place-items-center rounded-full text-stone-400 active:bg-stone-100"
                                       aria-label={`Remove ${file.name}`}
                                     >
@@ -582,7 +657,7 @@ export default function Send({ tab = '' }) {
 
                   {pending > 0 && (
                     <button
-                      disabled={sending || device.state !== 'ok'}
+                      disabled={busy || device.state !== 'ok'}
                       onClick={sendAll}
                       className="mt-4 flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-brand-500 text-base font-semibold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-50"
                     >

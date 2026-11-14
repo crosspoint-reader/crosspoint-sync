@@ -1,4 +1,8 @@
 mod books;
+mod import_store;
+mod imports;
+#[cfg(any(target_os = "ios", all(test, target_os = "macos")))]
+mod coordinated_import;
 mod epub_name;
 mod mdns;
 mod opds;
@@ -29,6 +33,10 @@ pub fn run() {
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![
+      imports::list_imports,
+      imports::add_import,
+      imports::read_import,
+      imports::remove_import,
       mdns::resolve_local,
       books::opds_feed,
       books::opds_search,
@@ -51,8 +59,14 @@ pub fn run() {
       set_page_scroll,
       refresh::end_refresh,
     ])
-    .run(tauri::generate_context!())
-    .expect("error while running tauri application");
+    .build(tauri::generate_context!())
+    .expect("error while building tauri application")
+    .run(|_app, _event| {
+      #[cfg(target_os = "ios")]
+      if let tauri::RunEvent::Opened { urls } = _event {
+        for url in urls { imports::open(_app, &url); }
+      }
+    });
 }
 
 // Read the real OS version; WebKit's user agent can report a compatibility version.

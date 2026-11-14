@@ -32,9 +32,11 @@ tauri-plugin-haptics = "2"
 # UIKit-managed iPhone/Duo navigation from our fork, pinned with the JS package.
 tauri-plugin-system-components = { git = "https://github.com/itsthisjustin/tauri-plugin-system-components", rev = "348476a5bd4ff19c95a944d9a5d93bf403d4e07b" }
 
-[target.'cfg(target_os = "ios")'.dependencies]
+[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
+block2 = "0.6"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSData", "NSFileManager", "NSString", "NSURL"] }
+objc2-foundation = { version = "0.3", features = ["NSData", "NSFileManager", "NSString", "NSURL", "NSFileCoordinator", "NSError", "block2"] }
+[target.'cfg(target_os = "ios")'.dependencies]
 objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "UIControl", "UIImage", "UIImagePickerController", "UIRefreshControl", "UIResponder", "UIView"] }
 
 [dev-dependencies]

@@ -31,6 +31,15 @@
 		E952F1320553223057A59239 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FE54F751F09F6D338C764211 /* WidgetKit.framework */; };
 		F507E6B34A0632CF9017FFF2 /* CrossPointWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = BB2A4F2B0B619285749721A7 /* CrossPointWidget.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		F5379C59BD1403E2BDA6098F /* assets in Resources */ = {isa = PBXBuildFile; fileRef = EFAC7081BE0965C9641C74F2 /* assets */; };
+		68EF11AFAF17A1B4A324D111 /* ShareViewController.swift in Sources */ = {
+			isa = PBXBuildFile;
+			fileRef = 7B070A0995F118DF9B3D65B0;
+		};
+		0E9D3268BD6043FEF43878EF /* CrossPointShare.appex in Embed Foundation Extensions */ = {
+			isa = PBXBuildFile;
+			fileRef = 2EF5C746673E376CB9E2CCBB;
+			settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); };
+		};
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -41,6 +50,13 @@
 			remoteGlobalIDString = F1B6382EBA17716854185CF2;
 			remoteInfo = CrossPointWidget;
 		};
+		CF98CF5C7962E13EA7FB20E2 /* Share proxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DEDF09BA2594341999063F5F;
+			proxyType = 1;
+			remoteGlobalIDString = C7443E56E1E907B3C23F3D65;
+			remoteInfo = CrossPointShare;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -50,6 +66,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
+				0E9D3268BD6043FEF43878EF,
 				F507E6B34A0632CF9017FFF2 /* CrossPointWidget.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
@@ -99,6 +116,30 @@
 		F77ADE8FD7A24CA12EFD9819 /* parse_v2.rs */ = {isa = PBXFileReference; path = parse_v2.rs; sourceTree = "<group>"; };
 		FE54F751F09F6D338C764211 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		FEFB9FFA8A213DFAD642AEFC /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		7B070A0995F118DF9B3D65B0 /* ShareViewController.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = ShareViewController.swift;
+			sourceTree = "<group>";
+		};
+		461F6177570E98D06DE3B2E6 /* Share Info.plist */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = text.plist.xml;
+			path = Info.plist;
+			sourceTree = "<group>";
+		};
+		4BBF5BA480BC2CBF7A08591F /* CrossPointShare.entitlements */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = text.plist.entitlements;
+			path = CrossPointShare.entitlements;
+			sourceTree = "<group>";
+		};
+		2EF5C746673E376CB9E2CCBB /* CrossPointShare.appex */ = {
+			isa = PBXFileReference;
+			explicitFileType = "wrapper.app-extension";
+			path = CrossPointShare.appex;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -236,6 +277,7 @@
 		C6909A934DEDCD389C924B62 = {
 			isa = PBXGroup;
 			children = (
+				6028C3C0C414DBDD74685343,
 				E4672BC0025EFAC99DE67520 /* AppIcon.icon */,
 				EFAC7081BE0965C9641C74F2 /* assets */,
 				72ED45BA68D8C2F5A99C542D /* Assets.xcassets */,
@@ -253,6 +295,7 @@
 		E6507374E28A1DF91D95ECBA /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				2EF5C746673E376CB9E2CCBB,
 				8379E0BC616B63E8DF220A7F /* crosspoint-sync-app_iOS.app */,
 				BB2A4F2B0B619285749721A7 /* CrossPointWidget.appex */,
 			);
@@ -273,6 +316,16 @@
 			path = arm64;
 			sourceTree = "<group>";
 		};
+		6028C3C0C414DBDD74685343 /* CrossPointShare */ = {
+			isa = PBXGroup;
+			children = (
+				7B070A0995F118DF9B3D65B0,
+				461F6177570E98D06DE3B2E6,
+				4BBF5BA480BC2CBF7A08591F,
+			);
+			path = CrossPointShare;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -289,6 +342,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				6340CB7E0B3D7D743F6BB9E5,
 				F74C6A1BA93A3A4914C29977 /* PBXTargetDependency */,
 			);
 			name = "crosspoint-sync-app_iOS";
@@ -315,6 +369,17 @@
 			);
 			productName = CrossPointWidget;
 			productReference = BB2A4F2B0B619285749721A7 /* CrossPointWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		C7443E56E1E907B3C23F3D65 /* Share target */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A434166406DD78CBF6633EDD;
+			buildPhases = (B64159187A2FBB4BD4268F41, );
+			buildRules = ();
+			dependencies = ();
+			name = CrossPointShare;
+			productName = CrossPointShare;
+			productReference = 2EF5C746673E376CB9E2CCBB;
 			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
@@ -346,6 +411,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				C7443E56E1E907B3C23F3D65,
 				68DFB3E8FF3470F98AB93324 /* crosspoint-sync-app_iOS */,
 				F1B6382EBA17716854185CF2 /* CrossPointWidget */,
 			);
@@ -419,6 +485,12 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B64159187A2FBB4BD4268F41 /* Share Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (68EF11AFAF17A1B4A324D111, );
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -426,6 +498,11 @@
 			isa = PBXTargetDependency;
 			target = F1B6382EBA17716854185CF2 /* CrossPointWidget */;
 			targetProxy = 914B064C5540432EB389614A /* PBXContainerItemProxy */;
+		};
+		6340CB7E0B3D7D743F6BB9E5 /* Share dependency */ = {
+			isa = PBXTargetDependency;
+			target = C7443E56E1E907B3C23F3D65;
+			targetProxy = CF98CF5C7962E13EA7FB20E2;
 		};
 /* End PBXTargetDependency section */
 
@@ -659,6 +736,46 @@
 			};
 			name = debug;
 		};
+		D34BF85984DEA3D3B8F330DC /* Share debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = CrossPointShare/CrossPointShare.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 96247QW4R8;
+				INFOPLIST_FILE = CrossPointShare/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = com.crosspointreader.sync.share;
+				PRODUCT_NAME = CrossPointShare;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = debug;
+		};
+		36BD32495DAB854E34E53221 /* Share release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = CrossPointShare/CrossPointShare.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 96247QW4R8;
+				INFOPLIST_FILE = CrossPointShare/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = com.crosspointreader.sync.share;
+				PRODUCT_NAME = CrossPointShare;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -688,6 +805,15 @@
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = debug;
+		};
+		A434166406DD78CBF6633EDD /* Share configurations */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D34BF85984DEA3D3B8F330DC,
+				36BD32495DAB854E34E53221,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = release;
 		};
 /* End XCConfigurationList section */
 	};

@@ -89,14 +89,18 @@ const STYLE = [
   ['italic', /[-_ ]?(italic|oblique)$/i],
   ['regular', /[-_ ]?(regular|normal|book|roman)$/i],
 ]
+export function localFontIdentity(name) {
+  const stem = name.replace(/\.(ttf|otf)$/i, '')
+  const [style, re] = STYLE.find(([, re]) => re.test(stem)) ?? ['regular', /$^/]
+  return { style, family: stem.replace(re, '') }
+}
 export async function localFamily(files) {
   const styles = {}
   let family = ''
   for (const file of files) {
-    const stem = file.name.replace(/\.(ttf|otf)$/i, '')
-    const [style, re] = STYLE.find(([, re]) => re.test(stem)) ?? ['regular', /$^/]
+    const { style, family: name } = localFontIdentity(file.name)
     styles[style] ??= new Uint8Array(await file.arrayBuffer())
-    if (style === 'regular' || !family) family = stem.replace(re, '')
+    if (style === 'regular' || !family) family = name
   }
   styles.regular ??= styles.bold ?? styles.italic ?? styles.bolditalic
   return { family, styles }

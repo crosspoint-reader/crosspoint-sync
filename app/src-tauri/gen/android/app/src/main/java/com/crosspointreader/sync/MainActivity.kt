@@ -23,6 +23,8 @@ import java.io.File
 
 class MainActivity : TauriActivity() {
   companion object {
+    private val importExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private const val DELIVERY_STATE = "crosspoint-import-delivery"
     private const val PAPER = 0xFFFAF8F3.toInt()
     private const val PAPER_DARK = 0xFF121110.toInt()
   }
@@ -39,6 +41,8 @@ class MainActivity : TauriActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    importDelivery = savedInstanceState?.getString(DELIVERY_STATE) ?: java.util.UUID.randomUUID().toString()
+    receiveFiles(intent, importDelivery)
     val content = findViewById<View>(android.R.id.content)
     val deadline = SystemClock.uptimeMillis() + 3000
     content.viewTreeObserver.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
@@ -55,6 +59,39 @@ class MainActivity : TauriActivity() {
     multicastLock = wifi.createMulticastLock("crosspoint-mdns").apply {
       setReferenceCounted(false)
       acquire()
+    }
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    importDelivery = java.util.UUID.randomUUID().toString()
+    receiveFiles(intent, importDelivery)
+  }
+
+  private var importDelivery = java.util.UUID.randomUUID().toString()
+
+  override fun onSaveInstanceState(outState: Bundle) {
+    outState.putString(DELIVERY_STATE, importDelivery)
+    super.onSaveInstanceState(outState)
+  }
+
+  private fun receiveFiles(incoming: Intent?, delivery: String) {
+    if (incoming == null) return
+    val uris = IncomingFiles.uris(incoming)
+    if (uris.isEmpty()) return
+    // Resolve and copy content:// streams while the activity holds the sender's
+    // temporary URI grant. No external-storage permission or network fetch.
+    importExecutor.execute {
+      val failures = mutableListOf<String>()
+      for ((index, uri) in uris.withIndex()) {
+        try { IncomingFiles.copy(applicationContext, uri, "$delivery-$index") }
+        catch (error: Exception) { failures.add(error.message ?: "Couldn't import file") }
+      }
+      runOnUiThread {
+        webView?.evaluateJavascript("dispatchEvent(new Event('crosspoint-imports-changed'))", null)
+        if (failures.isNotEmpty()) android.widget.Toast.makeText(this, failures.joinToString("\n"), android.widget.Toast.LENGTH_LONG).show()
+      }
     }
   }
 

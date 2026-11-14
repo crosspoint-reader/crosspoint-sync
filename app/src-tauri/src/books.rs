@@ -186,7 +186,7 @@ pub async fn send_download(
 /// Raw IPC body bytes. Android's WebView can't expose request bodies to the IPC
 /// protocol, so Tauri JSON-encodes the message there; the app sends base64 text
 /// (ipcBytes in api.js), and a plain byte array still works as a fallback.
-fn body_bytes(request: &Request<'_>) -> Res<Vec<u8>> {
+pub(crate) fn body_bytes(request: &Request<'_>) -> Res<Vec<u8>> {
   use base64::{engine::general_purpose::STANDARD, Engine};
   match request.body() {
     InvokeBody::Raw(bytes) => Ok(bytes.clone()),
@@ -358,7 +358,7 @@ fn urlencoding_encode(s: &str) -> String {
     .collect()
 }
 
-fn urlencoding_decode(s: &str) -> Option<String> {
+pub(crate) fn urlencoding_decode(s: &str) -> Option<String> {
   let bytes = s.as_bytes();
   let mut out = Vec::with_capacity(bytes.len());
   let mut i = 0;

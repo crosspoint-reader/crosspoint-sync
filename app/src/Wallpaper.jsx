@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Download, ImagePlus, Loader2, RotateCcw, RotateCw, Search, Send as SendIcon, Sparkles, Tablet, Wand2 } from 'lucide-react'
+import ImportedAssets, { runImportedAsset } from './ImportedAssets.jsx'
 import { isApp } from './api.js'
 import { reader, sendFile } from './catalogs.js'
 import { connect, folders, loadDevicePrefs, makeFolder } from './device.js'
@@ -228,20 +229,32 @@ export default function Wallpaper() {
     set(patch)
   }
 
-  function load(src, name, failure) {
+  const imageRequest = useRef(0)
+  const pendingImport = useRef(null)
+  useEffect(() => () => { imageRequest.current += 1 }, [])
+
+  function load(src, name, failure, importId = null, objectURL = false) {
+    const request = ++imageRequest.current
+    pendingImport.current = importId
     const el = new Image()
     el.crossOrigin = 'anonymous' // community images: keep the canvas readable
     el.onload = () => {
-      setImg({ el, name })
+      if (objectURL) URL.revokeObjectURL(src)
+      if (request !== imageRequest.current) return
+      pendingImport.current = null
+      setImg({ el, name, importId })
       set({ zoom: 1, cx: 0.5, cy: 0.5, rotation: 0 })
       setAuto(true)
       window.scrollTo(0, 0)
     }
-    el.onerror = () => setStatus({ error: true, text: failure })
+    el.onerror = () => {
+      if (objectURL) URL.revokeObjectURL(src)
+      if (request === imageRequest.current) setStatus({ error: true, text: failure })
+    }
     setStatus(null)
     el.src = src
   }
-  const open = (file) => file && load(URL.createObjectURL(file), file.name, "That file isn't an image this device can open.")
+  const open = (file, entry) => file && load(URL.createObjectURL(file), file.name, "That file isn't an image this device can open.", entry?.id, true)
   const pick = async (w) => {
     const failed = "Couldn't download that wallpaper. Check your connection and try again."
     setStatus({ busy: true, text: 'Loading wallpaper…' })
@@ -306,19 +319,24 @@ export default function Wallpaper() {
   async function send() {
     setStatus({ busy: true, text: 'Sending to reader…' })
     const prefs = { ...loadDevicePrefs(), optimize: false, renameFromMetadata: false }
-    const file = new File([toBmp(result.current)], fileName(), { type: 'image/bmp' })
     try {
-      const base = await reader(prefs)
-      let folder = '/.sleep'
-      try {
-        await sendFile(file, { ...prefs, folder })
-      } catch {
-        // No /.sleep yet, and the reader won't create dot folders over Wi-Fi: use /sleep,
-        // which CrossPoint reads whenever /.sleep has no wallpapers.
-        folder = '/sleep'
-        if (!(await folders(base)).includes('sleep')) await makeFolder(base, '/', 'sleep')
-        await sendFile(file, { ...prefs, folder })
+      const file = new File([toBmp(renderWallpaper(img.el, s))], fileName(), { type: 'image/bmp' })
+      const upload = async () => {
+        const base = await reader(prefs)
+        let folder = '/.sleep'
+        try {
+          await sendFile(file, { ...prefs, folder })
+        } catch {
+          // No /.sleep yet, and the reader won't create dot folders over Wi-Fi: use /sleep,
+          // which CrossPoint reads whenever /.sleep has no wallpapers.
+          folder = '/sleep'
+          if (!(await folders(base)).includes('sleep')) await makeFolder(base, '/', 'sleep')
+          await sendFile(file, { ...prefs, folder })
+        }
+        return folder
       }
+      const folder = await (img.importId ? runImportedAsset(img.importId, upload) : upload())
+      setImg(current => current === img ? { ...current, importId: null } : current)
       setStatus(null)
       notify({ title: 'Wallpaper sent to your reader', detail: `${file.name} in ${folder}` })
     } catch (e) {
@@ -345,6 +363,10 @@ export default function Wallpaper() {
 
   return (
     <div className="mt-6">
+      <ImportedAssets kind="wallpaper" actionLabel="Edit sleep screen" onAction={open} removeAfter={false} onRemoved={entry => {
+        if (pendingImport.current === entry.id) { imageRequest.current += 1; pendingImport.current = null }
+        setImg(current => current?.importId === entry.id ? { ...current, importId: null } : current)
+      }} actionDisabled={!!status?.busy} removalDisabled={!!status?.busy} />
       <p className="max-w-xl text-sm/6 text-stone-500">
         Turn a photo into a sleep screen, dithered to your reader&apos;s four shades of grey.
       </p>

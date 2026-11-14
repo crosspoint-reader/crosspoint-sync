@@ -116,3 +116,30 @@ Shortcuts. Load the Library and Clippings online, turn on airplane mode, close t
 app and run each action; check the returned fields and unchanged Cached At. Sign
 out and confirm actions no longer return the previous account's data. Sign into a
 different account and verify a previously selected book cannot resolve to it.
+
+### Importing files on mobile
+
+Share or open books (`.epub`, `.acsm`, `.md`, `.txt`), fonts (`.ttf`, `.otf`,
+`.cpfont`), and sleep-screen images (`.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`,
+`.bmp`) in CrossPoint Sync to queue them in **Send to your reader**. Imports are copied into app-owned storage and
+survive tab changes, restarts, and an unavailable reader. Tap Send when ready;
+a successful send deletes its queued copy. Failed sends stay queued, and Remove
+deletes only the app's copy. Files with identical names remain separate entries.
+Book file-picker imports use the same persistent queue. Shared font styles from
+one family are sent together through the existing font APIs; duplicate copies
+of one style remain separate. Raw bold/italic uploads do not replace regular.
+Converting a family to `.cpfont` requires its regular style. Shared images open
+in the sleep-screen editor for sizing/dithering and BMP conversion before send;
+editing or saving a preview leaves the original queued. Mixed batches show
+counts on each Send tab, and imports also work in guest mode.
+
+Android accepts Share (including multiple files) and Open intents. On iOS,
+**Open in CrossPoint Sync** opens the app directly. The **CrossPoint Sync** Share
+extension saves the files and confirms the result; open the app afterward to
+send them. iOS does not provide a supported API for this Share extension to
+launch its containing app. The extension uses the existing App Group
+`group.com.crosspointreader.sync` and the new automatically signed bundle
+identifier `com.crosspointreader.sync.share`.
+
+See [mobile import checks](../docs/mobile-file-imports-testing.md) for native
+build and device verification.
