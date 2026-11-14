@@ -513,7 +513,7 @@ describe('readwise highlight fan-out', () => {
 });
 
 describe('hardcover highlight quotes', () => {
-  it('posts clippings as journal quotes only when turned on, with the chosen privacy', async () => {
+  it.each(['2025-07-12T06:00:00.000Z', '2026-11-14T17:17:23.000Z'])('preserves highlight time %s with the chosen privacy and opt-in', async (highlightedAt) => {
     const fake = fakeTransport();
     fake.on('graphql', 200, { data: { me: [{ username: 'julia' }] } });
     const { app, db } = makeTestApp({}, { connectorTransport: fake.transport });
@@ -529,7 +529,7 @@ describe('hardcover highlight quotes', () => {
       app.request(`/api/v1/clippings/${DOC}`, {
         method: 'PUT',
         headers,
-        body: JSON.stringify({ items: [{ id, spine: 1, text, note: 'so good', created_at: 1752300000 }] }),
+        body: JSON.stringify({ items: [{ id, spine: 1, text, note: 'so good', created_at: Date.parse(highlightedAt) / 1000 }] }),
       });
     const queued = () =>
       (db.prepare(`SELECT COUNT(*) AS n FROM connector_queue WHERE connector_id = 'hardcover' AND kind LIKE 'highlight%' AND status = 'pending'`).get() as { n: number }).n;
@@ -559,7 +559,7 @@ describe('hardcover highlight quotes', () => {
       entry: 'second line\n\nso good',
       privacy_setting_id: 2,
       tags: [],
-      action_at: '2025-07-12',
+      action_at: highlightedAt,
     });
     expect(claimReady(db, 10)).toHaveLength(0);
 

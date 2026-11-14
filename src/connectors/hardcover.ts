@@ -658,8 +658,8 @@ async function pushQuote(
         entry,
         privacy_setting_id: privacySettingId,
         tags: [],
-        // Date the quote by when it was highlighted, so a backfill doesn't stamp them all today.
-        ...(h.highlightedAt ? { action_at: new Date(h.highlightedAt * 1000).toISOString().slice(0, 10) } : {}),
+        // Hardcover accepts full ISO timestamps despite declaring action_at as a date scalar.
+        ...(h.highlightedAt ? { action_at: new Date(h.highlightedAt * 1000).toISOString() } : {}),
       },
     }
   );
