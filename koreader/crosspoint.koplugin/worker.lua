@@ -12,6 +12,7 @@ local Annotations = dofile(plugin_dir .. "/annotations.lua")
 return function(settings, sent, annotation_sent, snapshot, automatic, checkpoint)
     local conn, looper, ok_result, error_result
     local synced = 0
+    local skipped = {}
     local function acknowledged()
         checkpoint({ ok = false, result = "Sync interrupted. Retry after the next Progress sync.",
             sent = sent, annotation_sent = annotation_sent })
@@ -89,14 +90,18 @@ return function(settings, sent, annotation_sent, snapshot, automatic, checkpoint
                         }))
                         if response.error then error(Sync.connectionError(response), 0) end
                         local decoded, result = pcall(JSON.decode, response.body or "")
-                        if response.code ~= 200 then
+                        if response.code == 409 then
+                            -- Preserve legacy totals; one conflicting book must not block the library.
+                            skipped[#skipped + 1] = book.title
+                        elseif response.code ~= 200 then
                             local detail = decoded and type(result) == "table" and type(result.message) == "string" and result.message:sub(1, 500)
                             error(book.title .. ": " .. (detail or ("Server returned HTTP " .. tostring(response.code) .. ". Check your account and server version.")), 0)
+                        else
+                            if not decoded or not Sync.acknowledged(result, payload) then error("Server did not acknowledge the history. Update CrossPoint Sync and retry.", 0) end
+                            sent[book.md5] = fingerprint
+                            synced = synced + 1
+                            acknowledged()
                         end
-                        if not decoded or not Sync.acknowledged(result, payload) then error("Server did not acknowledge the history. Update CrossPoint Sync and retry.", 0) end
-                        sent[book.md5] = fingerprint
-                        synced = synced + 1
-                        acknowledged()
                     end
                 end
             end)
@@ -110,5 +115,8 @@ return function(settings, sent, annotation_sent, snapshot, automatic, checkpoint
     if ok then ok, err = ok_result, error_result end
     local result = ok and (tostring(synced) .. " books of history synced to CrossPoint; available annotations synced.")
         or (tostring(synced) .. " books synced before stopping.\n\n" .. tostring(err or "Upload worker stopped unexpectedly.") .. "\n\nYour history is still on this reader. Retry Sync now; already received records will not be counted twice.")
+    if #skipped > 0 then
+        result = result .. "\n\nSkipped history for " .. tostring(#skipped) .. " books with existing import conflicts: " .. table.concat(skipped, "; ") .. ". Their saved history is unchanged."
+    end
     return { ok = ok == true, result = result, sent = sent, annotation_sent = annotation_sent }
 end

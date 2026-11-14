@@ -124,15 +124,16 @@ highlight in KOReader to give it a new creation identity.
 
 New manual KOReader/KOInsight imports and plugin uploads share source records and
 are counted once. Imports made before this plugin version stored only aggregates.
-If the plugin reports that an older import cannot be reconciled, re-import the
-**original complete history file** through CrossPoint Settings first. This records
-the source events without duplicating the imported totals. Export an account backup
-before replacing imported history; a smaller history file can replace that book's
-previous imported totals. Firmware stats are kept separately.
+Version 0.2.7 skips books whose older imports cannot be reconciled and continues
+syncing the rest of the library. **Last sync result** lists skipped books; automatic
+sync does not interrupt reading with a conflict popup. The skipped book's saved
+history stays unchanged, and it is retried on later syncs rather than marked uploaded.
+Progress and available annotations still sync independently.
 
-If the complete original history is unavailable, leave that book unsynced rather
-than clearing existing stats to bypass the conflict. A failure stops the current
-sync and reports the book involved.
+No re-import is needed to sync your other books. To also sync a skipped book's
+history, optionally re-import the **original complete history file** through
+CrossPoint Settings. Export an account backup first: a smaller history file can
+replace that book's previous imported totals. Firmware stats are kept separately.
 
 ## Connection and credentials
 

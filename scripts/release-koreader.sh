@@ -32,7 +32,9 @@ trap 'rm -f "$notes"' EXIT
 cat > "$notes" <<NOTES
 Install by extracting crosspoint-koreader.zip into KOReader's plugins folder and restarting KOReader. The plugin is now named **CrossPoint Sync**, with **Last sync result** in its menu. Existing account settings are preserved.
 
-Fixes the HTTP 400 caused by Turbo appending four extra CRLF bytes beyond the declared Content-Length. The plugin now sends exactly the declared body length, preserving the payload and its own trailing newlines.
+Skips books with existing history-import conflicts (HTTP 409) and continues syncing the rest of the library. Last sync result lists skipped books. Automatic sync does not show a failure popup for these conflicts. Existing history is preserved; skipped books are not marked uploaded and can retry later. No re-import is required to sync other books. Progress and available annotations continue independently.
+
+Retains the 0.2.6 transport fix. Fixes the HTTP 400 caused by Turbo appending four extra CRLF bytes beyond the declared Content-Length. The plugin now sends exactly the declared body length, preserving the payload and its own trailing newlines.
 
 Reproduced with the real Turbo 2.1.5 / LuaSocket / LuaSec stack: 100 KB and 500 KB requests returned a proxy-level 400 before the framing fix. With the fix, 100-byte, 100 KB and 500 KB synthetic unauthenticated requests all reached the application's JSON 401 response. No credentials or reader data were sent. This verifies hosted transport/framing. Separate authenticated imports of 100, 1,000 and 5,000 synthetic page records passed against an ephemeral local server. A full sync on a physical KOReader device still needs verification.
 

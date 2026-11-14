@@ -152,7 +152,29 @@ reset()
 plugin, thread = start()
 assert(coroutine.resume(thread, { code = 409, body = { message = "Re-import the original history." } }))
 assert(closed and not timeout and not plugin.busy)
-assert(shown[#shown].text:find("Re%-import") and shown[#shown].text:find("Retry"))
+assert(shown[#shown].text:find("Skipped history for 1 books", 1, true))
+assert(not shown[#shown].text:find("before stopping", 1, true) and not plugin.sent[hash])
+
+-- A conflict skips only that book, acknowledges later books, and retries the skipped book next time.
+reset()
+local second_hash = string.rep("b", 32)
+books.md5[2], books.title[2], books.authors[2] = second_hash, "Second book", "Author"
+plugin, thread = start()
+local continued, awaiting = coroutine.resume(thread, { code = 409, body = {} })
+assert(continued and awaiting == "http-await" and #posted == 2)
+assert(coroutine.resume(thread, { code = 200, body = { version = 1, document = second_hash, accepted = 2 } }))
+assert(not plugin.busy and not plugin.sent[hash] and plugin.sent[second_hash])
+assert(shown[#shown].text:find("1 books of history synced", 1, true))
+assert(shown[#shown].text:find("A book", 1, true))
+local shown_before = #shown
+plugin:sync(true)
+thread = coroutine.create(queued)
+assert(coroutine.resume(thread))
+assert(posted[#posted].book.md5 == hash)
+assert(coroutine.resume(thread, { code = 409, body = {} }))
+assert(coroutine.status(thread) == "dead" and #shown == shown_before)
+assert(saved.last_sync:find("Skipped history for 1 books", 1, true))
+books.md5[2], books.title[2], books.authors[2] = nil, nil, nil
 
 reset()
 plugin, thread = start()
