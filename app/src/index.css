@@ -241,3 +241,10 @@ body::before {
   top: max(env(safe-area-inset-top), var(--native-inset-top, 0px));
   right: calc(max(env(safe-area-inset-right), var(--native-inset-right, 0px)) + 0.75rem);
 }
+
+/* Browsers with the sidebar: no vertical rubber-band, which drags the fixed sidebar
+   along with the page. Horizontal overscroll stays for swipe back/forward. */
+@media (width >= 48rem) {
+  .in-browser, .in-browser body { overscroll-behavior-y: none; }
+  .in-browser .app-sidebar { overscroll-behavior-y: contain; }
+}

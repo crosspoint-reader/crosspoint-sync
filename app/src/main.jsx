@@ -21,6 +21,9 @@ document.addEventListener('focusin', (e) => {
   }
 })
 
+// The native apps keep the scroll bounce: their pull-to-refresh needs it.
+if (!('__TAURI_INTERNALS__' in window)) document.documentElement.classList.add('in-browser')
+
 initializeNavigation().then(() => {
   createRoot(document.getElementById('root')).render(
     <StrictMode>

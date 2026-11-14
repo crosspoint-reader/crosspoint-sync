@@ -19,7 +19,7 @@ const UNMEASURED = 'read, no time recorded'
 
 function ShadeLegend({ unknown }) {
   return (
-    <div className="font-mono text-[0.65rem] text-stone-400">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[0.65rem] text-stone-400">
       <div className="flex items-center gap-1">
         Less
         {SHADES.map((c) => (
@@ -28,7 +28,7 @@ function ShadeLegend({ unknown }) {
         More
       </div>
       {unknown && (
-        <div className="mt-1 flex items-center gap-1">
+        <div className="flex items-center gap-1">
           <span aria-hidden="true" className={`size-2.5 rounded-[2px] ${UNKNOWN_SHADE}`} />
           {unknown}
         </div>
@@ -837,7 +837,7 @@ function Timeline({ session, activity, books }) {
     .reverse()
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-2xl md:mx-auto">
       {reading.length > 0 && (
         <Card className="mt-6 divide-y divide-stone-100 px-4">
           <h2 className="flex items-center gap-2 py-3 font-display text-lg font-semibold text-stone-900">

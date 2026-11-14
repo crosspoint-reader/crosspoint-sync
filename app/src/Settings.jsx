@@ -1105,9 +1105,9 @@ export default function Settings({ session, theme, onSession, onLogout, onSignIn
   const host = new URL(session.server).host
   const section = 'mt-8 font-display text-xl font-semibold text-stone-900'
   return (
-    <div className="settings-page max-w-2xl px-4 pt-2 pb-8 md:px-8 md:pt-6 lg:px-12">
+    <div className="settings-page max-w-2xl px-4 pt-2 pb-8 md:px-8 md:pt-6 lg:max-w-none lg:px-12">
       <div className="settings-header flex min-h-11 items-center gap-6">
-        <a href="#/" aria-label="Back to Library" className="native-hide grid size-11 shrink-0 place-items-center rounded-full text-brand-600 transition active:bg-stone-200/70 md:hover:bg-stone-100">
+        <a href="#/" aria-label="Back to Library" className="native-hide grid size-11 shrink-0 place-items-center rounded-full text-brand-600 transition active:bg-stone-200/70 md:hidden">
           <ArrowLeft className="size-6" strokeWidth={2} />
         </a>
         <h1 className="font-display text-3xl font-semibold tracking-tight text-stone-900 md:text-4xl">Settings</h1>
@@ -1123,47 +1123,55 @@ export default function Settings({ session, theme, onSession, onLogout, onSignIn
         </div>
       </Card>
 
-      <h2 className={section}>Library</h2>
-      <p className="mt-1 text-sm text-stone-500">Books your reader synced without a title or author are hidden. Show them to see their progress and last sync, then add the title and author so they match.</p>
-      <Card className="mt-3 divide-y divide-stone-100">
-        <UntitledBooks />
-        {isApp && <CatalogsLink />}
-      </Card>
+      {/* Wide screens: reading and account settings on the left, services and
+          data transfer on the right. Source order stays the phone order. */}
+      <div className="lg:grid lg:grid-cols-2 lg:grid-rows-[auto_1fr] lg:gap-x-12">
+        <div className="lg:col-start-1 lg:row-start-1 lg:min-w-0">
+          <h2 className={section}>Library</h2>
+          <p className="mt-1 text-sm text-stone-500">Books your reader synced without a title or author are hidden. Show them to see their progress and last sync, then add the title and author so they match.</p>
+          <Card className="mt-3 divide-y divide-stone-100">
+            <UntitledBooks />
+            {isApp && <CatalogsLink />}
+          </Card>
 
-      <h2 className={section}>Appearance</h2>
-      <div className="mt-3">
-        <Appearance theme={theme} />
+          <h2 className={section}>Appearance</h2>
+          <div className="mt-3">
+            <Appearance theme={theme} />
+          </div>
+
+          <h2 className={section}>Reading</h2>
+          <p className="mt-1 text-sm text-stone-500">Books with no new progress for this long are marked Paused. Syncing a new position un-pauses them.</p>
+          <AutoPause session={session} />
+
+          <h2 id="reading-goals" className={section}>Reading goals</h2>
+          <ReadingGoals session={session} />
+        </div>
+        <div className="lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:min-w-0">
+          <h2 className={section}>Connected services</h2>
+          <p className="mt-1 text-sm text-stone-500">Your reading syncs out to these as you go.</p>
+          <Services session={session} />
+
+          <h2 className={section}>Account migration</h2>
+          <AccountTransfer session={session} />
+          <HistoryImport session={session} />
+        </div>
+        <div className="lg:col-start-1 lg:row-start-2 lg:min-w-0">
+          <h2 className={section}>Public profile</h2>
+          <p className="mt-1 text-sm text-stone-500">A page with your reading stats and shelves to link to or embed on a website, shown under your display name (or username if blank). Turning it off and on makes a new link.</p>
+          <Profile session={session} />
+
+          <h2 className={section}>Account</h2>
+          <Account session={session} onSession={onSession} onLogout={onLogout} />
+
+          <button
+            type="button"
+            onClick={onLogout}
+            className="mt-8 flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-surface text-sm font-semibold text-red-600 ring-1 ring-stone-950/10 active:bg-stone-50"
+          >
+            <LogOut className="size-4" /> Sign out
+          </button>
+        </div>
       </div>
-
-      <h2 className={section}>Reading</h2>
-      <p className="mt-1 text-sm text-stone-500">Books with no new progress for this long are marked Paused. Syncing a new position un-pauses them.</p>
-      <AutoPause session={session} />
-
-      <h2 id="reading-goals" className={section}>Reading goals</h2>
-      <ReadingGoals session={session} />
-
-      <h2 className={section}>Connected services</h2>
-      <p className="mt-1 text-sm text-stone-500">Your reading syncs out to these as you go.</p>
-      <Services session={session} />
-
-      <h2 className={section}>Account migration</h2>
-      <AccountTransfer session={session} />
-      <HistoryImport session={session} />
-
-      <h2 className={section}>Public profile</h2>
-      <p className="mt-1 text-sm text-stone-500">A page with your reading stats and shelves to link to or embed on a website, shown under your display name (or username if blank). Turning it off and on makes a new link.</p>
-      <Profile session={session} />
-
-      <h2 className={section}>Account</h2>
-      <Account session={session} onSession={onSession} onLogout={onLogout} />
-
-      <button
-        type="button"
-        onClick={onLogout}
-        className="mt-8 flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-surface text-sm font-semibold text-red-600 ring-1 ring-stone-950/10 active:bg-stone-50"
-      >
-        <LogOut className="size-4" /> Sign out
-      </button>
     </div>
   )
 }

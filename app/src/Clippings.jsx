@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { Copy, FileDown, MessageSquareQuote, Search } from 'lucide-react'
+import { ChevronDown, Copy, FileDown, MessageSquareQuote, Search } from 'lucide-react'
 import { api, cached, isApp } from './api.js'
 import { saveFile } from './shareCard.js'
 import { ClipMenu, ClipShare, DeleteClip, hold } from './Book.jsx'
@@ -28,13 +28,13 @@ function markdown(groups) {
 function Clip({ session, clip, book, onShare, onDelete, showBook, onMicroblog, sending }) {
   return (
     <article className={`group relative select-none [-webkit-touch-callout:none] ${showBook
-      ? 'border-b border-stone-200 pt-6 pb-4 md:pr-8'
+      ? 'border-b border-stone-200 pt-6 pb-4 md:px-8 md:pt-4'
       : 'border-b border-stone-200 py-5 md:pr-8'}`} {...hold(() => onDelete(clip))}>
       <ClipMenu onDelete={() => onDelete(clip)} />
-      <blockquote className="font-display text-lg/relaxed text-stone-800">{clip.text}</blockquote>
+      <blockquote className={`font-display text-lg/relaxed text-stone-800 ${showBook ? 'md:text-xl/relaxed' : ''}`}>{clip.text}</blockquote>
       {clip.note && <p className="mt-3 font-hand text-lg/6 text-brand-700">{clip.note}</p>}
       {showBook && (
-        <a href={`#/book/${book.document}`} className="mt-6 flex items-center gap-3 pr-5">
+        <a href={`#/book/${book.document}`} className="mt-6 flex items-center gap-3 pr-5 text-left md:justify-center md:pr-0">
           <Cover session={session} book={book} small className="w-8" />
           <div className="min-w-0">
             <p className="text-sm font-medium text-stone-900">{book.title || book.filename}</p>
@@ -42,7 +42,7 @@ function Clip({ session, clip, book, onShare, onDelete, showBook, onMicroblog, s
           </div>
         </a>
       )}
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+      <div className={`mt-2 flex flex-wrap items-center justify-between gap-3 ${showBook ? 'md:justify-center md:gap-6' : ''}`}>
         <button onClick={() => onShare(clip)} className="-ml-2 flex h-11 items-center gap-1.5 rounded-full px-2 text-sm font-medium text-brand-600 active:bg-stone-100">
           <ShareIcon className="size-4" /> Share
         </button>
@@ -151,16 +151,16 @@ export default function Clippings({ session, books }) {
       ) : (
         <>
           {daily && !q && !only && (
-            <section className="mt-6">
+            <section className="mt-6 md:mt-10 md:text-center">
               <p className="inline-block -rotate-1 font-hand text-xl text-brand-600">Clipping of the day</p>
-              <div className="mt-2 md:max-w-2xl">
+              <div className="mt-2 md:mx-auto md:max-w-3xl">
                 <Clip session={session} clip={daily} book={byDoc.get(daily.document)} onShare={setSharing} onDelete={setDeleting} showBook onMicroblog={microblog ? addToMicroblog : null} sending={sending} />
               </div>
             </section>
           )}
 
-          <div className="mt-6 flex items-center gap-3">
-            <div className="relative min-w-0 flex-1 md:max-w-sm">
+          <div className="mt-6 flex flex-wrap items-center gap-3 md:flex-nowrap">
+            <div className="relative min-w-0 flex-1">
               <Search className="pointer-events-none absolute top-3.5 left-4 size-5 text-stone-400" />
               <input
                 value={query}
@@ -171,7 +171,21 @@ export default function Clippings({ session, books }) {
                 className="h-12 w-full rounded-xl bg-surface pr-4 pl-12 text-base text-stone-900 ring-1 ring-stone-950/10 outline-none placeholder:text-stone-400 focus:ring-2 focus:ring-brand-500/60"
               />
             </div>
-            <details className="relative shrink-0">
+            <div className="relative order-last mt-1 min-w-0 basis-full md:order-none md:mt-0 md:w-48 md:basis-auto md:shrink-0 lg:w-64">
+              <select
+                aria-label="Filter clippings by book"
+                value={only ?? ''}
+                onChange={(e) => setOnly(e.target.value || null)}
+                className="h-12 w-full min-w-0 rounded-xl bg-surface px-3 text-base text-stone-900 ring-1 ring-stone-950/10 outline-none focus:ring-2 focus:ring-brand-500/60 md:appearance-none md:pr-10"
+              >
+                <option value="">All books ({all.length})</option>
+                {[...counts].map(([doc, n]) => (
+                  <option key={doc} value={doc}>{byDoc.get(doc).title || byDoc.get(doc).filename} ({n})</option>
+                ))}
+              </select>
+              <ChevronDown aria-hidden="true" className="pointer-events-none absolute top-3.5 right-3.5 hidden size-5 text-stone-400 md:block" />
+            </div>
+            <details className="relative shrink-0 md:order-last">
               <summary aria-label="Export clippings" title="Export clippings" className="grid size-11 cursor-pointer list-none place-items-center rounded-full text-stone-600 hover:bg-stone-100 active:bg-stone-200 [&::-webkit-details-marker]:hidden">
                 <FileDown aria-hidden="true" className="size-5" strokeWidth={1.75} />
               </summary>
@@ -187,18 +201,6 @@ export default function Clippings({ session, books }) {
               </div>
             </details>
           </div>
-
-          <select
-            aria-label="Filter clippings by book"
-            value={only ?? ''}
-            onChange={(e) => setOnly(e.target.value || null)}
-            className="mt-4 h-12 w-full min-w-0 rounded-xl bg-surface px-3 text-base text-stone-900 ring-1 ring-stone-950/10 outline-none focus:ring-2 focus:ring-brand-500/60 md:max-w-sm"
-          >
-            <option value="">All books ({all.length})</option>
-            {[...counts].map(([doc, n]) => (
-              <option key={doc} value={doc}>{byDoc.get(doc).title || byDoc.get(doc).filename} ({n})</option>
-            ))}
-          </select>
 
           {groups.length === 0 && (
             <EmptyState compact icon={Search} title="No clippings match">
