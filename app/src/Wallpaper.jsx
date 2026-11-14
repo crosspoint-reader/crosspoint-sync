@@ -319,8 +319,8 @@ export default function Wallpaper() {
   async function send() {
     setStatus({ busy: true, text: 'Sending to reader…' })
     const prefs = { ...loadDevicePrefs(), optimize: false, renameFromMetadata: false }
-    const file = new File([toBmp(result.current)], fileName(), { type: 'image/bmp' })
     try {
+      const file = new File([toBmp(renderWallpaper(img.el, s))], fileName(), { type: 'image/bmp' })
       const upload = async () => {
         const base = await reader(prefs)
         let folder = '/.sleep'
@@ -366,7 +366,7 @@ export default function Wallpaper() {
       <ImportedAssets kind="wallpaper" actionLabel="Edit sleep screen" onAction={open} removeAfter={false} onRemoved={entry => {
         if (pendingImport.current === entry.id) { imageRequest.current += 1; pendingImport.current = null }
         setImg(current => current?.importId === entry.id ? { ...current, importId: null } : current)
-      }} disabled={!!status?.busy} />
+      }} actionDisabled={!!status?.busy} removalDisabled={!!status?.busy} />
       <p className="max-w-xl text-sm/6 text-stone-500">
         Turn a photo into a sleep screen, dithered to your reader&apos;s four shades of grey.
       </p>

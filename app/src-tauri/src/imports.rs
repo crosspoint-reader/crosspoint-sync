@@ -35,26 +35,30 @@ pub async fn remove_import(app: AppHandle, id: String) -> Result<(), String> {
   import_store::remove(&queue_dir(&app)?, &id).map_err(|e| e.to_string())
 }
 
-// Open In is delivered by tao on both cold and warm launches. Copy while the
-// system's security-scoped grant is active, before the URL leaves native code.
+// Acquire and retain the source grant before returning to the event loop. Both
+// provider coordination (which can wait for iCloud) and disk I/O run on a worker.
 #[cfg(target_os = "ios")]
 pub fn open(app: &AppHandle, url: &url::Url) {
-  use objc2_foundation::{NSString, NSURL};
+  use crate::coordinated_import::ScopedSource;
   use tauri::Emitter;
   if url.scheme() != "file" { return }
-  let result = (|| -> Result<(), String> {
-    let native = NSURL::URLWithString(&NSString::from_str(url.as_str())).ok_or("Invalid file URL")?;
-    let access = unsafe { native.startAccessingSecurityScopedResource() };
-    let result = (|| {
-      let path = url.to_file_path().map_err(|_| "Invalid file URL")?;
-      let name = path.file_name().and_then(|s| s.to_str()).ok_or("Invalid file name")?;
-      if !import_store::valid_name(name) { return Err("Choose books, TTF/OTF/CPFONT fonts, or PNG/JPG/WebP/GIF/BMP sleep screens".into()); }
-      let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
-      import_store::add(&queue_dir(app)?, name, &bytes).map_err(|e| e.to_string())?;
-      Ok(())
-    })();
-    if access { unsafe { native.stopAccessingSecurityScopedResource() }; }
-    result
+  let prepare = (|| -> Result<_, String> {
+    let path = url.to_file_path().map_err(|_| "Invalid file URL")?;
+    let name = path.file_name().and_then(|s| s.to_str()).ok_or("Invalid file name")?.to_owned();
+    if !import_store::valid_name(&name) { return Err("Choose books, TTF/OTF/CPFONT fonts, or PNG/JPG/WebP/GIF/BMP sleep screens".into()); }
+    Ok((ScopedSource::acquire(url)?, name))
   })();
-  if let Err(error) = result { let _ = app.emit("import-error", error); }
+  match prepare {
+    Err(error) => { let _ = app.emit("import-error", error); }
+    Ok((source, name)) => {
+      let app = app.clone();
+      tauri::async_runtime::spawn_blocking(move || objc2::rc::autoreleasepool(|_| {
+        let result = queue_dir(&app).and_then(|root| source.import_into(&root, &name));
+        // source owns its security grant until this worker completes, including
+        // any failed coordination/read/publication path (released by Drop).
+        if let Err(error) = result { let _ = app.emit("import-error", error); }
+        drop(source); // release the scope inside the worker autorelease pool
+      }));
+    }
+  }
 }

@@ -20,7 +20,7 @@ export async function runImportedAsset(id, action, removeAfter = true) {
   } finally { for (const id of ids) active.delete(id); changed() }
 }
 
-export default function ImportedAssets({ kind, actionLabel, onAction, disabled = false, removeAfter = true, groupEntries, onRemoved }) {
+export default function ImportedAssets({ kind, actionLabel, onAction, actionDisabled = false, removalDisabled = false, removeAfter = true, groupEntries, onRemoved }) {
   const [entries, setEntries] = useState([])
   const [jobs, setJobs] = useState(new Set())
   useEffect(() => {
@@ -59,8 +59,8 @@ export default function ImportedAssets({ kind, actionLabel, onAction, disabled =
         {entries.map(entry => (
           <div key={entry.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
             <span className="min-w-0 flex-1 truncate text-sm font-medium text-stone-900">{entry.name}</span>
-            <button disabled={disabled || jobs.has(entry.id)} onClick={() => act(entry)} className="text-sm font-semibold text-brand-600 disabled:opacity-40">{jobs.has(entry.id) ? 'Processing…' : actionLabel}</button>
-            <button disabled={jobs.has(entry.id) || disabled} onClick={() => act(entry, true)} aria-label={`Remove ${entry.name}`} className="text-sm text-stone-500 disabled:opacity-40">Remove</button>
+            <button disabled={actionDisabled || jobs.has(entry.id)} onClick={() => act(entry)} className="text-sm font-semibold text-brand-600 disabled:opacity-40">{jobs.has(entry.id) ? 'Processing…' : actionLabel}</button>
+            <button disabled={jobs.has(entry.id) || removalDisabled} onClick={() => act(entry, true)} aria-label={`Remove ${entry.name}`} className="text-sm text-stone-500 disabled:opacity-40">Remove</button>
           </div>
         ))}
       </Card>

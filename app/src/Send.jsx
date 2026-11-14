@@ -444,19 +444,27 @@ export default function Send({ tab = '' }) {
 
   useEffect(() => {
     if (!isApp) return
-    let live = true, latest = 0
+    let live = true, latest = 0, retry, reported = false
+    const schedule = delay => {
+      clearTimeout(retry)
+      retry = setTimeout(load, delay)
+    }
     const load = async () => {
+      clearTimeout(retry)
       const request = ++latest
       const revision = queueRevision.current
       try {
         const all = await listImports()
+        if (!live || request !== latest) return
+        if (revision !== queueRevision.current) { schedule(0); return }
+        reported = false
         const entries = all.filter(isBook)
-        if (live && request === latest) setImportCounts(all.reduce((counts, entry) => {
+        setImportCounts(all.reduce((counts, entry) => {
           const kind = importKind(entry)
           if (kind) counts[kind] = (counts[kind] ?? 0) + 1
           return counts
         }, {}))
-        if (live && request === latest && revision === queueRevision.current) setFiles(cur => {
+        setFiles(cur => {
           if (revision !== queueRevision.current) return cur
           const byId = new Map(cur.map(item => [item.id, item]))
           return entries.map(entry => {
@@ -466,12 +474,15 @@ export default function Send({ tab = '' }) {
           })
         })
       } catch (error) {
-        if (live) notify({ error: true, title: "Couldn't load queued files", detail: String(error) })
+        if (!live || request !== latest) return
+        if (!reported) notify({ error: true, title: "Couldn't load queued files", detail: String(error) })
+        reported = true
+        schedule(1000)
       }
     }
     load()
     window.addEventListener('crosspoint-imports-changed', load)
-    return () => { live = false; window.removeEventListener('crosspoint-imports-changed', load) }
+    return () => { live = false; clearTimeout(retry); window.removeEventListener('crosspoint-imports-changed', load) }
   }, [])
 
   async function add(list) {
@@ -483,6 +494,7 @@ export default function Send({ tab = '' }) {
         const entry = await addImport(file)
         queueRevision.current += 1
         setFiles(cur => cur.some(item => item.id === entry.id) ? cur : [...cur, { id: entry.id, file: entry, state: 'queued' }])
+        window.dispatchEvent(new Event('crosspoint-imports-changed'))
       } catch (error) {
         notify({ error: true, title: `Couldn't queue ${file.name}`, detail: String(error) })
       }
@@ -494,6 +506,7 @@ export default function Send({ tab = '' }) {
       await removeImport(item.id)
       queueRevision.current += 1
       setFiles(cur => cur.filter(f => f.id !== item.id))
+      window.dispatchEvent(new Event('crosspoint-imports-changed'))
     } catch (error) {
       notify({ error: true, title: "Couldn't remove queued file", detail: String(error) })
     }

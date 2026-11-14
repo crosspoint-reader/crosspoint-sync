@@ -55,3 +55,11 @@ it('locks and consumes all related font faces only after the grouped upload succ
  await waitFor(()=>expect(screen.queryByText('Reader.ttf')).toBeNull())
  expect(entries.map(e=>e.id)).toEqual(['image','book'])
 })
+it('allows removing an offline font while its Send action is disabled',async()=>{
+ render(<ImportedAssets kind="fonts" actionLabel="Send" actionDisabled onAction={vi.fn()}/>)
+ expect((await screen.findByRole('button',{name:'Send'})).disabled).toBe(true)
+ const remove=screen.getByRole('button',{name:'Remove Reader.ttf'})
+ expect(remove.disabled).toBe(false)
+ fireEvent.click(remove)
+ await waitFor(()=>expect(screen.queryByText('Reader.ttf')).toBeNull())
+})

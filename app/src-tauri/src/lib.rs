@@ -1,6 +1,8 @@
 mod books;
 mod import_store;
 mod imports;
+#[cfg(any(target_os = "ios", all(test, target_os = "macos")))]
+mod coordinated_import;
 mod epub_name;
 mod mdns;
 mod opds;

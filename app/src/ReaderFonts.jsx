@@ -160,7 +160,7 @@ export default function ReaderFonts({ base, device }) {
 
   return (
     <section className="mt-6">
-      <ImportedAssets groupEntries={groupFontEntries} kind="fonts" actionLabel="Send" onAction={sendShared} disabled={!base || !!job} />
+      <ImportedAssets groupEntries={groupFontEntries} kind="fonts" actionLabel="Send" onAction={sendShared} actionDisabled={!base || !!job} />
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm/6 text-stone-500">Get fonts any time, then send them when your reader is connected.</p>
         <input

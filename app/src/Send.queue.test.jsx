@@ -74,3 +74,22 @@ it('does not resurrect a removed file when an older list response arrives late',
   await new Promise(done => setTimeout(done, 20))
   expect(screen.queryByText('Shared.epub')).toBeNull()
 })
+it('recovers from a failed queue refresh without another native change event',async()=>{
+ vi.spyOn(queue,'listImports').mockRejectedValueOnce(new Error('Temporary read failure'))
+ render(<Send/>)
+ await waitFor(()=>expect(screen.getAllByText('Shared.epub')).toHaveLength(2),{timeout:3000})
+})
+it('reloads a stale snapshot so another source incoming during removal is still shown',async()=>{
+ store.entries=store.entries.slice(0,1)
+ render(<Send/>)
+ await screen.findByText('Shared.epub')
+ let resolve
+ vi.spyOn(queue,'listImports').mockImplementationOnce(()=>new Promise(done=>{resolve=done}))
+ window.dispatchEvent(new Event('crosspoint-imports-changed'))
+ store.entries.push({id:'new',name:'Incoming.epub',size:4})
+ fireEvent.click(screen.getByRole('button',{name:'Remove Shared.epub'}))
+ await waitFor(()=>expect(screen.queryByText('Shared.epub')).toBeNull())
+ resolve([{id:'new',name:'Incoming.epub',size:4}])
+ await screen.findByText('Incoming.epub')
+ expect(screen.queryByText('Shared.epub')).toBeNull()
+})
