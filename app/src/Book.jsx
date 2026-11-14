@@ -207,34 +207,41 @@ function Clippings({ session, book, revision = 0 }) {
       </EmptyState>
     )
   }
-  let chapter = null
+  // Consecutive clippings under the same chapter share a heading.
+  const chapters = []
+  for (const c of items) {
+    const last = chapters.at(-1)
+    if (last && (!c.chapter || c.chapter === last.chapter)) last.clips.push(c)
+    else chapters.push({ chapter: c.chapter, clips: [c] })
+  }
   return (
     <div className="space-y-3">
-      {items.map((c) => {
-        const heading = c.chapter && c.chapter !== chapter ? (chapter = c.chapter) : null
-        return (
-          <div key={c.id}>
-            {heading && <p className="mt-5 mb-2 text-sm font-medium text-stone-500">{heading}</p>}
-            <article className="group relative border-b border-stone-200 py-5 md:pr-8 select-none [-webkit-touch-callout:none]" {...hold(() => setDeleting(c))}>
-              <ClipMenu onDelete={() => setDeleting(c)} />
-              <blockquote className="font-display text-lg/relaxed text-stone-800">
-                {c.text}
-              </blockquote>
-              {c.note && <p className="mt-3 font-hand text-lg/6 text-brand-700">{c.note}</p>}
-              <div className="mt-2 flex items-center justify-between">
-                <button
-                  onClick={() => setSharing(c)}
-                  className="-ml-2 flex h-9 items-center gap-1.5 rounded-full px-2 text-sm font-medium text-brand-600 active:bg-stone-100"
-                  aria-label="Share clipping"
-                >
-                  <ShareIcon className="size-4" /> Share
-                </button>
-                <p className="text-xs text-stone-500">{date(c.created_at)}</p>
-              </div>
-            </article>
+      {chapters.map(({ chapter, clips }) => (
+        <div key={clips[0].id}>
+          {chapter && <p className="mt-5 mb-2 text-sm font-medium text-stone-500">{chapter}</p>}
+          <div className="space-y-3 md:grid md:grid-cols-2 md:gap-x-8 md:space-y-0">
+            {clips.map((c) => (
+              <article key={c.id} className="group relative border-b border-stone-200 py-5 md:pr-8 select-none [-webkit-touch-callout:none]" {...hold(() => setDeleting(c))}>
+                <ClipMenu onDelete={() => setDeleting(c)} />
+                <blockquote className="font-display text-lg/relaxed text-stone-800">
+                  {c.text}
+                </blockquote>
+                {c.note && <p className="mt-3 font-hand text-lg/6 text-brand-700">{c.note}</p>}
+                <div className="mt-2 flex items-center justify-between">
+                  <button
+                    onClick={() => setSharing(c)}
+                    className="-ml-2 flex h-9 items-center gap-1.5 rounded-full px-2 text-sm font-medium text-brand-600 active:bg-stone-100"
+                    aria-label="Share clipping"
+                  >
+                    <ShareIcon className="size-4" /> Share
+                  </button>
+                  <p className="text-xs text-stone-500">{date(c.created_at)}</p>
+                </div>
+              </article>
+            ))}
           </div>
-        )
-      })}
+        </div>
+      ))}
       {sharing && <ClipShare session={session} book={book} clip={sharing} onClose={() => setSharing(null)} />}
       {deleting && (
         <DeleteClip
