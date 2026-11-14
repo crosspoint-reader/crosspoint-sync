@@ -44,6 +44,23 @@ describe('tracker CSV formats', () => {
     expect(t.skipped).toBe(1);
   });
 
+  it('skips reversed StoryGraph periods without losing valid rereads or other books', () => {
+    const csv = Buffer.from('Title,Authors,ISBN/UID,Read Status,Dates Read\n' +
+      'Reread,Author,one,read,"2025/09/28-2025/07/15, 2024/07/13-2024/07/13, 2024/01/08-2024/01/09"\n' +
+      'Only invalid,Author,two,read,2025/09/28-2025/07/15\n' +
+      'Valid book,Author,three,read,2025/01/01-2025/01/02\n');
+    const tracker = readTrackerCsv(csv);
+    expect(tracker.books).toHaveLength(3);
+    expect(tracker.books[0]).toMatchObject({ start_date: '2024-07-13', finished_date: '2024-07-13' });
+    expect(tracker.books[1]).toMatchObject({ status: 'finished', start_date: null, finished_date: null });
+    expect(tracker.books[2]).toMatchObject({ start_date: '2025-01-01', finished_date: '2025-01-02' });
+    expect(tracker.warnings).toEqual(expect.arrayContaining([
+      expect.stringContaining('CSV row 2: skipped reading period 2025/09/28-2025/07/15'),
+      expect.stringContaining('CSV row 3: skipped reading period'),
+    ]));
+    expect(tracker.skipped).toBe(0);
+  });
+
   it.each(['"unterminated', 'a"b,c', '"a"x,b'])('rejects malformed CSV %s', text => {
     expect(() => parseCsv(text)).toThrow();
   });
@@ -79,6 +96,22 @@ describe('tracker import API', () => {
     const books = await (await s.app.request('/api/v1/progress?include_history=1', { headers: s.headers })).json();
     expect(books.items).toHaveLength(3);
     expect(books.items.find((b: any) => b.document === 'goodreads.101')).toMatchObject({ user_rating: 4, isbn: '9780306406157', progress: null, history_only: true });
+  });
+
+  it('previews and imports valid rereads when another period is reversed', async () => {
+    const s = await setup();
+    const csv = Buffer.from('Title,Authors,ISBN/UID,Read Status,Dates Read\n' +
+      'Reread,Author,one,read,"2025/09/28-2025/07/15, 2024/07/13-2024/07/13, 2024/01/08-2024/01/09"\n');
+    const response = await s.upload(csv);
+    expect(response.status).toBe(200);
+    const preview = await response.json();
+    expect(preview.warnings).toEqual(expect.arrayContaining([expect.stringContaining('skipped reading period')]));
+    expect(preview.books[0]).toMatchObject({ start_date: '2024-07-13', finished_date: '2024-07-13' });
+    expect((await s.upload(csv, selections(preview))).status).toBe(200);
+    expect(s.db.prepare('SELECT start_date, finished_date FROM documents').get()).toEqual({
+      start_date: Date.parse('2024-07-13T00:00:00Z') / 1000,
+      finished_date: Date.parse('2024-07-13T00:00:00Z') / 1000,
+    });
   });
 
   it('requires title-match review, keeps real progress and personal ratings separate, and remembers the source match', async () => {

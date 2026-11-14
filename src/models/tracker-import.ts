@@ -90,12 +90,15 @@ export function readTrackerCsv(bytes: Buffer): Tracker {
     let start_date: string | null = null, finished_date: string | null = null;
     if (source === 'Goodreads') finished_date = calendar(r['Date Read'] || '', 'Date Read');
     else {
-      const periods = (r['Dates Read'] || '').split(',').map(s => s.trim()).filter(Boolean).map(period => {
+      const periods = (r['Dates Read'] || '').split(',').map(s => s.trim()).filter(Boolean).flatMap(period => {
         const match = /^(\d{4}\/\d{2}\/\d{2})?\s*-\s*(\d{4}\/\d{2}\/\d{2})?$/.exec(period);
         if (!match) fail(`Unsupported Dates Read on CSV row ${index + 2}.`);
         const start = calendar(match![1] || '', 'start date'), finish = calendar(match![2] || '', 'finish date');
-        if (start && finish && start > finish) fail(`Start date follows finish date on CSV row ${index + 2}.`);
-        return { start, finish };
+        if (start && finish && start > finish) {
+          warnings.add(`CSV row ${index + 2}: skipped reading period ${period} because its start date follows its finish date.`);
+          return [];
+        }
+        return [{ start, finish }];
       });
       periods.sort((a, b) => (b.finish || b.start || '').localeCompare(a.finish || a.start || ''));
       const latest = status === 'reading' ? periods.find(p => !p.finish) : periods[0];
