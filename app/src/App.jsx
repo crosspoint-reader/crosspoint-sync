@@ -355,7 +355,7 @@ function SettingsLink() {
 // Runs to the bottom and left screen edges; padding keeps its contents out of the insets.
 function Sidebar({ route, session, nav = NAV }) {
   return (
-    <aside className="fixed top-[env(safe-area-inset-top)] bottom-0 left-0 hidden w-[calc(15rem+env(safe-area-inset-left))] flex-col border-r border-stone-200 bg-surface/60 pt-6 pr-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pl-[calc(1rem+env(safe-area-inset-left))] md:flex lg:w-[calc(16rem+env(safe-area-inset-left))]">
+    <aside className="app-sidebar fixed top-[env(safe-area-inset-top)] bottom-0 left-0 hidden w-[calc(15rem+env(safe-area-inset-left))] flex-col border-r border-stone-200 bg-surface/60 pt-6 pr-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pl-[calc(1rem+env(safe-area-inset-left))] md:flex lg:w-[calc(16rem+env(safe-area-inset-left))]">
       {/* 44px band at the top, matching each page's first row (back button / title). */}
       <div className="flex h-11 items-center gap-2.5 px-2">
         <img src={`${import.meta.env.BASE_URL}logo.png`} alt="" className="size-8 rounded-lg" />
