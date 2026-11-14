@@ -24,6 +24,7 @@ import { parseReadingSession } from '../../models/reading-sessions.js';
 import { combineReadingStreak } from '../../models/reading-streak.js';
 import { importBookorbitStats } from '../../connectors/bookorbit-stats.js';
 import { seedStatsCounters, storeStatsDays, storeStatsSnapshot } from '../../models/stats-counters.js';
+import { fanOutBookStats } from '../../connectors/fanout.js';
 
 const MAX_BOOK_BATCH = 20;
 // Books per GET /stats/activity/books request.
@@ -239,6 +240,8 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
         storeStatsDays(db, user.id, deviceId, p.document, p.daily, now);
       }
     });
+    const device = typeof o.device === 'string' ? o.device.slice(0, 128) : '';
+    for (const p of parsed) fanOutBookStats(db, user.id, p.document, deviceId, device, now);
     return c.json({ until: now, accepted: parsed.length, accepted_daily: parsed.reduce((n, p) => n + p.daily.length, 0), counter_ids: 1 });
   });
 

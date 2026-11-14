@@ -6,6 +6,7 @@ import { activeConnectorIds, carriesFor, documentMeta, getMatch } from './store.
 import { extractTitleAuthor } from './matching.js';
 import { nowSeconds } from '../models/sync.js';
 import type { Connector, OutboundEvent } from './types.js';
+import type { BookStatsSnapshot } from '../models/stats.js';
 import { scheduleMicroblogClippings } from './microblog-clippings.js';
 
 /**
@@ -135,6 +136,34 @@ export function fanOutHighlight(
 ): void {
   // Per-clipping coalesce key so distinct highlights on one book each queue.
   fanOut(db, userId, { kind: 'highlight', document, timestamp, highlight: h }, `highlight:${clippingId}`, exceptConnectorId);
+}
+
+/**
+ * One source's running totals for a book, as stored: every counter lifetime of that
+ * device combined, so a connector sees the same total a reader sees. Sources are
+ * devices (CrossInk) and the KOReader history import. Call after the write commits.
+ */
+export function fanOutBookStats(
+  db: DB,
+  userId: number,
+  document: string,
+  deviceId: string,
+  device: string,
+  timestamp: number,
+  history = false
+): void {
+  const row = db
+    .prepare('SELECT payload FROM stats_device_book WHERE user_id = ? AND device_id = ? AND document = ?')
+    .get(userId, deviceId, document) as { payload: string } | undefined;
+  if (!row) return;
+  let book: BookStatsSnapshot;
+  try {
+    book = JSON.parse(row.payload) as BookStatsSnapshot;
+  } catch {
+    return;
+  }
+  // Totals replace the same source's earlier snapshot, but two sources on one book must not overwrite each other.
+  fanOut(db, userId, { kind: 'stats', document, timestamp, stats: { deviceId, device, book, history } }, `stats:${deviceId}`);
 }
 
 /**
