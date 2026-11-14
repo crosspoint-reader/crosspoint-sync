@@ -292,7 +292,7 @@ const LANDING = (basePath: string) => shell(basePath,
        <div class="desc">Keep your place in sync, both ways, with your own BookOrbit library. Import reading time and session history for matched books. Clippings show up as highlights, and finished books are marked Read.</div></div></div>
        <span class="pill warn">beta</span></div>
      <div class="svc"><div class="lead"><img class="svc-icon" src="${basePath}/icons/seekquel.png" alt="" width="34" height="34"><div><div class="name">Seekquel</div>
-       <div class="desc">Log your reading in Seekquel, a book tracker: where you are in each book, the books you finish, and your highlights.</div></div></div>
+       <div class="desc">Log your reading in Seekquel, a book tracker: where you are in each book, the books you finish, your reading time, and your highlights.</div></div></div>
        <span class="pill warn">beta</span></div>
      <div class="svc"><div class="lead"><img class="svc-icon" src="${basePath}/icons/readest.png" alt="" width="34" height="34"><div><div class="name">Readest</div>
        <div class="desc">Keep your place in sync, both ways, with the Readest reading app. Clippings show up as highlights.</div></div></div>
@@ -625,7 +625,7 @@ const HINTS = {
   audiobookshelf: 'Sync your reading position to the matching audiobook on your Audiobookshelf server. Create an API key in Audiobookshelf under Settings, Users, API Keys.',
   jellyfin: 'Sync reading progress with books in your Jellyfin library. Requires Jellyfin 12.0 or newer. Sign in with your Jellyfin username and password.',
   bookorbit: 'Sync reading progress both ways with your BookOrbit server. Import reading time and session history for matched books, including Kindle and other BookOrbit reader history alongside your device stats. Repeated sessions are counted once. Finishing a book marks it Read, and clippings appear as highlights. Connect with a BookOrbit API key.',
-  seekquel: 'Log your reading in your Seekquel library: where you are in each book, the books you finish, and your highlights. You will approve the request in the Seekquel app.',
+  seekquel: 'Log your reading in your Seekquel library: where you are in each book, the books you finish, your reading time, and your highlights. You will approve the request in the Seekquel app.',
   readest: 'Sync reading progress both ways with Readest. Clippings become Readest highlights for books in your Readest cloud library. Use this instead of the Readest plugin\u2019s progress sync, which moves your reader off CrossPoint Sync and stops clipping sync. You will approve the request on readest.com.'
 };
 

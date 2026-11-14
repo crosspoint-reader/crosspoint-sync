@@ -5,8 +5,12 @@ import type { AppEnv } from '../../auth/middleware.js';
 import { AccountImportError } from '../../models/account-data.js';
 import { HISTORY_DEVICE, importHistory, prepareHistory, type History } from '../../models/koinsight-import.js';
 import { resolveDocument, statsDocuments } from '../../models/merge.js';
+import { fanOutBookStats } from '../../connectors/fanout.js';
 
 const MAX_PAGES = 20_000;
+const HISTORY_LABEL = 'KOReader';
+// Page records older than this are history being filled in, not reading to report as new.
+const RECENT_READING_SECONDS = 2 * 86400;
 
 export function koreaderRoutes(db: DB): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -31,6 +35,8 @@ export function koreaderRoutes(db: DB): Hono<AppEnv> {
     const userId = c.get('user').id;
     try {
       let records = 0;
+      let synced = '';
+      let history = false;
       withTransaction(db, () => {
         const document = resolveDocument(db, userId, book.md5);
         const ids = statsDocuments(db, userId, document);
@@ -41,6 +47,9 @@ export function koreaderRoutes(db: DB): Hono<AppEnv> {
         if (legacy) {
           throw new AccountImportError('Re-import the original KOReader/KOInsight history file in app Settings before syncing this book. Its older import has no source records to reconcile safely.', 409);
         }
+        const known = new Map<string, number>(stored.map(p => [`${p.page}:${p.total_pages}:${p.start_time}`, Number(p.duration)]));
+        history = pages.some(p => p.start_time < now - RECENT_READING_SECONDS &&
+          (known.get(`${p.page}:${p.total_pages}:${p.start_time}`) ?? -1) < p.duration);
         const unique = new Map<string, History['pages'][number]>();
         for (const p of [...stored, ...pages]) {
           const key = `${p.page}:${p.total_pages}:${p.start_time}`;
@@ -59,7 +68,9 @@ export function koreaderRoutes(db: DB): Hono<AppEnv> {
         b.existing_history = false;
         importHistory(db, userId, prepared, { [document]: b.status === 'finished' ? b.finished_date : null });
         records = unique.size;
+        synced = document;
       });
+      fanOutBookStats(db, userId, synced, HISTORY_DEVICE, HISTORY_LABEL, now, history);
       return c.json({ version: 1, document: book.md5, accepted: pages.length, records });
     } catch (error) {
       if (error instanceof AccountImportError) return c.json({ message: error.message }, error.status);

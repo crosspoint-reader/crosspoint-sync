@@ -1,4 +1,5 @@
 import type { DB } from '../db/db.js';
+import type { BookStatsSnapshot } from '../models/stats.js';
 
 /**
  * Connector framework types. A connector adapts crosspoint-sync's canonical
@@ -15,8 +16,8 @@ export interface ConnectorContext {
   document?: string;
 }
 
-/** What data types a connector carries (progress/shelves vs highlights). */
-export type DataKind = 'progress' | 'finished' | 'highlight';
+/** What data types a connector carries (progress/shelves vs highlights vs reading stats). */
+export type DataKind = 'progress' | 'finished' | 'highlight' | 'stats';
 
 /** A per-account setting on a connector, stored in connector_accounts.options. */
 export interface ConnectorOption {
@@ -145,6 +146,14 @@ export interface OutboundEvent {
     startOffset?: number | null;
     endOffset?: number | null;
     chapter?: string | null;
+  };
+  /** For stats events: one device's running totals for this book, replacing its previous snapshot. */
+  stats?: {
+    deviceId: string;
+    device: string;
+    book: BookStatsSnapshot;
+    /** The change is old history (an import, a backfill), not reading done now. */
+    history?: boolean;
   };
 }
 

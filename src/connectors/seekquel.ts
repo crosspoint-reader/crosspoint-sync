@@ -49,6 +49,12 @@ import type {
  * back below the end. Every sync of a book at 100% fans out as 'finished', and
  * re-sending Read each time would undo a re-read the reader started in Seekquel
  * while the device still shows the old copy at the end.
+ *
+ * Reading time comes from a device that reports per-book totals (CrossInk). Each
+ * total replaces that device's last one and Seekquel credits what it adds, so a
+ * resend is harmless. KOReader history synced by the plugin is one more source;
+ * records older than two days are sent as history, which Seekquel never credits. A Seekquel that has the route closed answers 404, which is
+ * final and not an error: nothing is dead-lettered for it.
  */
 
 const DEFAULT_BASE = 'https://api.seekquel.app';
@@ -60,6 +66,8 @@ const MAX_XPATH = 120;
 const NOT_LINKED = 409;
 const BOOK_PLACE_PROGRESS = 'seekquel-linked-copy';
 const MS_PER_SECOND = 1000;
+const NOT_FOUND = 404;
+const MAX_TOTAL = 2147483647;
 const CONNECTOR_ID = 'seekquel';
 const NOT_LINKED_ERROR = 'not linked to a book in Seekquel yet; choose the book in Seekquel, then Sync now';
 
@@ -243,6 +251,45 @@ async function pushHighlight(c: SeekquelCred, m: Match, ev: OutboundEvent, http:
   return res.status >= 200 && res.status < 300 ? { ok: true } : failure(res.status, 'highlight');
 }
 
+async function pushStats(c: SeekquelCred, m: Match, ev: OutboundEvent, http: HttpTransport): Promise<PushResult> {
+  const stats = ev.stats;
+  if (!stats) return { ok: false, retryable: false, error: 'empty stats' };
+  const res = await http(`${c.server}/api/v1/stats/books`, {
+    method: 'PUT',
+    headers: headers(c),
+    body: JSON.stringify({
+      device_id: stats.deviceId,
+      device: stats.device,
+      // When we took the totals, so a delivery we had to retry is not read as time that never passed.
+      recorded_at: ev.timestamp,
+      // History is stored as the new starting point and never lands on today.
+      baseline: stats.history === true,
+      items: [{
+        document: m.externalId,
+        ...stats.book,
+        seconds: Math.min(stats.book.seconds, MAX_TOTAL),
+        pages: Math.min(stats.book.pages, MAX_TOTAL),
+      }],
+    }),
+  });
+  if (res.status === NOT_FOUND) return { ok: true };
+  return res.status >= 200 && res.status < 300 ? { ok: true } : failure(res.status, 'stats');
+}
+
+/**
+ * Unlinked or replaced: hand the key back so it stops working in Seekquel and no
+ * longer counts against the reader's connected devices. A key Seekquel already
+ * refuses is the goal; a Seekquel without the route answers 404 or 405.
+ */
+async function revoke(cred: Credential, http: HttpTransport): Promise<void> {
+  const c = parseCred(cred);
+  if (!c) return;
+  const res = await http(`${c.server}/device`, { method: 'DELETE', headers: headers(c) });
+  if (res.status >= 300 && ![401, 404, 405].includes(res.status)) {
+    throw new Error(`Seekquel did not disconnect the key (${res.status})`);
+  }
+}
+
 async function push(
   cred: Credential,
   m: Match,
@@ -254,6 +301,7 @@ async function push(
   if (!c) return { ok: false, retryable: false, needsReauth: true, error: 'bad credential' };
   try {
     if (ev.kind === 'highlight') return await pushHighlight(c, m, ev, http);
+    if (ev.kind === 'stats') return await pushStats(c, m, ev, http);
     const progress = await pushProgress(c, m, ev, http, ctx);
     if (!progress.ok) return progress;
     if (ev.kind !== 'finished') {
@@ -344,7 +392,7 @@ export const seekquelConnector: Connector = {
   displayName: 'Seekquel',
   tier: 1,
   capabilities: { read: true, write: true },
-  carries: ['progress', 'finished', 'highlight'],
+  carries: ['progress', 'finished', 'highlight', 'stats'],
   credentialKind: 'device_code',
   beta: true,
   // Keyed by our document hash: Seekquel matches the file itself, so always send.
@@ -355,4 +403,5 @@ export const seekquelConnector: Connector = {
   pullProgress,
   beginLink,
   pollLink,
+  revoke,
 };
