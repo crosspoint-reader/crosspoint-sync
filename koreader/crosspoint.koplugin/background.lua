@@ -1,4 +1,5 @@
 local ffiUtil = require("ffi/util")
+local DataStorage = require("datastorage")
 local UIManager = require("ui/uimanager")
 local JSON = require("json")
 local ffi = require("ffi")
@@ -19,9 +20,16 @@ end
 
 function Background.start(work, complete)
     if active then return false, "A CrossPoint sync is already running." end
-    -- os.tmpname reserves a private file; only the parent writes account settings.
-    local reserved, path = pcall(os.tmpname)
-    if not reserved then return false, "Could not create a sync result file." end
+    -- LuaJIT's os.tmpname() uses /tmp, which Android applications cannot write.
+    -- Reserve a private result file in KOReader's writable settings directory.
+    local template = DataStorage:getSettingsDir() .. "/crosspoint-result-XXXXXX"
+    local name = ffi.new("char[?]", #template + 1, template)
+    local reserved, fd = pcall(function() return ffi.C.mkstemps(name, 0) end)
+    if not reserved or not fd or fd < 0 then
+        return false, "Could not create a sync result file in KOReader's settings directory."
+    end
+    ffi.C.close(fd)
+    local path = ffi.string(name)
     local spawned, pid, err = pcall(ffiUtil.runInSubProcess, function()
         local function checkpoint(result)
             local encoded = JSON.encode(result)
