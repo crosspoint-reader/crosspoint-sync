@@ -101,6 +101,10 @@ export function koreaderRoutes(db: DB): Hono<AppEnv> {
             at: recentSeconds > 0 ? recentSince : now,
           };
         }
+      } else if (!prior && (recentSeconds > 0 || recentPages > 0)) {
+        // A book's first total made only of recent records is reading done now: it starts from
+        // zero, or the service would take the whole of it as its starting point and credit none.
+        baseline = { seconds: 0, pages: 0, at: recentSince };
       }
       fanOutBookStats(db, userId, synced, HISTORY_DEVICE, HISTORY_LABEL, now, baseline, prior);
       return c.json({ version: 1, document: book.md5, accepted: pages.length, records });

@@ -476,6 +476,27 @@ describe('seekquel connector (end to end)', () => {
     expect(latest).toMatchObject({ baseline: false, items: [{ document: DOC, seconds: 195, pages: 3 }] });
   });
 
+  it('credits the first session of a book KOReader has only just started', async () => {
+    const fake = fakeTransport();
+    const { app, db, headers } = await linkSeekquel(fake);
+    const recent = Math.floor(Date.now() / 1000) - 900;
+    const res = await app.request('/api/v1/stats/koreader', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        version: 1, book: { md5: DOC, title: 'Piranesi', authors: 'Susanna Clarke' }, timezone: 'Europe/London',
+        pages: [{ page: 1, total_pages: 100, start_time: recent, duration: 120 }, { page: 2, total_pages: 100, start_time: recent + 130, duration: 90 }],
+      }),
+    });
+    expect(res.status).toBe(200);
+    await drainQueue(db, fake.transport, 10);
+
+    const sent = fake.calls.filter((c) => c.url.endsWith('/api/v1/stats/books')).map(body);
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).toMatchObject({ baseline: true, recorded_at: recent, items: [{ document: DOC, seconds: 0, pages: 0 }] });
+    expect(sent[1]).toMatchObject({ baseline: false, items: [{ document: DOC, seconds: 210, pages: 2 }] });
+  });
+
   it('sends an upload that mixes old and recent records as the history first, then the recent reading', async () => {
     const fake = fakeTransport();
     const { app, db, headers } = await linkSeekquel(fake);
