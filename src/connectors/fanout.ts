@@ -6,7 +6,9 @@ import { activeConnectorIds, carriesFor, documentMeta, getMatch } from './store.
 import { extractTitleAuthor } from './matching.js';
 import { nowSeconds } from '../models/sync.js';
 import type { Connector, OutboundEvent } from './types.js';
-import type { BookStatsSnapshot } from '../models/stats.js';
+import { combineBookStats, type BookStatsSnapshot } from '../models/stats.js';
+import { resolveDocument, statsDocuments } from '../models/merge.js';
+import { HISTORY_DEVICE } from '../models/koinsight-import.js';
 import { scheduleMicroblogClippings } from './microblog-clippings.js';
 
 /**
@@ -37,7 +39,8 @@ function fanOut(
   userId: number,
   ev: OutboundEvent,
   coalesceKey?: string,
-  exceptConnectorId?: string
+  exceptConnectorId?: string,
+  statsBefore?: StatsTotals | null
 ): void {
   if (!secretsEnabled()) return;
   try {
@@ -47,7 +50,7 @@ function fanOut(
       const conn = getConnector(connectorId);
       if (!conn || !conn.capabilities.write || !carriesFor(db, userId, conn, ev.kind)) continue;
       if (!isAttemptable(db, userId, conn, ev.document)) continue; // no metadata/match: skip
-      enqueue(db, userId, connectorId, ev, coalesceKey);
+      enqueue(db, userId, connectorId, coalesceKey ? withBaseline(db, userId, connectorId, ev, coalesceKey, statsBefore) : ev, coalesceKey);
     }
   } catch (err) {
     console.error(
@@ -138,10 +141,106 @@ export function fanOutHighlight(
   fanOut(db, userId, { kind: 'highlight', document, timestamp, highlight: h }, `highlight:${clippingId}`, exceptConnectorId);
 }
 
+export type StatsBaseline = NonNullable<NonNullable<OutboundEvent['stats']>['baseline']>;
+
 /**
- * One source's running totals for a book, as stored: every counter lifetime of that
- * device combined, so a connector sees the same total a reader sees. Sources are
- * devices (CrossInk) and the KOReader history import. Call after the write commits.
+ * One source's running totals for a book as a reader sees them: every counter lifetime
+ * of that device, across the book's stats-merged copies, under the canonical document
+ * (the id progress is sent under). Sources are devices and the KOReader history import.
+ */
+export function bookStatsFor(
+  db: DB,
+  userId: number,
+  document: string,
+  deviceId: string
+): { document: string; book: BookStatsSnapshot } | null {
+  const canonical = resolveDocument(db, userId, document);
+  const documents = statsDocuments(db, userId, canonical);
+  const rows = db
+    .prepare(
+      `SELECT payload FROM stats_device_book
+       WHERE user_id = ? AND device_id = ? AND document IN (${documents.map(() => '?').join(',')})
+       ORDER BY updated_at`
+    )
+    .all(userId, deviceId, ...documents) as { payload: string }[];
+  const snapshots: BookStatsSnapshot[] = [];
+  for (const r of rows) {
+    try {
+      snapshots.push(JSON.parse(r.payload) as BookStatsSnapshot);
+    } catch {
+      // A row that does not parse is left out; the rest still add up.
+    }
+  }
+  if (!snapshots.length) return null;
+  const book = {
+    ...snapshots[snapshots.length - 1],
+    ...combineBookStats(snapshots),
+    pace_n: snapshots.reduce((n, s) => n + s.pace_n, 0),
+  };
+  return { document: canonical, book };
+}
+
+const statsKey = (deviceId: string) => `stats:${deviceId}`;
+
+type StatsTotals = { seconds: number; pages: number };
+
+/**
+ * Settles how much of a stats event is history for one connector.
+ *
+ * A stats event replaces the pending one for its source, so history that is still
+ * waiting (or was dead-lettered) must outlive the replacement: otherwise the newer
+ * total, which contains it, would be delivered as reading done now.
+ *
+ * A source this connector has never been sent, but which already had a total here
+ * (it was read on before the link), starts from that total, so what this upload adds
+ * is credited instead of being used up as the starting point.
+ */
+function withBaseline(
+  db: DB,
+  userId: number,
+  connectorId: string,
+  ev: OutboundEvent,
+  key: string,
+  before?: StatsTotals | null
+): OutboundEvent {
+  if (!ev.stats) return ev;
+  const row = db
+    .prepare(
+      `SELECT payload, status FROM connector_queue
+       WHERE user_id = ? AND connector_id = ? AND document = ? AND kind = ?`
+    )
+    .get(userId, connectorId, ev.document, key) as { payload: string; status: string } | undefined;
+  if (!row) {
+    if (ev.stats.baseline || !before || before.seconds <= 0 || before.seconds > ev.stats.book.seconds) return ev;
+    const added = ev.stats.book.seconds - before.seconds;
+    return {
+      ...ev,
+      stats: {
+        ...ev.stats,
+        baseline: { seconds: before.seconds, pages: Math.min(before.pages, ev.stats.book.pages), at: ev.timestamp - added },
+      },
+    };
+  }
+  if (row.status === 'done') return ev;
+  let waiting: StatsBaseline | undefined;
+  try {
+    waiting = (JSON.parse(row.payload) as OutboundEvent).stats?.baseline;
+  } catch {
+    waiting = undefined;
+  }
+  if (!waiting) return ev;
+  const mine = ev.stats.baseline;
+  const baseline: StatsBaseline = {
+    seconds: Math.min(Math.max(waiting.seconds, mine?.seconds ?? 0), ev.stats.book.seconds),
+    pages: Math.min(Math.max(waiting.pages, mine?.pages ?? 0), ev.stats.book.pages),
+    at: Math.min(waiting.at, mine?.at ?? ev.timestamp),
+  };
+  return { ...ev, stats: { ...ev.stats, baseline } };
+}
+
+/**
+ * Send one source's current total for a book to every connector that carries stats.
+ * Call after the write commits. `baseline` marks how much of the total is history.
  */
 export function fanOutBookStats(
   db: DB,
@@ -150,20 +249,20 @@ export function fanOutBookStats(
   deviceId: string,
   device: string,
   timestamp: number,
-  history = false
+  baseline?: StatsBaseline,
+  before?: StatsTotals | null
 ): void {
-  const row = db
-    .prepare('SELECT payload FROM stats_device_book WHERE user_id = ? AND device_id = ? AND document = ?')
-    .get(userId, deviceId, document) as { payload: string } | undefined;
-  if (!row) return;
-  let book: BookStatsSnapshot;
-  try {
-    book = JSON.parse(row.payload) as BookStatsSnapshot;
-  } catch {
-    return;
-  }
+  const totals = bookStatsFor(db, userId, document, deviceId);
+  if (!totals) return;
   // Totals replace the same source's earlier snapshot, but two sources on one book must not overwrite each other.
-  fanOut(db, userId, { kind: 'stats', document, timestamp, stats: { deviceId, device, book, history } }, `stats:${deviceId}`);
+  fanOut(
+    db,
+    userId,
+    { kind: 'stats', document: totals.document, timestamp, stats: { deviceId, device, book: totals.book, baseline } },
+    statsKey(deviceId),
+    undefined,
+    before
+  );
 }
 
 /**
@@ -224,6 +323,55 @@ export function backfillConnector(db: DB, userId: number, connectorId: string, d
         position,
         timestamp: r.updated_at,
       });
+      queued++;
+    }
+  }
+
+  if (carriesFor(db, userId, conn, 'stats')) {
+    // Totals from before the link are history: sent once as the starting point, so the
+    // next upload is credited for what it adds instead of being used up as the baseline.
+    const sources = db
+      .prepare('SELECT DISTINCT device_id, document FROM stats_device_book WHERE user_id = ?')
+      .all(userId) as { device_id: string; document: string }[];
+    const labels = new Map(
+      (db.prepare('SELECT device_id, device FROM stats_device_global WHERE user_id = ?').all(userId) as {
+        device_id: string;
+        device: string;
+      }[]).map((r) => [r.device_id, r.device])
+    );
+    const waiting = db.prepare(
+      `SELECT 1 FROM connector_queue
+       WHERE user_id = ? AND connector_id = ? AND document = ? AND kind = ? AND status != 'done'`
+    );
+    const now = nowSeconds();
+    const seen = new Set<string>();
+    for (const s of sources) {
+      const totals = bookStatsFor(db, userId, s.document, s.device_id);
+      if (!totals || (document && totals.document !== document)) continue;
+      const key = statsKey(s.device_id);
+      if (seen.has(`${key}:${totals.document}`)) continue;
+      seen.add(`${key}:${totals.document}`);
+      // An update already on its way carries its own boundary; replacing it would lose it.
+      if (waiting.get(userId, connectorId, totals.document, key)) continue;
+      if (!isAttemptable(db, userId, conn, totals.document)) continue;
+      const { seconds, pages } = totals.book;
+      enqueue(
+        db,
+        userId,
+        connectorId,
+        {
+          kind: 'stats',
+          document: totals.document,
+          timestamp: now,
+          stats: {
+            deviceId: s.device_id,
+            device: s.device_id === HISTORY_DEVICE ? 'KOReader' : labels.get(s.device_id) ?? '',
+            book: totals.book,
+            baseline: { seconds, pages, at: now },
+          },
+        },
+        key
+      );
       queued++;
     }
   }

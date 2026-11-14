@@ -468,6 +468,117 @@ describe('seekquel connector (end to end)', () => {
     expect(latest).toMatchObject({ baseline: false, items: [{ document: DOC, seconds: 195, pages: 3 }] });
   });
 
+  it('sends an upload that mixes old and recent records as the history first, then the recent reading', async () => {
+    const fake = fakeTransport();
+    const { app, db, headers } = await linkSeekquel(fake);
+    const old = Date.parse('2025-11-02T03:30:00Z') / 1000;
+    const recent = Math.floor(Date.now() / 1000) - 900;
+    const res = await app.request('/api/v1/stats/koreader', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        version: 1, book: { md5: DOC, title: 'Piranesi', authors: 'Susanna Clarke' }, timezone: 'Europe/London',
+        pages: [{ page: 10, total_pages: 100, start_time: old, duration: 60 }, { page: 11, total_pages: 100, start_time: recent, duration: 120 }],
+      }),
+    });
+    expect(res.status).toBe(200);
+    await drainQueue(db, fake.transport, 10);
+
+    const sent = fake.calls.filter((c) => c.url.endsWith('/api/v1/stats/books')).map(body);
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).toMatchObject({ baseline: true, recorded_at: recent, items: [{ document: DOC, seconds: 60 }] });
+    expect(sent[1]).toMatchObject({ baseline: false, items: [{ document: DOC, seconds: 180 }] });
+    expect(sent[1].recorded_at).toBeGreaterThanOrEqual(recent + 120);
+  });
+
+  it('keeps history that is still waiting when a later upload replaces it in the queue', async () => {
+    const fake = fakeTransport();
+    const { app, db, headers } = await linkSeekquel(fake);
+    const old = Date.parse('2025-11-02T03:30:00Z') / 1000;
+    const recent = Math.floor(Date.now() / 1000) - 900;
+    const upload = (pages: { page: number; total_pages: number; start_time: number; duration: number }[]) =>
+      app.request('/api/v1/stats/koreader', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ version: 1, book: { md5: DOC, title: 'Piranesi', authors: 'Susanna Clarke' }, timezone: 'Europe/London', pages }),
+      });
+    const history = [{ page: 10, total_pages: 100, start_time: old, duration: 60 }];
+
+    fake.on('/api/v1/stats/books', 503, {});
+    expect((await upload(history)).status).toBe(200);
+    await drainQueue(db, fake.transport, 10);
+    // The same upload again adds nothing, and must not turn the waiting history into reading.
+    expect((await upload(history)).status).toBe(200);
+    expect((await upload([...history, { page: 11, total_pages: 100, start_time: recent, duration: 120 }])).status).toBe(200);
+
+    const before = fake.calls.length;
+    fake.on('/api/v1/stats/books', 200, {});
+    db.prepare("UPDATE connector_queue SET next_try_at = 0 WHERE status = 'pending'").run();
+    await drainQueue(db, fake.transport, 10);
+    const sent = fake.calls.slice(before).filter((c) => c.url.endsWith('/api/v1/stats/books')).map(body);
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).toMatchObject({ baseline: true, items: [{ document: DOC, seconds: 60 }] });
+    expect(sent[1]).toMatchObject({ baseline: false, items: [{ document: DOC, seconds: 180 }] });
+  });
+
+  it('sends a merged copy\'s totals under the book\'s own id, added to the rest', async () => {
+    const fake = fakeTransport();
+    const { app, db, headers } = await linkSeekquel(fake);
+    const alias = 'b'.repeat(32);
+    const userId = Number((db.prepare('SELECT id FROM users LIMIT 1').get() as { id: number }).id);
+    const put = (document: string, seconds: number) => app.request('/api/v1/stats/books', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ device_id: 'crossink-aaaa', device: 'CrossInk', items: [{ document, ...BOOK_STATS, seconds, pages: 10 }] }),
+    });
+    expect((await put(DOC, 600)).status).toBe(200);
+    db.prepare('INSERT INTO document_aliases (user_id, alias, document, created_at, merge_stats) VALUES (?, ?, ?, ?, 1)')
+      .run(userId, alias, DOC, 1);
+    expect((await put(alias, 300)).status).toBe(200);
+    await drainQueue(db, fake.transport, 10);
+
+    const sent = fake.calls.filter((c) => c.url.endsWith('/api/v1/stats/books')).map(body);
+    expect(sent.every((s) => s.items[0].document === DOC)).toBe(true);
+    expect(sent.at(-1)).toMatchObject({ baseline: false, items: [{ document: DOC, seconds: 900, pages: 20 }] });
+  });
+
+  it('starts a source read on before the link from its earlier total, on Sync now and on its next upload', async () => {
+    const fake = fakeTransport();
+    const { app, db } = makeTestApp({}, { connectorTransport: fake.transport });
+    const { headers } = await registerUser(app);
+    const put = (document: string, seconds: number, pages: number) => app.request('/api/v1/stats/books', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ device_id: 'crossink-aaaa', device: 'CrossInk', items: [{ document, ...BOOK_STATS, seconds, pages }] }),
+    });
+    const other = 'c'.repeat(32);
+    expect((await put(DOC, 600, 20)).status).toBe(200);
+    expect((await put(other, 400, 10)).status).toBe(200);
+
+    fake.on('/koreader/pair/start', 201, { device_code: 'd'.repeat(64), user_code: 'WXYZ-2345', verification_uri_complete: 'https://seekquel.app/settings/integrations/crosspoint-sync?pair=WXYZ-2345' });
+    const { device_code } = await (await app.request('/api/v1/connectors/seekquel/link/begin', { method: 'POST', headers })).json();
+    fake.on('/koreader/pair/poll', 200, { key: CRED.key, sync_url: SERVER, device_id: '01J' });
+    fake.on('/users/auth', 200, { authorized: 'OK' });
+    await app.request('/api/v1/connectors/seekquel/link/poll', { method: 'POST', headers, body: JSON.stringify({ device_code }) });
+
+    // Reading straight after the link, with no Sync now: only what the upload adds is new.
+    expect((await put(DOC, 900, 30)).status).toBe(200);
+    await drainQueue(db, fake.transport, 10);
+    const first = fake.calls.filter((c) => c.url.endsWith('/api/v1/stats/books')).map(body);
+    expect(first).toHaveLength(2);
+    expect(first[0]).toMatchObject({ baseline: true, items: [{ document: DOC, seconds: 600 }] });
+    expect(first[1]).toMatchObject({ baseline: false, items: [{ document: DOC, seconds: 900 }] });
+    expect(first[1].recorded_at - first[0].recorded_at).toBe(300);
+
+    // Sync now sends the book that has not been sent yet as history, and leaves the other alone.
+    const before = fake.calls.length;
+    expect((await app.request('/api/v1/connectors/seekquel/sync', { method: 'POST', headers })).status).toBe(200);
+    await drainQueue(db, fake.transport, 10);
+    const synced = fake.calls.slice(before).filter((c) => c.url.endsWith('/api/v1/stats/books')).map(body);
+    expect(synced.filter((s) => s.items[0].document === other)).toEqual([expect.objectContaining({ baseline: true, items: [expect.objectContaining({ seconds: 400 })] })]);
+    expect(synced.filter((s) => s.items[0].document === DOC && s.baseline === false)).toHaveLength(0);
+  });
+
   it('hands its key back to Seekquel when the reader unlinks', async () => {
     const fake = fakeTransport();
     const { app, headers, linked } = await linkSeekquel(fake);

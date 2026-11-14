@@ -52,8 +52,10 @@ import type {
  *
  * Reading time comes from a device that reports per-book totals (CrossInk). Each
  * total replaces that device's last one and Seekquel credits what it adds, so a
- * resend is harmless. KOReader history synced by the plugin is one more source;
- * records older than two days are sent as history, which Seekquel never credits. A Seekquel that has the route closed answers 404, which is
+ * resend is harmless. KOReader history synced by the plugin is one more source.
+ * Whatever part of a total is history (page records older than two days, totals
+ * from before the link) is sent first as the starting point, which Seekquel never
+ * credits, and only what the total adds beyond it can count as new reading. A Seekquel that has the route closed answers 404, which is
  * final and not an error: nothing is dead-lettered for it.
  */
 
@@ -254,24 +256,34 @@ async function pushHighlight(c: SeekquelCred, m: Match, ev: OutboundEvent, http:
 async function pushStats(c: SeekquelCred, m: Match, ev: OutboundEvent, http: HttpTransport): Promise<PushResult> {
   const stats = ev.stats;
   if (!stats) return { ok: false, retryable: false, error: 'empty stats' };
-  const res = await http(`${c.server}/api/v1/stats/books`, {
-    method: 'PUT',
-    headers: headers(c),
-    body: JSON.stringify({
-      device_id: stats.deviceId,
-      device: stats.device,
-      // When we took the totals, so a delivery we had to retry is not read as time that never passed.
-      recorded_at: ev.timestamp,
-      // History is stored as the new starting point and never lands on today.
-      baseline: stats.history === true,
-      items: [{
-        document: m.externalId,
-        ...stats.book,
-        seconds: Math.min(stats.book.seconds, MAX_TOTAL),
-        pages: Math.min(stats.book.pages, MAX_TOTAL),
-      }],
-    }),
-  });
+  const send = (seconds: number, pages: number, recordedAt: number, baseline: boolean) =>
+    http(`${c.server}/api/v1/stats/books`, {
+      method: 'PUT',
+      headers: headers(c),
+      body: JSON.stringify({
+        device_id: stats.deviceId,
+        device: stats.device,
+        // When the totals were taken, so a delivery we had to retry is not read as time that never passed.
+        recorded_at: recordedAt,
+        // History is stored as the new starting point and never lands on today.
+        baseline,
+        items: [{
+          document: m.externalId,
+          ...stats.book,
+          seconds: Math.min(seconds, MAX_TOTAL),
+          pages: Math.min(pages, MAX_TOTAL),
+        }],
+      }),
+    });
+  const { book, baseline } = stats;
+  if (baseline) {
+    // The history first, then whatever the total adds beyond it. Sending both again on a retry is harmless.
+    const res = await send(baseline.seconds, baseline.pages, baseline.at, true);
+    if (res.status === NOT_FOUND) return { ok: true };
+    if (res.status < 200 || res.status >= 300) return failure(res.status, 'stats');
+    if (book.seconds <= baseline.seconds) return { ok: true };
+  }
+  const res = await send(book.seconds, book.pages, ev.timestamp, false);
   if (res.status === NOT_FOUND) return { ok: true };
   return res.status >= 200 && res.status < 300 ? { ok: true } : failure(res.status, 'stats');
 }

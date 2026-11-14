@@ -152,8 +152,13 @@ export interface OutboundEvent {
     deviceId: string;
     device: string;
     book: BookStatsSnapshot;
-    /** The change is old history (an import, a backfill), not reading done now. */
-    history?: boolean;
+    /**
+     * The part of the total that is history (an import, a backfill, totals from before
+     * the link), not reading done now. Delivered first as the starting point, so only
+     * what `book` adds beyond it can count as new reading. `at` is when the reading
+     * beyond it began, or when the history was taken if there is none.
+     */
+    baseline?: { seconds: number; pages: number; at: number };
   };
 }
 
