@@ -2,6 +2,15 @@ local ffi = require("ffi")
 local Transport = {}
 
 function Transport.install(turbo)
+    local handshake = turbo.crypto.ssl_do_handshake
+    turbo.crypto.ssl_do_handshake = function(stream)
+        -- Turbo's LuaSec backend omits SNI, which certificate-routing proxies require.
+        if stream._ssl_options._type == 1 and not stream._crosspoint_sni then
+            stream._ssl:sni(stream._ssl_hostname)
+            stream._crosspoint_sni = true
+        end
+        return handshake(stream)
+    end
     local prepare = turbo.async.HTTPClient._prepare_http_request
     turbo.async.HTTPClient._prepare_http_request = function(client)
         local request = prepare(client)

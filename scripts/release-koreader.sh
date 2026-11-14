@@ -32,6 +32,8 @@ trap 'rm -f "$notes"' EXIT
 cat > "$notes" <<NOTES
 Install by extracting crosspoint-koreader.zip into KOReader's plugins folder and restarting KOReader. The plugin is now named **CrossPoint Sync**, with **Last sync result** in its menu. Existing account settings are preserved.
 
+Fixes missing TLS Server Name Indication (SNI) in Turbo's LuaSocket backend. The plugin now supplies the hostname before the TLS handshake, allowing reverse proxies to select the correct certificate. Reproduced the previous code -5 / 10-second connect timeout against an SNI-required local TLS server; the patched transport reached HTTP authentication with 100-byte, 100 KB and 500 KB requests. Certificate-chain verification stays enabled, and private CAs must still be added to cacert.pem. This addresses a possible cause of discussion #102; the reporter's device and network have not been verified.
+
 Skips books with existing history-import conflicts (HTTP 409) and continues syncing the rest of the library. Last sync result lists skipped books. Automatic sync does not show a failure popup for these conflicts. Existing history is preserved; skipped books are not marked uploaded and can retry later. No re-import is required to sync other books. Progress and available annotations continue independently.
 
 Retains the 0.2.6 transport fix. Fixes the HTTP 400 caused by Turbo appending four extra CRLF bytes beyond the declared Content-Length. The plugin now sends exactly the declared body length, preserving the payload and its own trailing newlines.

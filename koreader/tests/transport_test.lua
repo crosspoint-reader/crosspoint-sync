@@ -1,6 +1,11 @@
 local ffi = require("ffi")
 local Transport = dofile("koreader/crosspoint.koplugin/transport.lua")
-local turbo = { iostream = { IOStream = {} }, async = { HTTPClient = {
+local handshakes = 0
+local turbo = { crypto = { ssl_do_handshake = function(stream)
+    handshakes = handshakes + 1
+    if stream._ssl_options._type == 1 then assert(stream._crosspoint_sni) end
+    return nil, "wantread"
+end }, iostream = { IOStream = {} }, async = { HTTPClient = {
     _prepare_http_request = function(client) return client.request end,
 } } }
 Transport.install(turbo)
@@ -75,3 +80,14 @@ for _, body in ipairs({ "", "{}", "café", "text\r\n\r\n", string.rep("x", 50000
 end
 assert(turbo.async.HTTPClient._prepare_http_request({kwargs={},request=-1}) == -1)
 print("HTTP framing checks passed: exact Content-Length, UTF-8, trailing payload newlines and already-correct requests.")
+
+local names = {}
+local tls = { _ssl_options = { _type = 1 }, _ssl_hostname = "koreader-sync.home",
+    _ssl = { sni = function(_, name) names[#names + 1] = name end } }
+local ready, retry = turbo.crypto.ssl_do_handshake(tls)
+assert(ready == nil and retry == "wantread")
+turbo.crypto.ssl_do_handshake(tls)
+assert(#names == 1 and names[1] == "koreader-sync.home" and handshakes == 2)
+turbo.crypto.ssl_do_handshake({ _ssl_options = { _type = 0 } })
+assert(handshakes == 3)
+print("TLS SNI checks passed: hostname set before handshake, once per connection, client only.")
