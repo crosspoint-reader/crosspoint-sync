@@ -6,6 +6,7 @@ import { getConnector } from './registry.js';
 import { SAVE_CREDENTIAL, type Connector, type Credential, type DataKind, type DocumentMeta, type Match, type SavableCredential } from './types.js';
 import { destinationForPost, selectedMicroblogDestination } from './microblog-destinations.js';
 import { baseUrl } from './audiobookshelf.js';
+import { purgeStatsQueue } from './queue.js';
 
 export interface AccountRow {
   user_id: number;
@@ -28,7 +29,18 @@ export function upsertAccount(
   now = nowSeconds()
 ): void {
   const enc = encryptSecret(JSON.stringify(cred));
-  const previous = connectorId === 'bookorbit' || connectorId === 'microblog' ? getAccount(db, userId, connectorId) : null;
+  const previous = connectorId === 'bookorbit' || connectorId === 'microblog' || connectorId === 'seekquel'
+    ? getAccount(db, userId, connectorId)
+    : null;
+  let changedSeekquelAccount = false;
+  if (connectorId === 'seekquel' && previous) {
+    try {
+      const old = decryptCredential(previous);
+      changedSeekquelAccount = old.server !== cred.server || old.key !== cred.key;
+    } catch {
+      changedSeekquelAccount = true;
+    }
+  }
   let changedMicroblogAccount = false;
   let verifyMicroblogPosts = false;
   if (connectorId === 'microblog' && previous) {
@@ -60,6 +72,7 @@ export function upsertAccount(
     } catch { /* Reconnecting also recovers an unreadable old credential. */ }
   }
   withTransaction(db, () => {
+    if (changedSeekquelAccount) purgeStatsQueue(db, userId, connectorId);
     if (verifyMicroblogPosts) {
       // Retain URL/destination/history. Publication validates access to each
       // original blog and its source URL before any further update.

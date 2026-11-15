@@ -1,7 +1,7 @@
 import type { DB } from '../db/db.js';
 import { secretsEnabled } from '../crypto/secrets.js';
 import { getConnector } from './registry.js';
-import { enqueue } from './queue.js';
+import { enqueue, STATS_QUEUE_PREFIX } from './queue.js';
 import { activeConnectorIds, carriesFor, documentMeta, getMatch } from './store.js';
 import { extractTitleAuthor } from './matching.js';
 import { nowSeconds } from '../models/sync.js';
@@ -186,7 +186,7 @@ export function statsSince(totals: { book: BookStatsSnapshot; updatedAt: number 
   return totals ? { seconds: totals.book.seconds, pages: totals.book.pages, at: totals.updatedAt } : undefined;
 }
 
-const statsKey = (deviceId: string) => `stats:${deviceId}`;
+const statsKey = (deviceId: string) => `${STATS_QUEUE_PREFIX}${deviceId}`;
 const between = (n: number, low: number, high: number) => Math.min(Math.max(n, low), high);
 
 /**
@@ -226,7 +226,8 @@ function withFloor(db: DB, userId: number, connectorId: string, ev: OutboundEven
   if (row.status === 'done') {
     // The total grew without an upload (a copy with its own stats was merged in, a
     // history file was imported): what was added that way is history.
-    if (stats.baseline || !stats.since || !waiting || stats.since.seconds <= waiting.book.seconds) return ev;
+    if (stats.baseline || !stats.since || !waiting) return ev;
+    if (stats.since.seconds <= waiting.book.seconds && stats.since.pages <= waiting.book.pages) return ev;
     return { ...ev, stats: { ...stats, baseline: stats.since, since: undefined } };
   }
   if (!last || !waiting) return ev;
@@ -241,7 +242,8 @@ function withFloor(db: DB, userId: number, connectorId: string, ev: OutboundEven
     pages: between(mine.pages - Math.max(0, waiting.book.pages - theirs.pages), 0, stats.book.pages),
     at: Math.min(theirs.at, mine.at),
   };
-  return stats.baseline || waiting.baseline || first
+  const historyGrew = floor.seconds > theirs.seconds || floor.pages > theirs.pages;
+  return stats.baseline || waiting.baseline || first || historyGrew
     ? { ...ev, stats: { ...stats, baseline: floor, since: undefined } }
     : { ...ev, stats: { ...stats, since: floor } };
 }

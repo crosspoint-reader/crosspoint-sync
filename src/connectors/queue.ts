@@ -100,6 +100,17 @@ export function markFailed(
   ).run(attempts, error.slice(0, 500), now + backoff, now, row.id, row.payload);
 }
 
+export const STATS_QUEUE_PREFIX = 'stats:';
+
+/** Forget what was sent as reading time to a connector, so a different account starts from nothing. */
+export function purgeStatsQueue(db: DB, userId: number, connectorId: string): void {
+  db.prepare(`DELETE FROM connector_queue WHERE user_id = ? AND connector_id = ? AND kind LIKE ?`).run(
+    userId,
+    connectorId,
+    `${STATS_QUEUE_PREFIX}%`
+  );
+}
+
 /** Drop a queued row entirely (e.g. connector unlinked). */
 export function purgeConnector(db: DB, userId: number, connectorId: string): void {
   db.prepare(`DELETE FROM connector_queue WHERE user_id = ? AND connector_id = ?`).run(

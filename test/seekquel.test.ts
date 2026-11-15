@@ -5,6 +5,7 @@ import type { HttpTransport, OutboundEvent } from '../src/connectors/types.js';
 import { drainQueue } from '../src/connectors/runner.js';
 import { claimReady } from '../src/connectors/queue.js';
 import { seekquelBase, seekquelConnector } from '../src/connectors/seekquel.js';
+import { upsertAccount } from '../src/connectors/store.js';
 import { upsertProgress } from '../src/routes/kosync.js';
 
 function fakeTransport() {
@@ -704,6 +705,84 @@ describe('seekquel connector (end to end)', () => {
     expect(sent).toHaveLength(2);
     expect(sent[0]).toMatchObject({ baseline: true, items: [{ document: DOC, seconds: 600, pages: 20 }] });
     expect(sent[1]).toMatchObject({ baseline: false, items: [{ document: DOC, seconds: 900, pages: 30 }] });
+  });
+
+  it('treats pages a merged copy adds as history even when the seconds did not change', async () => {
+    const fake = fakeTransport();
+    const { app, db, headers } = await linkSeekquel(fake);
+    const alias = 'b'.repeat(32);
+    const userId = Number((db.prepare('SELECT id FROM users LIMIT 1').get() as { id: number }).id);
+    const put = (document: string, seconds: number, pages: number) => app.request('/api/v1/stats/books', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ device_id: 'crossink-aaaa', device: 'CrossInk', items: [{ document, ...BOOK_STATS, seconds, pages }] }),
+    });
+    expect((await put(alias, 0, 50)).status).toBe(200);
+    expect((await put(DOC, 600, 10)).status).toBe(200);
+    await drainQueue(db, fake.transport, 10);
+    db.prepare("DELETE FROM connector_queue WHERE document = ?").run(alias);
+    db.prepare('INSERT INTO document_aliases (user_id, alias, document, created_at, merge_stats) VALUES (?, ?, ?, ?, 1)')
+      .run(userId, alias, DOC, 1);
+
+    const before = fake.calls.length;
+    expect((await put(DOC, 600, 12)).status).toBe(200);
+    await drainQueue(db, fake.transport, 10);
+    const sent = fake.calls.slice(before).filter((c) => c.url.endsWith('/api/v1/stats/books')).map(body);
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).toMatchObject({ baseline: true, items: [{ document: DOC, seconds: 600, pages: 60 }] });
+    expect(sent[1]).toMatchObject({ baseline: false, items: [{ document: DOC, seconds: 600, pages: 62 }] });
+  });
+
+  it('sends history a merged copy adds while a total is waiting as history, not as reading', async () => {
+    const fake = fakeTransport();
+    const { app, db, headers } = await linkSeekquel(fake);
+    const alias = 'b'.repeat(32);
+    const userId = Number((db.prepare('SELECT id FROM users LIMIT 1').get() as { id: number }).id);
+    const put = (document: string, seconds: number, pages: number) => app.request('/api/v1/stats/books', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ device_id: 'crossink-aaaa', device: 'CrossInk', items: [{ document, ...BOOK_STATS, seconds, pages }] }),
+    });
+    expect((await put(alias, 5000, 10)).status).toBe(200);
+    expect((await put(DOC, 600, 10)).status).toBe(200);
+    await drainQueue(db, fake.transport, 10);
+    db.prepare("DELETE FROM connector_queue WHERE document = ?").run(alias);
+
+    fake.on('/api/v1/stats/books', 503, {});
+    expect((await put(DOC, 900, 12)).status).toBe(200);
+    await drainQueue(db, fake.transport, 10);
+    db.prepare('INSERT INTO document_aliases (user_id, alias, document, created_at, merge_stats) VALUES (?, ?, ?, ?, 1)')
+      .run(userId, alias, DOC, 1);
+    expect((await put(DOC, 1000, 12)).status).toBe(200);
+
+    const before = fake.calls.length;
+    fake.on('/api/v1/stats/books', 200, {});
+    db.prepare("UPDATE connector_queue SET next_try_at = 0 WHERE status = 'pending'").run();
+    await drainQueue(db, fake.transport, 10);
+    const sent = fake.calls.slice(before).filter((c) => c.url.endsWith('/api/v1/stats/books')).map(body);
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).toMatchObject({ baseline: true, items: [{ document: DOC, seconds: 5600 }] });
+    expect(sent[1]).toMatchObject({ baseline: false, items: [{ document: DOC, seconds: 6000 }] });
+  });
+
+  it('forgets what it sent when the link is replaced by a different account, and keeps it for the same one', async () => {
+    const fake = fakeTransport();
+    const { app, db, headers } = await linkSeekquel(fake);
+    const userId = Number((db.prepare('SELECT id FROM users LIMIT 1').get() as { id: number }).id);
+    expect((await app.request('/api/v1/stats/books', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ device_id: 'crossink-aaaa', device: 'CrossInk', items: [{ document: DOC, ...BOOK_STATS }] }),
+    })).status).toBe(200);
+    await drainQueue(db, fake.transport, 10);
+    const stored = () => (db.prepare("SELECT COUNT(*) AS n FROM connector_queue WHERE connector_id = 'seekquel' AND kind LIKE 'stats:%'").get() as { n: number }).n;
+    expect(stored()).toBe(1);
+
+    upsertAccount(db, userId, 'seekquel', CRED, 'Seekquel');
+    expect(stored()).toBe(1);
+
+    upsertAccount(db, userId, 'seekquel', { server: SERVER, key: 'WXYZ-ABCD-EFGH-JKLM' }, 'Seekquel');
+    expect(stored()).toBe(0);
   });
 
   it('sends a merged copy\'s totals under the book\'s own id, added to the rest', async () => {
