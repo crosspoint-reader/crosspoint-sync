@@ -39,7 +39,7 @@ export const metaTags = (title: string, description = SITE_DESCRIPTION) =>
 const SERVICES: [string, string, string, 'ready' | 'beta'][] = [
   ['hardcover', 'Hardcover', 'Your shelf and progress update each time you sync.', 'ready'],
   ['bookfusion', 'BookFusion', 'Reading positions both ways for books from BookFusion.', 'ready'],
-  ['readwise', 'Readwise', 'Send your highlights to Readwise, and archive finished books in Reader.', 'ready'],
+  ['readwise', 'Readwise', 'Sync reading progress both ways with matched books in Readwise Reader.', 'ready'],
   ['spotify', 'Spotify', 'Listen ahead in the audiobook and your progress moves forward. Resume it in one tap.', 'beta'],
   ['microblog', 'Micro.blog', 'Keep your Currently reading and Finished shelves current.', 'ready'],
   ['audiobookshelf', 'Audiobookshelf', 'Switch between the ebook and the audiobook without losing your place.', 'ready'],

@@ -571,7 +571,7 @@ export function connectorRoutes(
   });
 
   // "Sync now": backfill this connector with everything already synced.
-  // Audiobookshelf first pulls every matched book's position, so newer listening
+  // Audiobookshelf and Reader first pull matched positions, so newer reading
   // there isn't overwritten by the backfill.
   app.post('/connectors/:id/sync', async (c) => {
     const conn = getConnector(c.req.param('id'));
@@ -580,7 +580,7 @@ export function connectorRoutes(
     if (!getAccount(db, user.id, conn.id)) {
       return c.json({ code: 2003, message: 'Connector not linked' }, 400);
     }
-    if (conn.id === 'audiobookshelf') {
+    if (conn.id === 'audiobookshelf' || conn.id === 'readwise-reader') {
       // Per-book failures are logged and skipped; a revoked key marks the account needs_reauth.
       const signal = AbortSignal.timeout(60_000);
       const bounded: HttpTransport = (url, init) => transport(url, { ...init,

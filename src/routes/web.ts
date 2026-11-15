@@ -566,7 +566,8 @@ async function renderConnectors() {
   el.querySelectorAll('[data-sync]').forEach(b => b.onclick = async () => {
     const orig = b.textContent; b.disabled = true; b.textContent = 'Syncing…';
     const r = await jsend('${basePath}/api/v1/connectors/'+b.dataset.sync+'/sync');
-    b.textContent = r.ok ? ('Queued ' + r.data.queued + ' ✓') : 'Failed';
+    b.textContent = r.ok ? (b.dataset.sync === 'readwise-reader' && !r.data.queued
+      ? 'No eligible books — check Matches' : ('Queued ' + r.data.queued + ' ✓')) : 'Failed';
     b.classList.toggle('copied', r.ok);
     setTimeout(() => { b.textContent = orig; b.disabled = false; b.classList.remove('copied'); }, 2000);
   });
@@ -619,7 +620,7 @@ const HINTS = {
   hardcover: 'Syncs your reading progress and shelf status to Hardcover.',
   microblog: 'Connect an app token to keep your Currently reading and Finished reading bookshelves in sync. Optional clipping sync publishes one post per book and updates its generated content on later syncs, replacing edits made on Micro.blog.',
   readwise: 'Paste your Readwise access token from readwise.io/access_token. Syncs your highlights.',
-  'readwise-reader': 'Paste your Readwise access token from readwise.io/access_token. Archives books in Reader when you finish them, and brings your Reader progress back to your device.',
+  'readwise-reader': 'Paste your Readwise access token from readwise.io/access_token. Syncs reading progress both ways for matched books and archives finished books. Sync a book from your device, then check Matches. Does not import your Reader library or highlights.',
   kosync: 'Mirror your reading progress to another KOReader-compatible (KOSync) server, so your other devices see it too.',
   bookfusion: 'Connect your BookFusion account to sync reading progress. You will approve the request on bookfusion.com.',
   audiobookshelf: 'Sync your reading position to the matching audiobook on your Audiobookshelf server. Create an API key in Audiobookshelf under Settings, Users, API Keys.',

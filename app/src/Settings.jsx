@@ -44,7 +44,7 @@ const HINTS = {
   hardcover: 'Syncs your reading progress and shelf status to Hardcover, and your highlights if you turn them on.',
   microblog: 'Keeps your Currently reading and Finished reading bookshelves in sync. Optional clipping sync publishes one post per book and updates its generated content on later syncs, replacing edits made on Micro.blog.',
   readwise: 'Syncs your highlights to Readwise.',
-  'readwise-reader': 'Archives books in Reader when you finish them, and brings your Reader progress back.',
+  'readwise-reader': 'Syncs reading progress both ways for matched books and archives finished books. Does not import your Reader library or highlights.',
   kosync: 'Mirrors your reading progress to another KOReader-compatible (KOSync) server. For Calibre-Web, use your library URL ending in /kosync.',
   bookfusion: 'Syncs reading progress with BookFusion. You approve the request on bookfusion.com.',
   audiobookshelf: 'Keeps your place between the ebook and the audiobook. Create an API key in Audiobookshelf under Settings, Users, API Keys.',
@@ -532,7 +532,7 @@ function Service({ session, conn, onChange }) {
               onClick={() =>
                 act('sync', async () => {
                   const r = await api.syncConnector(session, conn.id)
-                  const queued = r?.queued ? `${r.queued} item${r.queued === 1 ? '' : 's'} queued` : 'No synced items to queue'
+                  const queued = r?.queued ? `${r.queued} item${r.queued === 1 ? '' : 's'} queued` : conn.id === 'readwise-reader' ? 'No eligible books to send. Sync a book from your device and check its Reader match in Connected services.' : 'No synced items to queue'
                   notify({
                     title: `Syncing to ${conn.name}`,
                     detail: r?.pulled === undefined ? queued : `${r.pulled} position${r.pulled === 1 ? '' : 's'} pulled, ${queued.toLowerCase()}`,

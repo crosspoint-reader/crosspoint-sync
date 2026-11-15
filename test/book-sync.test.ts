@@ -104,3 +104,19 @@ it('Audiobookshelf "Sync now" pulls every matched book before queueing, and so d
   expect(await pollMatched(f.db, 'audiobookshelf')).toBe(1);
   expect(pct()).toEqual({ percentage: 0.6 });
 });
+
+it('Reader Sync now pulls matched books and queues unfinished progress', async () => {
+  const f = await fixture('readwise-reader');
+  vi.spyOn(getConnector('readwise-reader')!, 'pullProgress').mockImplementation(async (_cred, match) => ({
+    externalId: match.externalId, percentage: 0.6, updatedAtMs: 200000,
+  }));
+  const response = await f.app.request('/api/v1/connectors/readwise-reader/sync', { method: 'POST', headers: f.headers });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ pulled: 2, queued: 2 });
+  const rows = f.db.prepare('SELECT kind, payload FROM connector_queue').all();
+  expect(rows).toHaveLength(2);
+  for (const row of rows) {
+    expect(row.kind).toBe('progress');
+    expect(JSON.parse(String(row.payload)).percentage).toBe(0.6);
+  }
+});

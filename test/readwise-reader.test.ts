@@ -7,7 +7,9 @@ import { readwiseReaderConnector } from '../src/connectors/readwise-reader.js';
 // appears in the URL or body.
 function fakeTransport() {
   const calls: { url: string; method: string; body?: string }[] = [];
-  const handlers: { match: string; status: number; body: unknown }[] = [];
+  const handlers: { match: string; status: number; body: unknown }[] = [
+    { match: 'id=', status: 200, body: { results: [{ id: '01bbb', category: 'epub', reading_progress: 0.1, updated_at: '1970-01-01T00:00:00Z' }] } },
+  ];
   const t: HttpTransport = async (url, init) => {
     calls.push({ url, method: init.method, body: init.body });
     const h = [...handlers].reverse().find((x) => url.includes(x.match) || (init.body ?? '').includes(x.match));
@@ -78,10 +80,10 @@ describe('readwise-reader connector', () => {
     expect(r.ok).toBe(true);
     const call = fake.calls.find((c) => c.url.includes('/bulk_update/'));
     expect(call?.method).toBe('PATCH');
-    expect(JSON.parse(call!.body!)).toEqual({ updates: [{ id: '01bbb', location: 'archive', seen: true }] });
+    expect(JSON.parse(call!.body!)).toEqual({ updates: [{ id: '01bbb', reading_progress: 1, location: 'archive', seen: true }] });
   });
 
-  it('ignores in-progress events (only finish archives)', async () => {
+  it('sends in-progress percentages without archiving', async () => {
     const fake = fakeTransport();
     const r = await readwiseReaderConnector.push(
       CRED,
@@ -90,7 +92,71 @@ describe('readwise-reader connector', () => {
       fake.transport
     );
     expect(r.ok).toBe(true);
+    expect(JSON.parse(fake.calls.find(c => c.method === 'PATCH')!.body!)).toEqual({
+      updates: [{ id: '01bbb', reading_progress: 0.5 }],
+    });
+  });
+
+  it.each(['progress', 'finished'] as const)('preserves newer Reader progress for queued %s events', async kind => {
+    const fake = fakeTransport();
+    fake.on('id=', 200, { results: [{ reading_progress: 0.7, updated_at: '2026-01-01T00:00:00Z' }] });
+    const result = await readwiseReaderConnector.push(CRED, { externalId: '01bbb', confidence: 1 },
+      { kind, document: 'hash', percentage: kind === 'finished' ? 1 : 0.2, timestamp: 1 }, fake.transport);
+    expect(result.ok).toBe(true);
+    expect(result.note).toContain('Newer Reader');
+    expect(fake.calls.some(c => c.method === 'PATCH')).toBe(false);
+  });
+
+  it.each([401, 403, 429, 500])('does not write when the position check fails with %s', async status => {
+    const fake = fakeTransport();
+    fake.on('id=', status, {});
+    const result = await readwiseReaderConnector.push({ token: `preflight-${status}` }, { externalId: '01bbb', confidence: 1 },
+      { kind: 'progress', document: 'hash', percentage: 0.5, timestamp: 1 }, fake.transport);
+    expect(result).toMatchObject({ ok: false, retryable: status === 429 || status === 500,
+      needsReauth: status === 401 || status === 403 });
+    expect(fake.calls.some(c => c.method === 'PATCH')).toBe(false);
+  });
+
+  it.each([undefined, 'invalid'])('does not overwrite a position with an unknown timestamp (%s)', async updated_at => {
+    const fake = fakeTransport();
+    fake.on('id=', 200, { results: [{ reading_progress: 0.1, updated_at }] });
+    const result = await readwiseReaderConnector.push(CRED, { externalId: '01bbb', confidence: 1 },
+      { kind: 'progress', document: 'hash', percentage: 0.5, timestamp: 1 }, fake.transport);
+    expect(result).toMatchObject({ ok: false, retryable: true });
+    expect(fake.calls.some(c => c.method === 'PATCH')).toBe(false);
+  });
+
+  it.each([NaN, Infinity, -0.1, 1.1, undefined])('rejects invalid percentages (%s)', async percentage => {
+    const fake = fakeTransport();
+    const result = await readwiseReaderConnector.push(CRED, { externalId: '01bbb', confidence: 1 },
+      { kind: 'progress', document: 'hash', percentage, timestamp: 1 }, fake.transport);
+    expect(result).toMatchObject({ ok: false, retryable: false });
     expect(fake.calls).toHaveLength(0);
+  });
+
+  it('skips PDF positions but still archives a finished PDF', async () => {
+    const fake = fakeTransport();
+    fake.on('id=', 200, { results: [{ category: 'pdf', updated_at: '1970-01-01T00:00:00Z' }] });
+    const event = { kind: 'progress' as const, document: 'hash', percentage: 0.5, timestamp: 1 };
+    expect(await readwiseReaderConnector.push(CRED, { externalId: 'pdf', confidence: 1 }, event, fake.transport))
+      .toMatchObject({ ok: true, note: expect.stringContaining('PDF') });
+    expect(fake.calls.some(c => c.method === 'PATCH')).toBe(false);
+    await readwiseReaderConnector.push(CRED, { externalId: 'pdf', confidence: 1 }, { ...event, kind: 'finished', percentage: 1 }, fake.transport);
+    expect(JSON.parse(fake.calls.find(c => c.method === 'PATCH')!.body!))
+      .toEqual({ updates: [{ id: 'pdf', location: 'archive', seen: true }] });
+  });
+
+  it('lists archived books but excludes highlights and notes from matching', async () => {
+    const fake = fakeTransport();
+    fake.on('/list/', 200, { results: [
+      { id: 'book', title: 'Book', category: 'epub', location: 'archive' },
+      { id: 'highlight', title: 'Book', category: 'highlight' },
+      { id: 'note', title: 'Book', category: 'note' },
+    ] });
+    expect(await readwiseReaderConnector.listCurrentlyReading!(CRED, fake.transport))
+      .toEqual([{ externalId: 'book', title: 'Book', author: null }]);
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0].url).not.toContain('location=');
   });
 
   it('retries a 207 partial failure', async () => {
