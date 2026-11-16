@@ -634,7 +634,10 @@ export const api = {
     return books
   },
   candidates: (s, id) => call(s, `/api/v1/connectors/${id}/candidates`).then((r) => r.books ?? []),
-  searchConnector: (s, id, q) => call(s, `/api/v1/connectors/${id}/search?q=${encodeURIComponent(q)}`).then((r) => r.books ?? []),
+  searchConnector: (s, id, q) => call(s, `/api/v1/connectors/${id}/search?q=${encodeURIComponent(q)}`).then((r) => {
+    if (r.error) throw new Error(r.error)
+    return r.books ?? []
+  }),
   bookMatches: (s, doc) => call(s, `/api/v1/documents/${doc}/matches`).then((r) => r.services),
   // Spotify audiobook position, and "Resume in Spotify" (a user tap; never background sync).
   spotifyPosition: (s, doc) => call(s, `/api/v1/connectors/spotify/position/${doc}`),

@@ -385,3 +385,8 @@ it('invalidates a looked-up cover on metadata edits and rejects a pre-edit looku
   await expect(pending).rejects.toMatchObject({ stale: true })
   expect(cached.cover(s, 'book')).toBeNull()
 })
+
+it('surfaces connector search errors instead of returning an empty library', async () => {
+  fetchMock.mockResolvedValueOnce(response({ books: [], error: 'Readwise Reader is rate limited; try again later' }))
+  await expect(api.searchConnector(session('reader'), 'readwise-reader', 'Dawn')).rejects.toThrow('rate limited')
+})

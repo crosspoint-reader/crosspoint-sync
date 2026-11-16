@@ -1008,6 +1008,10 @@ async function runSearch(doc, q, isAuto) {
   const res = $('results-' + doc);
   res.innerHTML = '<div class="grp">' + (isAuto ? 'Suggestions' : 'Results') + '</div><p class="muted" style="margin:2px 0 0">Searching…</p>';
   const r = await jget('${basePath}/api/v1/connectors/' + ID + '/search?q=' + encodeURIComponent(q));
+  if (!r.ok || r.data.error) {
+    res.innerHTML = '<p role="alert">' + esc(r.data.error || r.data.message || 'Search failed. Try again.') + '</p>';
+    return;
+  }
   const rows = (r.data.books || []).map(c => optionRow(doc, c)).join('');
   res.innerHTML = '<div class="grp">' + (isAuto ? 'Suggestions' : 'Results') + '</div>' + (rows || '<p class="muted" style="margin:2px 0 0">No matches found.</p>');
   res.querySelectorAll('[data-choose]').forEach(bindChoose);

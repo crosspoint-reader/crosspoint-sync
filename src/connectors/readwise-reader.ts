@@ -1,5 +1,5 @@
 import { ConnectorOperationError } from './types.js';
-import { decideMatch, extractTitleAuthor, type Candidate } from './matching.js';
+import { decideMatch, extractTitleAuthor, normalizeText, type Candidate } from './matching.js';
 import type {
   Connector,
   Credential,
@@ -93,7 +93,7 @@ async function listDocs(token: string, http: HttpTransport): Promise<ReaderDoc[]
   return out;
 }
 
-async function candidatePool(token: string, http: HttpTransport): Promise<Candidate[]> {
+async function loadCandidatePool(token: string, http: HttpTransport): Promise<Candidate[]> {
   const seen = new Set<string>();
   const pool: Candidate[] = [];
   if (rateLimited(token)) throw new ConnectorOperationError('Readwise Reader is rate limited; try again later', true);
@@ -103,6 +103,33 @@ async function candidatePool(token: string, http: HttpTransport): Promise<Candid
     pool.push({ externalId: d.id, title: d.title, author: d.author ?? d.site_name ?? null });
   }
   return pool;
+}
+
+// Share in-flight library requests across matching and the picker; never cache positions.
+const candidateCache = new Map<string, { expires: number; pending: Promise<Candidate[]> }>();
+function candidatePool(token: string, http: HttpTransport): Promise<Candidate[]> {
+  const cached = candidateCache.get(token);
+  if (cached && cached.expires > Date.now()) return cached.pending;
+  for (const [key, entry] of candidateCache) {
+    if (entry.expires <= Date.now()) candidateCache.delete(key);
+  }
+  if (candidateCache.size >= 100) candidateCache.delete(candidateCache.keys().next().value!);
+  const entry = { expires: Date.now() + 300_000, pending: loadCandidatePool(token, http) };
+  candidateCache.set(token, entry);
+  entry.pending.catch(() => {
+    if (candidateCache.get(token) === entry) candidateCache.delete(token);
+  });
+  return entry.pending;
+}
+
+async function search(cred: Credential, query: string, http: HttpTransport): Promise<ExternalBook[]> {
+  const words = normalizeText(query).split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const pool = await candidatePool(tokenOf(cred), http);
+  return pool.filter(book => {
+    const text = normalizeText(`${book.title} ${book.author ?? ''}`);
+    return words.every(word => text.includes(word));
+  });
 }
 
 async function validate(cred: Credential, http: HttpTransport): Promise<ValidateResult> {
@@ -126,7 +153,6 @@ function shouldPush(ev: OutboundEvent): boolean {
 
 async function match(cred: Credential, doc: DocumentMeta, http: HttpTransport): Promise<Match | null> {
   const token = tokenOf(cred);
-  if (rateLimited(token)) throw new ConnectorOperationError('Readwise Reader is rate limited; try again later', true);
   const ta = extractTitleAuthor(doc);
   if (!ta) return null;
   const candidates = await candidatePool(token, http);
@@ -249,4 +275,5 @@ export const readwiseReaderConnector: Connector = {
   push,
   pullProgress,
   listCurrentlyReading,
+  search,
 };

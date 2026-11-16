@@ -1300,12 +1300,19 @@ export function Matches({ session, id }) {
 export function Picker({ session, id, name, book, onDone }) {
   const [reading] = useLoad(() => api.candidates(session, id).catch(() => []), [session, id], `candidates ${id}`)
   const [q, setQ] = useState(book.title ?? '')
+  const [searchError, setSearchError] = useState(null)
   const [results, setResults] = useState(null)
   const [busy, setBusy] = useState(false)
   async function search(text) {
     if (!text.trim()) return
     setResults(null)
-    setResults(await api.searchConnector(session, id, text.trim()).catch(() => []))
+    setSearchError(null)
+    try {
+      setResults(await api.searchConnector(session, id, text.trim()))
+    } catch (error) {
+      setSearchError(error.message)
+      setResults([])
+    }
   }
   useEffect(() => {
     if (book.title) search(book.title)
@@ -1355,7 +1362,9 @@ export function Picker({ session, id, name, book, onDone }) {
         </>
       )}
       <p className={group}>Results</p>
-      {results === null ? (
+      {searchError ? (
+        <p role="alert" className="px-2 py-2 text-sm text-red-700">{searchError}</p>
+      ) : results === null ? (
         <Loader2 className="mx-auto my-3 size-4 animate-spin text-stone-400" />
       ) : results.length ? (
         rows(results)

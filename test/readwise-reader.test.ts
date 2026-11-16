@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HttpTransport } from '../src/connectors/types.js';
 import { readwiseReaderConnector } from '../src/connectors/readwise-reader.js';
 
@@ -21,6 +21,8 @@ function fakeTransport() {
 }
 
 const CRED = { token: 'rw_token' };
+let tokenId = 0;
+beforeEach(() => { CRED.token = `rw_test_${++tokenId}`; });
 
 describe('readwise-reader connector', () => {
   it('validates via GET /api/v3/list/', async () => {
@@ -265,4 +267,37 @@ describe('readwise-reader connector', () => {
     expect(ok?.percentage).toBe(0.5);
     expect(b.calls.length).toBeGreaterThan(0);
   });
+});
+
+it('shares paginated candidates between concurrent searches and automatic matching', async () => {
+  const fake = fakeTransport();
+  fake.on('/list/', 200, { results: [{ id: 'first', title: 'Other' }], nextPageCursor: 'next' });
+  fake.on('pageCursor=', 200, { results: [{ id: 'book', title: 'The Robots of Dawn', author: 'Isaac Asimov' }] });
+  const [books, results, match] = await Promise.all([
+    readwiseReaderConnector.listCurrentlyReading!(CRED, fake.transport),
+    readwiseReaderConnector.search!(CRED, 'robots ASIMOV', fake.transport),
+    readwiseReaderConnector.match!(CRED, { document: 'hash', title: 'The Robots of Dawn', author: 'Isaac Asimov', filename: null }, fake.transport),
+  ]);
+  expect(books).toHaveLength(2);
+  expect(results.map(b => b.externalId)).toEqual(['book']);
+  expect(match?.externalId).toBe('book');
+  expect(fake.calls).toHaveLength(2);
+  expect(await readwiseReaderConnector.search!({ token: CRED.token + '-other' }, 'robots', fake.transport)).toHaveLength(1);
+  expect(fake.calls).toHaveLength(4);
+});
+
+it('expires cached candidates and does not retain failed requests', async () => {
+  const fake = fakeTransport();
+  const now = vi.spyOn(Date, 'now');
+  try {
+    now.mockReturnValue(1_000_000);
+    fake.on('/list/', 500, {});
+    await expect(readwiseReaderConnector.search!(CRED, 'book', fake.transport)).rejects.toThrow('500');
+    fake.on('/list/', 200, { results: [{ id: 'book', title: 'Book' }] });
+    expect(await readwiseReaderConnector.search!(CRED, 'book', fake.transport)).toHaveLength(1);
+    expect(fake.calls).toHaveLength(2);
+    now.mockReturnValue(1_300_001);
+    await readwiseReaderConnector.search!(CRED, 'book', fake.transport);
+    expect(fake.calls).toHaveLength(3);
+  } finally { now.mockRestore(); }
 });

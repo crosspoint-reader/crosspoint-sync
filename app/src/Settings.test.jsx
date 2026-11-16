@@ -8,7 +8,7 @@ vi.mock('./api.js', () => ({
   showUntitled: vi.fn(() => false),
   setShowUntitled: vi.fn(),
   cached: { readingGoals: () => null },
-  api: { exportAccount: vi.fn(), importAccount: vi.fn(), oauthBegin: vi.fn(), oauthComplete: vi.fn(), connectors: vi.fn(), linkConnector: vi.fn(), setClientId: vi.fn(), removeClientId: vi.fn(), syncConnector: vi.fn(), unlinkConnector: vi.fn(), clearData: vi.fn(), deleteAccount: vi.fn(), autoPause: vi.fn(), setAutoPause: vi.fn(), profile: vi.fn(), setProfile: vi.fn(), setDisplayName: vi.fn(), recoveryToken: vi.fn(() => Promise.resolve({ token: null })), newRecoveryToken: vi.fn() },
+  api: { candidates: vi.fn(), searchConnector: vi.fn(), exportAccount: vi.fn(), importAccount: vi.fn(), oauthBegin: vi.fn(), oauthComplete: vi.fn(), connectors: vi.fn(), linkConnector: vi.fn(), setClientId: vi.fn(), removeClientId: vi.fn(), syncConnector: vi.fn(), unlinkConnector: vi.fn(), clearData: vi.fn(), deleteAccount: vi.fn(), autoPause: vi.fn(), setAutoPause: vi.fn(), profile: vi.fn(), setProfile: vi.fn(), setDisplayName: vi.fn(), recoveryToken: vi.fn(() => Promise.resolve({ token: null })), newRecoveryToken: vi.fn() },
 }))
 vi.mock('./shareCard.js', () => ({ saveFile: vi.fn() }))
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }))
@@ -17,7 +17,7 @@ vi.mock('@tauri-apps/plugin-deep-link', () => ({ onOpenUrl: vi.fn(async (fn) => 
 
 const { api, setShowUntitled } = await import('./api.js')
 const { openUrl } = await import('@tauri-apps/plugin-opener')
-const { default: Settings, LinkForm, AccountTransfer } = await import('./Settings.jsx')
+const { default: Settings, LinkForm, AccountTransfer, Picker } = await import('./Settings.jsx')
 vi.mock('./tabbar.js', async (orig) => ({ ...(await orig()), useNativeBack: vi.fn() }))
 const { useNativeBack } = await import('./tabbar.js')
 vi.mock('./ui.jsx', async (orig) => ({ ...(await orig()), notify: vi.fn() }))
@@ -463,4 +463,16 @@ it('saves a display name with its case and spaces, falling back to the username 
   fireEvent.change(input, { target: { value: '  Jane Q. Reader ' } })
   fireEvent.blur(input)
   await waitFor(() => expect(api.setDisplayName).toHaveBeenCalledWith(expect.anything(), 'Jane Q. Reader'))
+})
+
+it('shows a matching error and lets the reader retry the search', async () => {
+  api.candidates.mockResolvedValue([])
+  api.searchConnector.mockRejectedValueOnce(new Error('Readwise Reader is rate limited; try again later'))
+  render(<Picker session={session} id="readwise-reader" name="Readwise Reader" book={{ document: OWN, title: 'Dawn' }} onDone={() => {}} />)
+  expect((await screen.findByRole('alert')).textContent).toContain('rate limited')
+  expect(screen.queryByText('No matches found.')).toBeNull()
+  api.searchConnector.mockResolvedValueOnce([{ externalId: 'book', title: 'The Robots of Dawn', author: 'Isaac Asimov' }])
+  fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+  expect(await screen.findByText('The Robots of Dawn')).toBeTruthy()
+  expect(screen.queryByRole('alert')).toBeNull()
 })
