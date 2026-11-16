@@ -29,6 +29,24 @@ it('reviews the file, allows correcting inferred finishes, and keeps existing hi
   expect(screen.getByRole('button', { name: 'Import 2 books' }).disabled).toBe(false)
 })
 
+it('shows KOReader incomplete-record counts before importing', async () => {
+  api.importHistory.mockResolvedValueOnce({
+    source: 'KOReader', skipped_records: 3, adjusted_records: 162,
+    skipped_reasons: { nonpositive_duration: 2, unknown_page_count: 1 },
+    books: [{ document: 'new', title: 'New book', records: 2, start_date: '2025-01-01',
+      finished_date: null, completed: false, existing_history: false, status: null }],
+  })
+  render(<HistoryImport session={{}} />)
+  fireEvent.change(screen.getByLabelText('Reading-history file'),
+    { target: { files: [new File(['sqlite'], 'statistics.sqlite3')] } })
+  fireEvent.click(screen.getByRole('button', { name: 'Review history' }))
+  expect((await screen.findByText(/162 KOReader page records exceeded the saved page count/)).textContent)
+    .toContain('preserve reading time')
+  expect((await screen.findByText(/3 incomplete KOReader page records skipped/)).textContent)
+    .toContain('1 without a page count; 2 without reading time')
+  expect(screen.getByRole('button', { name: 'Import 1 books' }).disabled).toBe(false)
+})
+
 it('invalidates the preview when the time zone changes', async () => {
   api.importHistory.mockResolvedValue({ books: [] })
   render(<HistoryImport session={{}} />)
