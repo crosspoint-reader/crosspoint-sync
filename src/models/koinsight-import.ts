@@ -72,17 +72,14 @@ function readDatabase(bytes: Buffer, path: string): History | null {
       if (native && p.duration <= 0) { skipped.nonpositive_duration++; continue; }
       if (p.duration < 0) { invalidPages++; continue; }
       if (p.page > p.total_pages) {
-        // KOReader history can outlive a pagination change. Keep the reading time,
-        // but normalize only modest overruns to the recorded last page.
+        // Validate original KOReader coordinates before deduplication or
+        // increasing stale page totals, so distinct source turns remain distinct.
         const excess = p.page - p.total_pages;
-        if (!native || excess > 32 || p.page > Math.ceil(p.total_pages * 1.25)) {
+        if (!native || excess > 32 || p.page > p.total_pages * 1.25) {
           invalidPages++;
           continue;
         }
-        if (hashes.has(p.book_md5)) {
-          validPages.push({ ...p, page: p.total_pages });
-          adjustedPages++;
-        }
+        if (hashes.has(p.book_md5)) validPages.push(p);
         continue;
       }
       if (hashes.has(p.book_md5) && p.total_pages > 0) validPages.push(p);
@@ -93,12 +90,32 @@ function readDatabase(bytes: Buffer, path: string): History | null {
       sourceName, 'invalid_page_fields', invalidPages,
     );
     const uniqueBooks = [...new Map(books.map(b => [b.md5, b])).values()];
+    // First deduplicate exact source turns, before changing their page coordinates.
     const uniquePages = new Map<string, Page>();
     for (const p of validPages) {
       const key = `${p.book_md5}:${p.page}:${p.total_pages}:${p.start_time}`;
       if (!uniquePages.has(key) || uniquePages.get(key)!.duration < p.duration) uniquePages.set(key, p);
     }
-    return { books: uniqueBooks, pages: native ? [...uniquePages.values()] : validPages,
+    const normalizedPages = new Map<string, Page>();
+    if (native) for (const raw of uniquePages.values()) {
+      // Raising the stale total preserves each original page number, so
+      // consecutive overruns at the same timestamp do not collapse.
+      const p = raw.page > raw.total_pages ? { ...raw, total_pages: raw.page } : raw;
+      if (p !== raw) adjustedPages++;
+      const key = `${p.book_md5}:${p.page}:${p.total_pages}:${p.start_time}`;
+      const existing = normalizedPages.get(key);
+      if (existing) {
+        // Different raw turns can still converge on the same stored key (for
+        // example page 352/351 and 352/352). Retain both reading durations.
+        const duration = existing.duration + p.duration;
+        if (duration > 86400) throw new HistoryPageValidationError(
+          'Distinct KOReader page turns exceed the maximum combined duration. Nothing was imported.',
+          sourceName, 'invalid_page_fields', 1,
+        );
+        normalizedPages.set(key, { ...existing, duration });
+      } else normalizedPages.set(key, p);
+    }
+    return { books: uniqueBooks, pages: native ? [...normalizedPages.values()] : validPages,
       source: sourceName, ...(native ? { skipped, adjusted_pages: adjustedPages } : {}) };
   } finally { source.close(); }
 }

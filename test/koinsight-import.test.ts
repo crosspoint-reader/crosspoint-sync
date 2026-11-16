@@ -224,9 +224,9 @@ describe('KOInsight file import', () => {
       nonpositive_duration: 0, unknown_page_count: 0,
     } });
     expect(history.pages).toHaveLength(6);
-    expect(history.pages.find(p => p.start_time === t1)).toMatchObject({ page: 351, total_pages: 351, duration: 46 });
-    expect(history.pages.find(p => p.start_time === t2)).toMatchObject({ page: 351, total_pages: 351, duration: 40 });
-    expect(history.pages.find(p => p.start_time === t3)).toMatchObject({ page: 113, total_pages: 113, duration: 25 });
+    expect(history.pages.find(p => p.start_time === t1)).toMatchObject({ page: 352, total_pages: 352, duration: 46 });
+    expect(history.pages.find(p => p.start_time === t2)).toMatchObject({ page: 373, total_pages: 373, duration: 40 });
+    expect(history.pages.find(p => p.start_time === t3)).toMatchObject({ page: 135, total_pages: 135, duration: 25 });
     const s = await fixture();
     const preview = await s.upload(bytes);
     expect(preview.status).toBe(200);
@@ -236,6 +236,68 @@ describe('KOInsight file import', () => {
     expect(imported.status).toBe(200);
     expect(JSON.parse(String(s.db.prepare('SELECT payload FROM stats_device_global').get()!.payload)).seconds).toBe(221);
     expect(s.db.prepare('SELECT * FROM progress').all()).toEqual([]);
+  });
+
+  it('retains distinct same-timestamp overruns and combines only true post-normalization collisions', async () => {
+    const when = at('2025-11-01T23:40:00Z');
+    const bytes = database(db => db.exec(`
+      ALTER TABLE book ADD COLUMN id INTEGER;
+      UPDATE book SET id = CASE WHEN md5 = '${OLD}' THEN 1 ELSE 2 END;
+      CREATE TABLE page_stat_data (id_book INTEGER, page INTEGER, total_pages INTEGER, start_time INTEGER, duration INTEGER);
+      INSERT INTO page_stat_data SELECT b.id, p.page, p.total_pages, p.start_time, p.duration
+        FROM page_stat p JOIN book b ON b.md5 = p.book_md5;
+      INSERT INTO page_stat_data VALUES
+        (1, 352, 351, ${when}, 20),
+        (1, 352, 351, ${when}, 5),
+        (1, 353, 351, ${when}, 40),
+        (1, 352, 352, ${when}, 30);
+      DROP TABLE page_stat;
+      CREATE VIEW page_stat AS SELECT * FROM never_execute_this_view;
+    `));
+    const history = await readHistoryFile(bytes);
+    expect(history.source).toBe('KOReader');
+    expect(history.adjusted_pages).toBe(2);
+    expect(history.pages).toHaveLength(5);
+    expect(history.pages.find(p => p.start_time === when && p.page === 352)).toMatchObject({
+      page: 352, total_pages: 352, duration: 50,
+    });
+    expect(history.pages.find(p => p.start_time === when && p.page === 353)).toMatchObject({
+      page: 353, total_pages: 353, duration: 40,
+    });
+    const s = await fixture();
+    const preview = await s.upload(bytes);
+    expect(preview.status).toBe(200);
+    expect(await preview.json()).toMatchObject({ source: 'KOReader', adjusted_records: 2, skipped_records: 0 });
+    const finishes = { [OLD]: null, [SECOND]: null };
+    const imported = await s.upload(bytes, finishes);
+    expect(imported.status).toBe(200);
+    const totals = () => s.db.prepare('SELECT COUNT(*) AS pages, SUM(duration) AS seconds FROM reader_history_pages').get();
+    expect(totals()).toEqual({ pages: 5, seconds: 200 });
+    expect(JSON.parse(String(s.db.prepare('SELECT payload FROM stats_device_global').get()!.payload))).toMatchObject({
+      pages: 5, seconds: 200,
+    });
+    expect((await s.upload(bytes, finishes)).status).toBe(200);
+    expect(totals()).toEqual({ pages: 5, seconds: 200 });
+    expect(s.db.prepare('SELECT * FROM progress').all()).toEqual([]);
+  });
+
+  it('rejects page 4 of 3 rather than rounding the 25-percent threshold up', async () => {
+    const bytes = database(db => db.exec(`
+      ALTER TABLE book ADD COLUMN id INTEGER;
+      UPDATE book SET id = CASE WHEN md5 = '${OLD}' THEN 1 ELSE 2 END;
+      CREATE TABLE page_stat_data (id_book INTEGER, page INTEGER, total_pages INTEGER, start_time INTEGER, duration INTEGER);
+      INSERT INTO page_stat_data SELECT b.id, p.page, p.total_pages, p.start_time, p.duration
+        FROM page_stat p JOIN book b ON b.md5 = p.book_md5;
+      INSERT INTO page_stat_data VALUES (1, 4, 3, ${at('2025-11-01T23:45:00Z')}, 20);
+      DROP TABLE page_stat;
+      CREATE VIEW page_stat AS SELECT * FROM never_execute_this_view;
+    `));
+    await expect(readHistoryFile(bytes)).rejects.toThrow('Invalid KOReader page history (1 malformed record)');
+    const s = await fixture();
+    const preview = await s.upload(bytes);
+    expect(preview.status).toBe(400);
+    expect(s.db.prepare('SELECT * FROM documents').all()).toEqual([]);
+    expect(s.db.prepare('SELECT * FROM reader_history_pages').all()).toEqual([]);
   });
 
   it('rejects malformed native KOReader positions with a source-specific error and no writes', async () => {
