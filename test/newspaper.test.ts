@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import jpeg from 'jpeg-js';
 import yauzl from 'yauzl';
 import type { HttpTransport } from '../src/connectors/types.js';
+import { extractArticle } from '../src/models/newspaper.js';
 import { renderCover } from '../src/render/crosspaper-cover.js';
 import { isPublicAddress, safeFetch } from '../src/safe-fetch.js';
 import { makeTestApp, registerUser } from './helpers.js';
@@ -65,7 +66,9 @@ describe('newspaper', () => {
     // Saved pages lead; feed items follow under their feed's name.
     expect(files['OEBPS/nav.xhtml']).toMatch(/Saved<\/span>.*Saved Story.*Example Blog<\/span>.*Post 1.*Post 2/s);
     const story = files['OEBPS/a1.xhtml'];
-    expect(story).toContain('Second &amp; last <a href="https://news.test/more">link</a>');
+    expect(story).toContain('Second &amp; last link'); // links are unwrapped: a reader cannot follow them
+    expect(story).not.toContain('<a ');
+    expect(story).toContain('min read');
     expect(story).not.toMatch(/script|img|Menu/);
 
     // A new post arrives: the same day's paper grows, and nothing repeats.
@@ -82,6 +85,68 @@ describe('newspaper', () => {
     expect(left.articles.map((a: { title: string }) => a.title)).toEqual(['Saved Story']);
     const other = await registerUser(app);
     expect((await app.request('/api/v1/newspaper/issue/today.epub', { headers: other.headers })).status).toBe(404);
+  });
+
+  it('keeps the article and drops the page around it', () => {
+    const page = `<html><head><title>Robots at Work</title></head><body>
+      <nav><a href="/">Home</a><a href="/news">News</a></nav>
+      <article>
+        <h1>Robots at Work</h1>
+        <p>By Jane Doe</p>
+        <p>Updated 39 minutes ago</p>
+        <div class="social-share"><a href="#">Share on Facebook</a></div>
+        <p>${para}</p>
+        <ul><li><a href="/a">Another headline entirely</a></li><li><a href="/b">A second unrelated headline</a></li></ul>
+        <p>The middle of the story cites a study<sup>[1]</sup> and carries on.</p>
+        <p>${para}</p>
+        <p>Follow us on Twitter</p>
+        <p><a href="/full">Read the essay</a></p>
+        <p>Jane Doe is a reporter covering robots and has written for many magazines.</p>
+        <h2>Related articles</h2>
+        <p>A teaser for something else that happens to be long enough to look like a paragraph of real prose.</p>
+      </article>
+      <aside class="newsletter-signup"><p>Sign up for our newsletter</p></aside>
+      <footer>Copyright 2026</footer>
+    </body></html>`;
+    const article = extractArticle(page, 'https://news.test/robots')!;
+    const read = article.content.replace(/<[^>]+>/g, ' ');
+    expect(read).toContain('quick brown fox');
+    expect(read).toContain('cites a study and carries on');
+    for (const junk of ['Jane Doe', 'Updated', 'Share on', 'Another headline', 'Follow us', 'Read the essay', 'Related', 'teaser', 'newsletter', 'Copyright', 'Home', '[1]']) {
+      expect(read).not.toContain(junk);
+    }
+    // Flat reading markup: paragraphs, no wrappers, no links.
+    expect(article.content).not.toMatch(/<div|<a |<section/);
+    expect(article.byline).toBe('Jane Doe, news.test');
+  });
+
+  it('uses the publisher\'s own copy of the article to decide what belongs', () => {
+    const first = 'The council voted on Tuesday to rebuild the old harbour bridge, ending a debate that had run for most of a decade. '.repeat(3);
+    const second = 'Engineers say the work will take two years and that the crossing will stay open to walkers throughout. '.repeat(3);
+    const promo = 'Our award winning app is the fastest way to keep up with everything happening in your town, every single day of the week.';
+    const page = (body: string, extra = '') => `<html><head><title>Bridge Vote</title>
+      <script type="application/ld+json">${JSON.stringify({ '@graph': [{ '@type': 'NewsArticle', headline: 'Bridge Vote', author: [{ name: 'Ann Lee' }, { name: 'Bo Diaz' }], articleBody: body }] })}</script>
+      <script type="application/ld+json">{ not json</script></head>
+      <body><article><h1>Bridge Vote</h1><p>${first}</p><p>${promo}</p><h2>What happens next</h2><p>${second}</p><h2>Elsewhere</h2><p>${promo}</p></article>${extra}</body></html>`;
+
+    // The promo paragraphs read like prose, so no rule catches them; the publisher's copy does.
+    const article = extractArticle(page(`${first}\n\n${second}`), 'https://news.test/bridge')!;
+    const read = article.content.replace(/<[^>]+>/g, ' ');
+    expect(read).toContain('rebuild the old harbour bridge');
+    expect(read).toContain('What happens next');
+    expect(read).toContain('stay open to walkers');
+    expect(read).not.toContain('award winning app');
+    expect(read).not.toContain('Elsewhere'); // a subheading with nothing left under it
+    expect(article.byline).toBe('Ann Lee, Bo Diaz, news.test');
+
+    // A teaser (as before a paywall) covers too little of the page to be trusted as the judge.
+    const teased = extractArticle(page(first.slice(0, 120)), 'https://news.test/bridge')!;
+    expect(teased.content).toContain('award winning app');
+
+    // A page drawn by scripts has nothing to extract, but still carries the publisher's copy.
+    const scripted = extractArticle(`<html><head><title>Bridge Vote</title><script type="application/ld+json">${JSON.stringify({ '@type': 'Article', articleBody: `${first}\n${second}` })}</script></head><body><div id="root"></div></body></html>`, 'https://news.test/bridge')!;
+    expect(scripted.title).toBe('Bridge Vote');
+    expect(scripted.content.match(/<p>/g)).toHaveLength(2);
   });
 
   it('closes a past day into its own edition, which stays downloadable', async () => {

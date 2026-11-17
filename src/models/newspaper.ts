@@ -35,53 +35,195 @@ function httpUrl(href: string | null | undefined, base?: string): string | null 
 }
 
 // ---- HTML to EPUB-safe XHTML -------------------------------------------------
-// A whitelist serializer: whatever the page contained, the output is well
-// formed and holds only plain reading markup.
+// The reader gets the article and nothing else. Two passes strip the page
+// around it (tidy, on the document), then a whitelist serializer writes what
+// is left as well-formed reading markup, with no links: a reader cannot follow
+// them, and most of a page's links are not the article.
 
-const KEEP = new Set(['p', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'ul', 'ol', 'li', 'pre', 'code', 'em', 'strong', 'i', 'b', 'a', 'br', 'hr', 'sup', 'sub']);
-const AS_DIV = new Set(['div', 'section', 'article', 'main', 'aside', 'table', 'tr', 'figcaption', 'dl', 'dt', 'dd']);
-const DROP = new Set(['script', 'style', 'noscript', 'iframe', 'svg', 'form', 'button', 'nav', 'template', 'head', 'img', 'picture', 'video', 'audio', 'figure', 'object', 'embed']);
+const KEEP = new Set(['p', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'ul', 'ol', 'li', 'pre', 'code', 'em', 'strong', 'i', 'b', 'br', 'hr', 'sup', 'sub']);
+const WRAPPER = new Set(['div', 'section', 'article', 'main', 'aside', 'table', 'tbody', 'tr', 'figcaption', 'dl', 'dt', 'dd']);
+const DROP = new Set(['script', 'style', 'noscript', 'iframe', 'svg', 'form', 'button', 'nav', 'footer', 'template', 'head', 'img', 'picture', 'video', 'audio', 'figure', 'object', 'embed', 'select', 'input', 'textarea']);
+const HAS_BLOCK = /<(p|h[2-6]|blockquote|ul|ol|pre|hr)[\s>/]/;
 
-interface HtmlNode { nodeType: number; localName?: string; textContent: string | null; childNodes: Iterable<HtmlNode>; getAttribute?(name: string): string | null }
+interface HtmlNode {
+  nodeType: number; localName?: string; textContent: string | null;
+  childNodes: Iterable<HtmlNode>; parentNode?: HtmlNode | null; nextSibling?: HtmlNode | null;
+  getAttribute?(name: string): string | null; remove?(): void;
+  querySelectorAll?(selector: string): Iterable<HtmlNode>;
+}
 
-function serialize(node: HtmlNode, base: string): string {
+function serialize(node: HtmlNode): string {
   if (node.nodeType === 3) return escapeXml(node.textContent ?? '');
   if (node.nodeType !== 1) return '';
   const tag = (node.localName ?? '').toLowerCase();
   if (DROP.has(tag)) return '';
-  const inner = [...node.childNodes].map((child) => serialize(child, base)).join('');
-  const name = tag === 'h1' ? 'h2' : AS_DIV.has(tag) ? 'div' : tag;
+  const inner = [...node.childNodes].map(serialize).join('');
+  const name = tag === 'h1' ? 'h2' : tag;
   if (name === 'br' || name === 'hr') return `<${name}/>`;
-  if (name === 'a') {
-    const href = httpUrl(node.getAttribute?.('href'), base);
-    return href ? `<a href="${escapeXml(href)}">${inner}</a>` : inner;
-  }
-  if (name === 'div') return inner.trim() ? `<div>${inner}</div>` : '';
-  if (KEEP.has(name)) return `<${name}>${inner}</${name}>`;
+  // A wrapper around blocks disappears; one holding bare text becomes a paragraph. No nesting survives.
+  if (WRAPPER.has(name)) return !inner.trim() ? '' : HAS_BLOCK.test(inner) ? inner : `<p>${inner.trim()}</p>`;
+  if (KEEP.has(name)) return inner.trim() || name === 'li' ? `<${name}>${inner}</${name}>` : '';
   return tag === 'td' || tag === 'th' ? `${inner} ` : inner;
 }
 
-export function toXhtml(html: string, base: string): string {
-  const { document } = parseHTML(`<!doctype html><html><body>${html}</body></html>`);
-  return serialize(document.body as unknown as HtmlNode, base);
+const text = (node: HtmlNode) => (node.textContent ?? '').replace(/\s+/g, ' ').trim();
+const each = (root: HtmlNode, selector: string) => [...(root.querySelectorAll?.(selector) ?? [])];
+/** How much of a block's text sits inside links: near 1 means it is navigation, not prose. */
+const linkShare = (node: HtmlNode) => {
+  const all = text(node).length;
+  return all ? each(node, 'a').reduce((n, a) => n + text(a).length, 0) / all : 0;
+};
+
+// Page furniture that reads like a sentence, so no selector catches it.
+const FURNITURE = /^(follow (us|me)\b|subscribe\b|sign up\b|sign in\b|log in\b|share (this|on)\b|read more\b|read the (essay|story|article|full)\b|continue reading\b|related\b|advertisement\b|sponsored\b|more on this\b|you may also\b|recommended\b|top stories\b|most read\b|listen to\b|watch:|image (source|caption|credit)\b|photo(graph)?( credit)?:|getty images\b|©|copyright\b|all rights reserved\b|updated\b|published\b|last (updated|modified)\b|\d+ min(ute)?s? read\b|this article (was|is|originally)\b|a version of this\b|get (our|the) (newsletter|app)\b|thanks for reading\b|comments?\b)|\|\s*[\d,]+ words$/i;
+const BYLINE = /^[Bb]y\s?[A-Z]/;
+// A heading that starts everything after the article.
+const TAIL = /^(related( (articles|stories|reading|topics|content|links))?|more on this( story| topic)?|read more|recommended|you (may|might) also like|more from\b.*|most read|top stories|further reading|see also|references|external links|notes|footnotes|citations|bibliography|sources|comments|about the author|topics|tags|more (recent |great |top )?(picks|stories|reads|articles|coverage|news|from|on this|like this)\b.*)$/i;
+
+/** Remove the first "Related" or "References" heading under `root` and everything after it. */
+function cutTail(root: HtmlNode): void {
+  const end = each(root, 'h1, h2, h3, h4, h5, h6').find((h) => TAIL.test(text(h)));
+  for (let node: HtmlNode | null | undefined = end; node && node !== root; node = node.parentNode) {
+    while (node.nextSibling) node.nextSibling.remove?.();
+  }
+  end?.remove?.();
 }
+
+// Letters and digits only, so curly quotes, entities and spacing never stop two copies of a sentence matching.
+const letters = (value: string) => value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+
+/**
+ * Many publishers put the article's full text in the page's metadata, free of
+ * anything else on the page. It has no paragraphs or emphasis, so it is used as
+ * the judge, not the text: a block stays only if the publisher's copy contains
+ * it. Skipped when that copy covers little of what was extracted (a teaser
+ * shown before a paywall, or a different article).
+ */
+function keepPublished(root: HtmlNode, published: string): void {
+  const copy = letters(published);
+  const blocks = each(root, 'p, li, pre, blockquote, h2, h3, h4, h5, h6, div, figcaption')
+    .filter((block) => !each(block, 'p, li, div, ul, ol, blockquote, pre').length && text(block));
+  const prose = blocks.filter((block) => !/^h\d$/.test(block.localName ?? ''));
+  const inCopy = (block: HtmlNode) => { const own = letters(text(block)); return own.length >= 12 && copy.includes(own.slice(0, 80)); };
+  const size = (list: HtmlNode[]) => list.reduce((n, block) => n + text(block).length, 0);
+  const kept = prose.filter(inCopy);
+  if (size(kept) < size(prose) * 0.6) return;
+  for (const block of prose) if (!kept.includes(block)) block.remove?.();
+  // A subheading stays only while prose follows it.
+  const order = blocks.filter((block) => kept.includes(block) || /^h\d$/.test(block.localName ?? ''));
+  order.forEach((block, i) => { if (/^h\d$/.test(block.localName ?? '') && !order.slice(i + 1).some((later) => kept.includes(later))) block.remove?.(); });
+}
+
+/**
+ * Strip what surrounds the article, in place. `authors` are the byline's names; `lead` is how many
+ * opening blocks may be a byline. Returns the byline it removed from the text, if the page had one there.
+ */
+function tidy(root: HtmlNode, authors: string[] = [], lead = 6, published?: string): string | undefined {
+  cutTail(root);
+  if (published) keepPublished(root, published);
+  // Citation lists: "Retrieved 11 January 2022", "Archived from the original".
+  for (const list of each(root, 'ul, ol')) {
+    const items = each(list, 'li').filter((li) => text(li));
+    if (items.length >= 3 && items.filter((li) => /\bRetrieved \d|Archived from the original|^[↑^]/.test(text(li))).length / items.length >= 0.5) list.remove?.();
+  }
+  // Footnote markers and edit links: [1], [edit].
+  for (const sup of each(root, 'sup, span')) if (/^\[?(\d{1,3}|edit|citation needed|note \d+)\]?$/i.test(text(sup)) && /\[|\]/.test(text(sup))) sup.remove?.();
+  // Lists that are menus: most items are a bare link.
+  for (const list of each(root, 'ul, ol')) {
+    const items = each(list, 'li').filter((li) => text(li));
+    if (items.length && items.filter((li) => linkShare(li) > 0.7 && text(li).length < 160).length / items.length >= 0.7) list.remove?.();
+  }
+  // Single lines that are a link, a byline, a timestamp or a call to action.
+  let seen = 0, byline: string | undefined;
+  for (const block of each(root, 'p, li, h2, h3, h4, h5, h6, div, section, figcaption')) {
+    if (each(block, 'p, li, div, section, ul, ol, blockquote, pre').length) continue; // a container, not a line
+    const line = text(block);
+    if (!line) continue;
+    const opening = seen++ < lead;
+    const signed = opening && line.length < 120 && BYLINE.test(line);
+    if (signed) byline ??= line.replace(/^by\s?/i, '').trim();
+    if (signed || (line.length < 200 && linkShare(block) > 0.6) || (line.length < 140 && FURNITURE.test(line))) block.remove?.();
+  }
+  if (byline) authors = [...authors, ...names(byline)];
+  // The author's biography, tacked on after the last paragraph: "Jane Doe is a reporter covering…".
+  const last = each(root, 'p').filter((p) => text(p)).pop();
+  if (last && authors.some((name) => name.length > 4 && new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} (is|was|covers|writes|reports|has)\\b`).test(text(last)))) last.remove?.();
+  return byline;
+}
+
+/** The people in a byline: "Ann Lee, Bo Diaz and Cy Ng" is three names. */
+const names = (byline: string) => byline.replace(/^by\s+/i, '').split(/,|&|\band\b/).map((name) => name.trim()).filter(Boolean);
+
+function clean(html: string, authors: string[] = [], published?: string): { content: string; byline?: string } {
+  const { document } = parseHTML(`<!doctype html><html><body>${html}</body></html>`);
+  const body = document.body as unknown as HtmlNode;
+  const byline = tidy(body, authors, 6, published);
+  return { content: serialize(body).replace(/(<br\/>\s*){3,}/g, '<br/><br/>'), byline };
+}
+
+export const toXhtml = (html: string): string => clean(html).content;
 
 // ---- Pages -------------------------------------------------------------------
 
 export interface Extracted { title: string; byline: string; content: string }
 
+// Blocks that are never the article, by what the page itself calls them.
+const CHROME = 'nav, aside, footer, form, [role="navigation"], [role="complementary"], [role="contentinfo"], [aria-label*="share" i], ' +
+  ['share', 'social', 'newsletter', 'subscribe', 'related', 'recirc', 'promo', 'advert', 'sponsor', 'comment', 'breadcrumb', 'paywall', 'cookie', 'outbrain', 'taboola', 'read-more', 'most-read', 'trending',
+    'author-bio', 'about-author', 'reflist', 'references', 'navbox', 'infobox', 'hatnote', 'mw-editsection', 'catlinks']
+    .flatMap((word) => [`[class*="${word}" i]`, `[id*="${word}" i]`]).join(', ');
+
+/** The article as the publisher describes it in the page's schema.org metadata (JSON-LD), when it does. */
+function publishedArticle(document: { querySelectorAll(selector: string): Iterable<{ textContent: string | null }> }): { body?: string; author?: string } {
+  const found: { body?: string; author?: string } = {};
+  const visit = (node: unknown, depth = 0): void => {
+    if (!node || typeof node !== 'object' || depth > 6) return;
+    if (Array.isArray(node)) { for (const item of node) visit(item, depth + 1); return; }
+    const item = node as Record<string, unknown>;
+    if (/Article|BlogPosting|Report/.test([item['@type']].flat().join(' ')) && typeof item.articleBody === 'string' && item.articleBody.length > (found.body?.length ?? 0)) {
+      found.body = item.articleBody;
+      const people = [item.author].flat().map((a) => (typeof a === 'string' ? a : (a as { name?: unknown } | null)?.name)).filter((name): name is string => typeof name === 'string');
+      if (people.length) found.author = people.join(', ');
+    }
+    for (const key of ['@graph', 'mainEntity', 'mainEntityOfPage', 'hasPart']) visit(item[key], depth + 1);
+  };
+  for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+    try { visit(JSON.parse(script.textContent ?? '')); } catch { /* malformed metadata is common; the page still reads */ }
+  }
+  // Some publishers put markup or entities in it; only its words matter here.
+  if (found.body) found.body = found.body.replace(/<[^>]+>/g, ' ');
+  return found;
+}
+
 /** The readable article in a web page, or null when there isn't one. */
 export function extractArticle(html: string, url: string): Extracted | null {
   const { document } = parseHTML(html);
+  const published = publishedArticle(document);
+  // Drop the page's own furniture first, so the extractor is choosing among less.
+  // A match holding much of the page's text is a layout wrapper named "social-layout" or the like: leave it.
+  const whole = (document.body?.textContent ?? '').length;
+  for (const el of [...document.querySelectorAll(CHROME)]) {
+    if (!['body', 'main', 'article'].includes(el.localName) && (el.textContent ?? '').length < whole * 0.5) el.remove();
+  }
+  // "See also", "References" and the like end the article where the page marks its main content.
+  for (const main of [...document.querySelectorAll('article, main, [role="main"], .mw-parser-output')]) cutTail(main as unknown as HtmlNode);
   let article;
-  try { article = new Readability(document as unknown as Document).parse(); } catch { return null; }
-  if (!article?.content) return null;
-  const content = toXhtml(article.content, url);
+  const title = document.title?.trim();
+  try { article = new Readability(document as unknown as Document).parse(); } catch { article = null; }
+  const site = article?.siteName?.trim() || new URL(url).hostname.replace(/^www\./, '');
+  // Nothing readable in the page itself (it is drawn by scripts, say): the publisher's copy is the article.
+  if (!article?.content || textLength(article.content) < MIN_TEXT) {
+    const paragraphs = (published.body ?? '').split(/\n+/).map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
+    const content = paragraphs.map((line) => `<p>${escapeXml(line)}</p>`).join('');
+    if (textLength(content) < MIN_TEXT) return null;
+    return { title: article?.title?.trim() || title || site, byline: [published.author, site].filter(Boolean).join(', '), content };
+  }
+  const stated = article.byline?.trim().replace(/^by\s+/i, '');
+  const { content, byline: inText } = clean(article.content, names(stated || published.author || ''), published.body);
   if (textLength(content) < MIN_TEXT) return null;
-  const site = article.siteName?.trim() || new URL(url).hostname.replace(/^www\./, '');
   return {
     title: article.title?.trim() || site,
-    byline: [article.byline?.trim(), site].filter(Boolean).join(', '),
+    byline: [stated || published.author || inText, site].filter(Boolean).join(', '),
     content,
   };
 }
@@ -172,7 +314,7 @@ export async function saveArticle(db: DB, userId: number, input: string, http: H
 
 /** A feed item's article: its own full text, else the linked page, else its summary. */
 async function itemArticle(item: FeedItem, http: HttpTransport): Promise<Extracted | null> {
-  const own = toXhtml(item.html, item.url);
+  const own = toXhtml(item.html);
   const fromFeed = { title: item.title || item.url, byline: item.byline, content: own };
   if (textLength(own) >= FULL_TEXT) return fromFeed;
   try {
@@ -264,6 +406,9 @@ export function issueArticles(db: DB, userId: number, date: string, claim: boole
   ).all(userId, date) as unknown as IssueArticle[];
 }
 
+/** "6 min read", at an unhurried 230 words a minute. */
+const readingTime = (xhtml: string) => `${Math.max(1, Math.round(xhtml.replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length / 230))} min read`;
+
 const page = (title: string, body: string) =>
   `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="en" lang="en"><head><meta charset="UTF-8"/><title>${escapeXml(title)}</title></head><body>${body}</body></html>`;
 
@@ -297,6 +442,6 @@ export function buildEpub(date: string, articles: IssueArticle[]): Buffer {
     entry('OEBPS/nav.xhtml', nav),
     entry('OEBPS/toc.ncx', ncx),
     ...articles.map((a, i) => entry(`OEBPS/${file(i)}`, page(a.title,
-      `<h1>${escapeXml(a.title)}</h1>${a.byline ? `<p><em>${escapeXml(a.byline)}</em></p>` : ''}${a.content}<hr/><p><a href="${escapeXml(a.url)}">${escapeXml(a.url)}</a></p>`))),
+      `<h1>${escapeXml(a.title)}</h1><p><em>${escapeXml([a.byline, readingTime(a.content)].filter(Boolean).join(' · '))}</em></p><hr/>${a.content}`))),
   ]);
 }
