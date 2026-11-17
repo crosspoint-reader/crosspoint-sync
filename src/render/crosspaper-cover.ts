@@ -10,11 +10,27 @@ import { SleepGraphics } from './sleep-graphics.js';
  * on it, at one of the panel's native levels: in four greys it is an even tone,
  * and in 1-bit it either drops to white or becomes a halftone, never noise
  * behind lettering.
- * 480x800 is the panel size, so the sleep screen needs no scaling. Baseline
- * JPEG, because the firmware's decoder does not read progressive files.
+ * The page is laid out on a 480x800 grid and drawn at three times that size,
+ * like a normal book cover: the reader scales covers down to its own screen, so
+ * edges arrive smooth at any resolution, where a screen-sized image shows every
+ * antialiased edge as dither speckle. Baseline JPEG, because the firmware's
+ * decoder does not read progressive files.
  */
 
-export const COVER_WIDTH = 480, COVER_HEIGHT = 800;
+// The layout grid, and how many pixels each grid unit is drawn with.
+const COVER_WIDTH = 480, COVER_HEIGHT = 800;
+export const COVER_SCALE = 3;
+
+/** Draws in layout units onto a canvas COVER_SCALE times larger: every shape passes through fill(). */
+class Canvas extends SleepGraphics {
+  constructor() { super(COVER_WIDTH * COVER_SCALE, COVER_HEIGHT * COVER_SCALE, true); }
+  override fill(contours: { x: number; y: number }[][], gray = 0) {
+    super.fill(contours.map((points) => points.map((p) => ({ x: p.x * COVER_SCALE, y: p.y * COVER_SCALE }))), gray);
+  }
+}
+
+// One cover per date, the same for everyone; drawing it takes a moment, so recent ones are kept.
+const drawn = new Map<string, Buffer>();
 const MARGIN = 44;
 // One of the panel's four native levels (0, 85, 170, 255), so it shows as a flat tone.
 const DARK = 85;
@@ -22,7 +38,9 @@ const DARK = 85;
 export interface CoverInput { name: string; date: string }
 
 export function renderCover({ name, date }: CoverInput): Buffer {
-  const g = new SleepGraphics(COVER_WIDTH, COVER_HEIGHT, true);
+  const key = `${name}\n${date}`, kept = drawn.get(key);
+  if (kept) return kept;
+  const g = new Canvas();
   const right = COVER_WIDTH - MARGIN, inner = right - MARGIN;
   const rule = (y: number, thickness: number, from = MARGIN, to = right) => g.line(from, y, to, y, thickness);
 
@@ -127,5 +145,8 @@ export function renderCover({ name, date }: CoverInput): Buffer {
   rule(712, 1.5);
   g.text(part({ year: 'numeric' }), MARGIN, 744, 22, { weight: 'semibold', tracking: 80 });
 
-  return jpeg.encode({ data: g.image.data, width: COVER_WIDTH, height: COVER_HEIGHT }, 92).data;
+  const cover = jpeg.encode({ data: g.image.data, width: g.width, height: g.height }, 80).data;
+  if (drawn.size >= 8) drawn.delete(drawn.keys().next().value!);
+  drawn.set(key, cover);
+  return cover;
 }

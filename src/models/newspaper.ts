@@ -269,7 +269,9 @@ const page = (title: string, body: string) =>
 
 /** The paper's name, everywhere it is shown. */
 export const PAPER_NAME = 'CrossPaper';
-export const issueTitle = (date: string) => `CrossPaper ${date}`;
+/** An edition's title and file name: "CrossPaper Nov 16 2026". */
+export const issueTitle = (date: string) =>
+  `${PAPER_NAME} ${new Date(`${date}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).replace(',', '')}`;
 
 /** One EPUB (3, with an NCX for older readers): a cover, a contents page, then a chapter per article. */
 export function buildEpub(date: string, articles: IssueArticle[]): Buffer {

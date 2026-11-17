@@ -35,24 +35,28 @@ export class SleepGraphics {
   }
   fill(contours: Point[][], gray = 0) {
     const edges: [Point, Point][] = [];
-    let minY = this.height, maxY = 0;
+    let minY = this.height, maxY = 0, minX = this.width, maxX = 0;
     for (const points of contours) for (let i = 0; i < points.length; i++) {
       const a = points[i], b = points[(i + 1) % points.length];
       if (a.y !== b.y) edges.push([a,b]);
       minY = Math.min(minY, a.y); maxY = Math.max(maxY, a.y);
+      minX = Math.min(minX, a.x); maxX = Math.max(maxX, a.x);
     }
+    // Only the columns the shape spans: the same pixels, far less work for small shapes.
+    const x0 = Math.max(0, Math.floor(minX)), x1 = Math.min(this.width, Math.ceil(maxX) + 1);
+    if (x1 <= x0) return;
     for (let y = Math.max(0, Math.floor(minY)); y < Math.min(this.height, Math.ceil(maxY)); y++) {
-      const coverage = new Float32Array(this.width);
+      const coverage = new Float32Array(x1 - x0);
       for (const dy of [.25,.75]) {
         const scan = y + dy, xs: number[] = [];
         for (const [a,b] of edges) if ((a.y <= scan && b.y > scan) || (b.y <= scan && a.y > scan)) xs.push(a.x + (scan - a.y) * (b.x - a.x) / (b.y - a.y));
         xs.sort((a,b) => a - b);
         for (let i = 0; i + 1 < xs.length; i += 2) {
           const left = Math.max(0, xs[i]), right = Math.min(this.width, xs[i + 1]);
-          for (let x = Math.floor(left); x < Math.ceil(right); x++) if (x >= 0 && x < this.width) coverage[x] += .5 * Math.max(0, Math.min(x + 1, right) - Math.max(x, left));
+          for (let x = Math.floor(left); x < Math.ceil(right); x++) if (x >= x0 && x < x1) coverage[x - x0] += .5 * Math.max(0, Math.min(x + 1, right) - Math.max(x, left));
         }
       }
-      for (let x = 0; x < this.width; x++) if (coverage[x]) this.pixel(x, y, gray, Math.min(1, coverage[x]));
+      for (let x = x0; x < x1; x++) if (coverage[x - x0]) this.pixel(x, y, gray, Math.min(1, coverage[x - x0]));
     }
   }
   line(x1: number, y1: number, x2: number, y2: number, thickness = 1, gray = 0) {

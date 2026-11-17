@@ -98,7 +98,9 @@ describe('newspaper', () => {
     expect((await app.request('/api/v1/newspaper/issue/today.epub', { headers })).status).toBe(404);
     const past = await app.request(`/api/v1/newspaper/issue/${day}.epub`, { headers });
     expect(past.status).toBe(200);
-    expect(past.headers.get('content-disposition')).toContain(`CrossPaper ${day}.epub`);
+    // Named the way a person writes the date: "CrossPaper Nov 16 2026.epub".
+    const written = new Date(then * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).replace(',', '');
+    expect(past.headers.get('content-disposition')).toContain(`CrossPaper ${written}.epub`);
   });
 
   it('finds a feed from a site home page and rejects pages with no article', async () => {
@@ -137,7 +139,7 @@ describe('newspaper', () => {
     expect(sof).toBeGreaterThan(0);
     expect(jpg.includes(Buffer.from([0xff, 0xc2]))).toBe(false);
     const { width, height, data } = jpeg.decode(jpg);
-    expect([width, height]).toEqual([480, 800]);
+    expect([width, height]).toEqual([1440, 2400]); // three times the reader's screen, scaled down on the device
     // Every flat area sits on a native level; anything in between would dither into noise.
     // Edges (type, halftone dots) are antialiased, so only pixels with flat surroundings count.
     const at = (x: number, y: number) => data[(y * width + x) * 4];
@@ -155,7 +157,7 @@ describe('newspaper', () => {
     expect(near[1]).toBeGreaterThan(width * height * 0.1); // the dark grey field
     // Text sits on white: below the field, grey appears only on glyph edges.
     let grey = 0;
-    const rows = [400, height - 30]; // between the field and the bottom band
+    const rows = [400 * 3, height - 30 * 3]; // between the field and the bottom band
     for (let p = rows[0] * width * 4; p < rows[1] * width * 4; p += 4) if (Math.abs(data[p] - 85) < 25) grey++;
     expect(grey / ((rows[1] - rows[0]) * width)).toBeLessThan(0.02);
   });
