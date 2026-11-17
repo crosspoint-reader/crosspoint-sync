@@ -159,20 +159,25 @@ export default function CrossPaper({ session }) {
 
       <Card className="mt-5 p-4">
         <h2 className="font-semibold text-stone-900">Today&apos;s CrossPaper</h2>
-        <p className="mt-1 text-sm/6 text-stone-500">
-          {waiting.length
-            ? `${waiting.length} ${waiting.length === 1 ? 'article' : 'articles'} so far. New posts from your feeds are added when you ${isApp ? 'send' : 'download'} it.`
-            : 'Nothing yet today. Save a page or follow a feed below.'}
+        <p className="mt-1 text-sm/6 text-stone-600">
+          A daily newspaper for your reader, made from web pages you save and feeds you follow. Each day&apos;s articles are bundled into one book.
         </p>
-        <button onClick={() => fetchEdition('today')} disabled={!!building} className={`${button} mt-3`}>
+        <ol className="mt-3 list-decimal space-y-1 pl-5 text-sm/6 text-stone-600">
+          <li>Save pages or follow feeds below.</li>
+          <li>Press <span className="font-medium text-stone-800">{isApp ? 'Send to CrossPoint' : 'Download Today’s Edition'}</span> to get today&apos;s edition as a book.</li>
+          <li>Tomorrow starts a new edition. Earlier ones are kept under Editions.</li>
+        </ol>
+        <p className="mt-4 text-sm font-medium text-stone-900">
+          {waiting.length ? `Today so far: ${waiting.length} ${waiting.length === 1 ? 'article' : 'articles'}` : 'Nothing saved yet today'}
+        </p>
+        <button onClick={() => fetchEdition('today')} disabled={!!building} className={`${button} mt-2`}>
           {building === 'today' ? <Loader2 className="size-4 animate-spin" /> : isApp ? <SendIcon className="size-4" /> : <Download className="size-4" />}
           {building === 'today' ? 'Building…' : isApp ? 'Send to CrossPoint' : 'Download Today’s Edition'}
         </button>
-        <p className="mt-3 text-sm/6 text-stone-500">Skip a day and it is still saved under Editions.</p>
-        <details className="mt-3 border-t border-stone-200 pt-3 text-sm/6 text-stone-500">
+        <details className="mt-4 border-t border-stone-200 pt-3 text-sm/6 text-stone-500">
           <summary className="cursor-pointer font-medium text-stone-600">Get it from your reader, without the app</summary>
           <p className="mt-2">On your reader, add this OPDS catalog and sign in with your sync username and password:</p>
-          <p className="mt-1 font-mono text-xs break-all text-stone-700">{session.server}/opds/newspaper</p>
+          <p className="mt-1 font-mono text-xs break-all text-stone-700">{session.server}/opds/crosspaper</p>
         </details>
       </Card>
 

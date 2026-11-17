@@ -121,12 +121,12 @@ describe('newspaper', () => {
     await app.request('/api/v1/newspaper/articles', post(headers, 'https://news.test/story'));
     const basic = (pass: string) => ({ authorization: `Basic ${Buffer.from(`${username}:${pass}`).toString('base64')}` });
 
-    expect((await app.request('/opds/newspaper')).status).toBe(401);
-    expect((await app.request('/opds/newspaper', { headers: basic('wrong') })).status).toBe(401);
-    expect((await app.request('/opds/newspaper/today.epub', { headers: basic('wrong') })).status).toBe(401);
-    const feed = await app.request('/opds/newspaper', { headers: basic(password) });
-    expect(await feed.text()).toContain('href="/opds/newspaper/today.epub"');
-    const epub = await app.request('/opds/newspaper/today.epub', { headers: basic(password) });
+    expect((await app.request('/opds/crosspaper')).status).toBe(401);
+    expect((await app.request('/opds/crosspaper', { headers: basic('wrong') })).status).toBe(401);
+    expect((await app.request('/opds/crosspaper/today.epub', { headers: basic('wrong') })).status).toBe(401);
+    const feed = await app.request('/opds/crosspaper', { headers: basic(password) });
+    expect(await feed.text()).toContain('href="/opds/crosspaper/today.epub"');
+    const epub = await app.request('/opds/crosspaper/today.epub', { headers: basic(password) });
     expect(epub.headers.get('content-type')).toBe('application/epub+zip');
   });
 

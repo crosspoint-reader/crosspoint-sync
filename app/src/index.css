@@ -158,6 +158,14 @@ body {
   -webkit-touch-callout: none;
 }
 
+/* The apps behave like native ones, where a long press does not select the
+   interface. In a browser, text on the page selects and copies as usual. */
+.in-browser body {
+  -webkit-user-select: auto;
+  user-select: auto;
+  -webkit-touch-callout: default;
+}
+
 /* Text entry still needs selection handles and copy/paste. */
 input, textarea, [contenteditable]:not([contenteditable="false"]) {
   -webkit-user-select: text;

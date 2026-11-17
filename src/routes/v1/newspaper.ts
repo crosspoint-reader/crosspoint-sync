@@ -98,7 +98,7 @@ export function newspaperRoutes(db: DB, http: HttpTransport): Hono<AppEnv> {
  */
 export function newspaperOpdsRoutes(api: Hono<AppEnv>, basePath: string): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
-  const root = `${basePath}/opds/newspaper`;
+  const root = `${basePath}/opds/crosspaper`;
 
   const asUser = (c: Context, path: string): Promise<Response> | null => {
     const basic = /^Basic\s+(.+)$/i.exec(c.req.header('authorization') ?? '')?.[1];
@@ -107,7 +107,7 @@ export function newspaperOpdsRoutes(api: Hono<AppEnv>, basePath: string): Hono<A
   };
   const challenge = (c: Context) => c.text('Sign in with your sync username and password.', 401, { 'WWW-Authenticate': 'Basic realm="CrossPoint Sync"' });
 
-  app.get('/opds/newspaper', async (c) => {
+  app.get('/opds/crosspaper', async (c) => {
     const res = await asUser(c, '/newspaper');
     if (!res || res.status !== 200) return challenge(c);
     const { articles } = await res.json() as { articles: { issue: string | null }[] };
@@ -121,7 +121,7 @@ export function newspaperOpdsRoutes(api: Hono<AppEnv>, basePath: string): Hono<A
       200, { 'Content-Type': 'application/atom+xml;profile=opds-catalog;kind=acquisition', 'Cache-Control': 'no-store' });
   });
 
-  app.get('/opds/newspaper/:file', async (c) => {
+  app.get('/opds/crosspaper/:file', async (c) => {
     const res = await asUser(c, `/newspaper/issue/${encodeURIComponent(c.req.param('file'))}`);
     return !res || res.status === 401 ? challenge(c) : res;
   });
