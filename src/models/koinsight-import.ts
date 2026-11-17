@@ -17,7 +17,17 @@ const MAX_ROWS = 200_000;
 const fail = (message: string): never => { throw new AccountImportError(message); };
 type Page = { book_md5: string; page: number; total_pages: number; start_time: number; duration: number };
 type Book = { md5: string; title: string | null; authors: string | null; reference_pages: number | null };
-export type History = { books: Book[]; pages: Page[]; source?: 'KOInsight' | 'KOReader' };
+export type HistorySkips = { nonpositive_duration: number; unknown_page_count: number };
+export type History = { books: Book[]; pages: Page[]; source?: 'KOInsight' | 'KOReader'; skipped?: HistorySkips; adjusted_pages?: number };
+
+export class HistoryPageValidationError extends AccountImportError {
+  constructor(
+    message: string,
+    readonly source: 'KOInsight' | 'KOReader',
+    readonly reason: 'invalid_page_fields',
+    readonly rejectedRecords: number,
+  ) { super(message); }
+}
 
 function readDatabase(bytes: Buffer, path: string): History | null {
   if (bytes.subarray(0, 16).toString() !== 'SQLite format 3\0') return null;
@@ -45,19 +55,68 @@ function readDatabase(bytes: Buffer, path: string): History | null {
       if ([b.title, b.authors].some(v => v !== null && (typeof v !== 'string' || v.length > 4096))) fail('Invalid book metadata.');
       if (b.reference_pages !== null && (!Number.isSafeInteger(b.reference_pages) || b.reference_pages < 0 || b.reference_pages > 1_000_000)) fail('Invalid page count.');
     }
+    const skipped: HistorySkips = { nonpositive_duration: 0, unknown_page_count: 0 };
+    const validPages: Page[] = [];
+    let invalidPages = 0;
+    let adjustedPages = 0;
     for (const p of pages) {
+      // KOReader records incomplete turns. Match Deluxe-Sync's duration/page-count
+      // filtering, but reject malformed positions and timestamps.
       if (typeof p.book_md5 !== 'string' || ![p.page, p.total_pages, p.start_time, p.duration].every(Number.isSafeInteger) ||
-          p.page < 0 || p.total_pages < 0 || p.total_pages > 1_000_000 || p.page > p.total_pages ||
-          p.start_time < 946684800 || p.start_time > 4102444799 || p.duration < 0 || p.duration > 86400) fail('Invalid KOInsight page history. Nothing was imported.');
+          p.page < 0 || p.page > 1_000_000 || p.total_pages < 0 || p.total_pages > 1_000_000 || p.start_time < 946684800 ||
+          p.start_time > 4102444799 || p.duration > 86400) {
+        invalidPages++;
+        continue;
+      }
+      if (native && p.total_pages === 0) { skipped.unknown_page_count++; continue; }
+      if (native && p.duration <= 0) { skipped.nonpositive_duration++; continue; }
+      if (p.duration < 0) { invalidPages++; continue; }
+      if (p.page > p.total_pages) {
+        // Validate original KOReader coordinates before deduplication or
+        // increasing stale page totals, so distinct source turns remain distinct.
+        const excess = p.page - p.total_pages;
+        if (!native || excess > 32 || p.page >= p.total_pages * 1.25) {
+          invalidPages++;
+          continue;
+        }
+        if (hashes.has(p.book_md5)) validPages.push(p);
+        continue;
+      }
+      if (hashes.has(p.book_md5) && p.total_pages > 0) validPages.push(p);
     }
+    const sourceName = native ? 'KOReader' : 'KOInsight';
+    if (invalidPages) throw new HistoryPageValidationError(
+      `Invalid ${sourceName} page history (${invalidPages} malformed ${invalidPages === 1 ? 'record' : 'records'}). Nothing was imported.`,
+      sourceName, 'invalid_page_fields', invalidPages,
+    );
     const uniqueBooks = [...new Map(books.map(b => [b.md5, b])).values()];
-    const validPages = pages.filter(p => hashes.has(p.book_md5) && p.total_pages > 0);
+    // First deduplicate exact source turns, before changing their page coordinates.
     const uniquePages = new Map<string, Page>();
     for (const p of validPages) {
       const key = `${p.book_md5}:${p.page}:${p.total_pages}:${p.start_time}`;
       if (!uniquePages.has(key) || uniquePages.get(key)!.duration < p.duration) uniquePages.set(key, p);
     }
-    return { books: uniqueBooks, pages: native ? [...uniquePages.values()] : validPages, source: native ? 'KOReader' : 'KOInsight' };
+    const normalizedPages = new Map<string, Page>();
+    if (native) for (const raw of uniquePages.values()) {
+      // Raising the stale total preserves each original page number, so
+      // consecutive overruns at the same timestamp do not collapse.
+      const p = raw.page > raw.total_pages ? { ...raw, total_pages: raw.page } : raw;
+      if (p !== raw) adjustedPages++;
+      const key = `${p.book_md5}:${p.page}:${p.total_pages}:${p.start_time}`;
+      const existing = normalizedPages.get(key);
+      if (existing) {
+        // Different raw turns can still converge on the same stored key (for
+        // example page 352/351 and 352/352). Retain both reading durations.
+        const duration = existing.duration + p.duration;
+        if (duration > 86400) throw new HistoryPageValidationError(
+          'Distinct KOReader page turns exceed the maximum combined duration. Nothing was imported.',
+          sourceName, 'invalid_page_fields', 1,
+        );
+        normalizedPages.set(key, { ...existing, duration });
+      } else normalizedPages.set(key, p);
+    }
+    return { books: uniqueBooks, pages: native ? [...normalizedPages.values()] : [...uniquePages.values()],
+      source: sourceName, ...(native ? { skipped, adjusted_pages: adjustedPages } : {}) };
   } finally { source.close(); }
 }
 

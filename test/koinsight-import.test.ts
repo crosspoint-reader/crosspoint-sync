@@ -144,6 +144,42 @@ describe('KOInsight file import', () => {
     expect((await s.app.request('/api/v1/account/import/koinsight', { method: 'POST' })).status).toBe(401);
   });
 
+  it('deduplicates KOInsight page turns before preview and keeps imported history and totals consistent', async () => {
+    const when = at('2025-11-01T23:30:00Z');
+    const bytes = database(db => {
+      const turn = db.prepare('INSERT INTO page_stat VALUES (?, ?, ?, ?, ?)');
+      turn.run(OLD, 1, 100, when, 20);
+      turn.run(OLD, 1, 100, when, 45);
+    });
+    const history = await readHistoryFile(bytes);
+    expect(history.source).toBe('KOInsight');
+    expect(history.pages).toHaveLength(3);
+    expect(history.pages.find(p => p.book_md5 === OLD && p.page === 1)).toMatchObject({
+      duration: 45, start_time: when,
+    });
+
+    const s = await fixture();
+    const preview = await s.upload(bytes);
+    expect(preview.status).toBe(200);
+    expect((await preview.json()).books).toEqual(expect.arrayContaining([
+      expect.objectContaining({ document: OLD, records: 2 }),
+      expect.objectContaining({ document: SECOND, records: 1 }),
+    ]));
+    expect(s.db.prepare('SELECT * FROM reader_history_pages').all()).toEqual([]);
+
+    const finishes = { [OLD]: '2025-11-02', [SECOND]: null };
+    const imported = await s.upload(bytes, finishes);
+    expect(imported.status).toBe(200);
+    const stored = () => s.db.prepare('SELECT COUNT(*) AS pages, SUM(duration) AS seconds FROM reader_history_pages').get();
+    expect(stored()).toEqual({ pages: 3, seconds: 125 });
+    expect(JSON.parse(String(s.db.prepare('SELECT payload FROM stats_device_global').get()!.payload))).toMatchObject({
+      pages: 3, seconds: 125,
+    });
+    expect((await s.upload(bytes, finishes)).status).toBe(200);
+    expect(stored()).toEqual({ pages: 3, seconds: 125 });
+    expect(s.db.prepare('SELECT * FROM progress').all()).toEqual([]);
+  });
+
   it('reads KOReader raw page records without executing its page_stat view, and deduplicates copies', async () => {
     const bytes = database(db => db.exec(`
       ALTER TABLE book ADD COLUMN id INTEGER;
@@ -167,6 +203,204 @@ describe('KOInsight file import', () => {
     expect(s.db.prepare('SELECT * FROM progress').all()).toEqual([]);
     expect(s.db.prepare('SELECT * FROM progress_log').all()).toHaveLength(3);
     expect(JSON.parse(String(s.db.prepare('SELECT payload FROM stats_device_global').get()!.payload)).seconds).toBe(110);
+  });
+
+  it('skips incomplete native KOReader turns, reports them in preview, and imports only valid history', async () => {
+    const bytes = database(db => db.exec(`
+      ALTER TABLE book ADD COLUMN id INTEGER;
+      UPDATE book SET id = CASE WHEN md5 = '${OLD}' THEN 1 ELSE 2 END;
+      CREATE TABLE page_stat_data (id_book INTEGER, page INTEGER, total_pages INTEGER, start_time INTEGER, duration INTEGER);
+      INSERT INTO page_stat_data SELECT b.id, p.page, p.total_pages, p.start_time, p.duration
+        FROM page_stat p JOIN book b ON b.md5 = p.book_md5;
+      INSERT INTO page_stat_data VALUES
+        (1, 3, 100, ${at('2025-11-01T23:40:00Z')}, 0),
+        (1, 4, 100, ${at('2025-11-01T23:50:00Z')}, -1),
+        (2, 5, 0, ${at('2025-11-04T03:00:00Z')}, 25);
+      DROP TABLE page_stat;
+      CREATE VIEW page_stat AS SELECT * FROM never_execute_this_view;
+    `));
+    const history = await readHistoryFile(bytes);
+    expect(history.source).toBe('KOReader');
+    expect(history.skipped).toEqual({ nonpositive_duration: 2, unknown_page_count: 1 });
+    expect(history.pages).toHaveLength(3);
+    const s = await fixture();
+    const preview = await s.upload(bytes);
+    expect(preview.status).toBe(200);
+    expect(await preview.json()).toMatchObject({
+      source: 'KOReader', skipped_records: 3,
+      skipped_reasons: { nonpositive_duration: 2, unknown_page_count: 1 },
+    });
+    expect(s.db.prepare('SELECT * FROM documents').all()).toEqual([]);
+    const imported = await s.upload(bytes, { [OLD]: '2025-11-02', [SECOND]: null });
+    expect(imported.status).toBe(200);
+    expect((await imported.json()).imported_history).toBe(2);
+    expect(JSON.parse(String(s.db.prepare('SELECT payload FROM stats_device_global').get()!.payload)).seconds).toBe(110);
+    expect(s.db.prepare('SELECT * FROM progress').all()).toEqual([]);
+  });
+
+  it('preserves KOReader history when saved pages exceed a stale total, without accepting implausible values', async () => {
+    const t1 = at('2025-11-01T23:40:00Z');
+    const t2 = at('2025-11-01T23:50:00Z');
+    const t3 = at('2025-11-04T03:00:00Z');
+    const bytes = database(db => db.exec(`
+      ALTER TABLE book ADD COLUMN id INTEGER;
+      UPDATE book SET id = CASE WHEN md5 = '${OLD}' THEN 1 ELSE 2 END;
+      CREATE TABLE page_stat_data (id_book INTEGER, page INTEGER, total_pages INTEGER, start_time INTEGER, duration INTEGER);
+      INSERT INTO page_stat_data SELECT b.id, p.page, p.total_pages, p.start_time, p.duration
+        FROM page_stat p JOIN book b ON b.md5 = p.book_md5;
+      INSERT INTO page_stat_data VALUES
+        (1, 352, 351, ${t1}, 46),
+        (1, 373, 351, ${t2}, 40),
+        (2, 135, 113, ${t3}, 25);
+      DROP TABLE page_stat;
+      CREATE VIEW page_stat AS SELECT * FROM never_execute_this_view;
+    `));
+    const history = await readHistoryFile(bytes);
+    expect(history).toMatchObject({ source: 'KOReader', adjusted_pages: 3, skipped: {
+      nonpositive_duration: 0, unknown_page_count: 0,
+    } });
+    expect(history.pages).toHaveLength(6);
+    expect(history.pages.find(p => p.start_time === t1)).toMatchObject({ page: 352, total_pages: 352, duration: 46 });
+    expect(history.pages.find(p => p.start_time === t2)).toMatchObject({ page: 373, total_pages: 373, duration: 40 });
+    expect(history.pages.find(p => p.start_time === t3)).toMatchObject({ page: 135, total_pages: 135, duration: 25 });
+    const s = await fixture();
+    const preview = await s.upload(bytes);
+    expect(preview.status).toBe(200);
+    expect(await preview.json()).toMatchObject({ source: 'KOReader', adjusted_records: 3, skipped_records: 0 });
+    expect(s.db.prepare('SELECT * FROM documents').all()).toEqual([]);
+    const imported = await s.upload(bytes, { [OLD]: '2025-11-02', [SECOND]: null });
+    expect(imported.status).toBe(200);
+    expect(JSON.parse(String(s.db.prepare('SELECT payload FROM stats_device_global').get()!.payload)).seconds).toBe(221);
+    expect(s.db.prepare('SELECT * FROM progress').all()).toEqual([]);
+  });
+
+  it('retains distinct same-timestamp overruns and combines only true post-normalization collisions', async () => {
+    const when = at('2025-11-01T23:40:00Z');
+    const bytes = database(db => db.exec(`
+      ALTER TABLE book ADD COLUMN id INTEGER;
+      UPDATE book SET id = CASE WHEN md5 = '${OLD}' THEN 1 ELSE 2 END;
+      CREATE TABLE page_stat_data (id_book INTEGER, page INTEGER, total_pages INTEGER, start_time INTEGER, duration INTEGER);
+      INSERT INTO page_stat_data SELECT b.id, p.page, p.total_pages, p.start_time, p.duration
+        FROM page_stat p JOIN book b ON b.md5 = p.book_md5;
+      INSERT INTO page_stat_data VALUES
+        (1, 352, 351, ${when}, 20),
+        (1, 352, 351, ${when}, 5),
+        (1, 353, 351, ${when}, 40),
+        (1, 352, 352, ${when}, 30);
+      DROP TABLE page_stat;
+      CREATE VIEW page_stat AS SELECT * FROM never_execute_this_view;
+    `));
+    const history = await readHistoryFile(bytes);
+    expect(history.source).toBe('KOReader');
+    expect(history.adjusted_pages).toBe(2);
+    expect(history.pages).toHaveLength(5);
+    expect(history.pages.find(p => p.start_time === when && p.page === 352)).toMatchObject({
+      page: 352, total_pages: 352, duration: 50,
+    });
+    expect(history.pages.find(p => p.start_time === when && p.page === 353)).toMatchObject({
+      page: 353, total_pages: 353, duration: 40,
+    });
+    const s = await fixture();
+    const preview = await s.upload(bytes);
+    expect(preview.status).toBe(200);
+    expect(await preview.json()).toMatchObject({ source: 'KOReader', adjusted_records: 2, skipped_records: 0 });
+    const finishes = { [OLD]: null, [SECOND]: null };
+    const imported = await s.upload(bytes, finishes);
+    expect(imported.status).toBe(200);
+    const totals = () => s.db.prepare('SELECT COUNT(*) AS pages, SUM(duration) AS seconds FROM reader_history_pages').get();
+    expect(totals()).toEqual({ pages: 5, seconds: 200 });
+    expect(JSON.parse(String(s.db.prepare('SELECT payload FROM stats_device_global').get()!.payload))).toMatchObject({
+      pages: 5, seconds: 200,
+    });
+    expect((await s.upload(bytes, finishes)).status).toBe(200);
+    expect(totals()).toEqual({ pages: 5, seconds: 200 });
+    expect(s.db.prepare('SELECT * FROM progress').all()).toEqual([]);
+  });
+
+  it('rejects an exact 25-percent native page overrun (page 5 of 4) before writing', async () => {
+    const bytes = database(db => db.exec(`
+      ALTER TABLE book ADD COLUMN id INTEGER;
+      UPDATE book SET id = CASE WHEN md5 = '${OLD}' THEN 1 ELSE 2 END;
+      CREATE TABLE page_stat_data (id_book INTEGER, page INTEGER, total_pages INTEGER, start_time INTEGER, duration INTEGER);
+      INSERT INTO page_stat_data SELECT b.id, p.page, p.total_pages, p.start_time, p.duration
+        FROM page_stat p JOIN book b ON b.md5 = p.book_md5;
+      INSERT INTO page_stat_data VALUES (1, 5, 4, ${at('2025-11-01T23:45:00Z')}, 20);
+      DROP TABLE page_stat;
+      CREATE VIEW page_stat AS SELECT * FROM never_execute_this_view;
+    `));
+    await expect(readHistoryFile(bytes)).rejects.toThrow('Invalid KOReader page history (1 malformed record)');
+    const s = await fixture();
+    const preview = await s.upload(bytes);
+    expect(preview.status).toBe(400);
+    expect((await preview.json()).message).toContain('Invalid KOReader page history (1 malformed record)');
+    const attemptedImport = await s.upload(bytes, { [OLD]: null, [SECOND]: null });
+    expect(attemptedImport.status).toBe(400);
+    expect(s.db.prepare('SELECT * FROM documents').all()).toEqual([]);
+    expect(s.db.prepare('SELECT * FROM reader_history_pages').all()).toEqual([]);
+    expect(s.db.prepare('SELECT * FROM progress').all()).toEqual([]);
+  });
+
+  it('rejects page 4 of 3 rather than rounding the 25-percent threshold up', async () => {
+    const bytes = database(db => db.exec(`
+      ALTER TABLE book ADD COLUMN id INTEGER;
+      UPDATE book SET id = CASE WHEN md5 = '${OLD}' THEN 1 ELSE 2 END;
+      CREATE TABLE page_stat_data (id_book INTEGER, page INTEGER, total_pages INTEGER, start_time INTEGER, duration INTEGER);
+      INSERT INTO page_stat_data SELECT b.id, p.page, p.total_pages, p.start_time, p.duration
+        FROM page_stat p JOIN book b ON b.md5 = p.book_md5;
+      INSERT INTO page_stat_data VALUES (1, 4, 3, ${at('2025-11-01T23:45:00Z')}, 20);
+      DROP TABLE page_stat;
+      CREATE VIEW page_stat AS SELECT * FROM never_execute_this_view;
+    `));
+    await expect(readHistoryFile(bytes)).rejects.toThrow('Invalid KOReader page history (1 malformed record)');
+    const s = await fixture();
+    const preview = await s.upload(bytes);
+    expect(preview.status).toBe(400);
+    expect(s.db.prepare('SELECT * FROM documents').all()).toEqual([]);
+    expect(s.db.prepare('SELECT * FROM reader_history_pages').all()).toEqual([]);
+  });
+
+  it('rejects a native overrun above the persisted page-count ceiling before preview or import', async () => {
+    const bytes = database(db => db.exec(`
+      ALTER TABLE book ADD COLUMN id INTEGER;
+      UPDATE book SET id = CASE WHEN md5 = '${OLD}' THEN 1 ELSE 2 END;
+      CREATE TABLE page_stat_data (id_book INTEGER, page INTEGER, total_pages INTEGER, start_time INTEGER, duration INTEGER);
+      INSERT INTO page_stat_data SELECT b.id, p.page, p.total_pages, p.start_time, p.duration
+        FROM page_stat p JOIN book b ON b.md5 = p.book_md5;
+      INSERT INTO page_stat_data VALUES (1, 1000001, 1000000, ${at('2025-11-01T23:45:00Z')}, 20);
+      DROP TABLE page_stat;
+      CREATE VIEW page_stat AS SELECT * FROM never_execute_this_view;
+    `));
+    await expect(readHistoryFile(bytes)).rejects.toThrow('Invalid KOReader page history (1 malformed record)');
+    const s = await fixture();
+    const preview = await s.upload(bytes);
+    expect(preview.status).toBe(400);
+    expect((await preview.json()).message).toContain('Invalid KOReader page history (1 malformed record)');
+    const attemptedImport = await s.upload(bytes, { [OLD]: null, [SECOND]: null });
+    expect(attemptedImport.status).toBe(400);
+    expect((await attemptedImport.json()).message).toContain('Invalid KOReader page history (1 malformed record)');
+    expect(s.db.prepare('SELECT * FROM documents').all()).toEqual([]);
+    expect(s.db.prepare('SELECT * FROM reader_history_pages').all()).toEqual([]);
+    expect(s.db.prepare('SELECT * FROM progress').all()).toEqual([]);
+  });
+
+  it('rejects malformed native KOReader positions with a source-specific error and no writes', async () => {
+    const bytes = database(db => db.exec(`
+      ALTER TABLE book ADD COLUMN id INTEGER;
+      UPDATE book SET id = CASE WHEN md5 = '${OLD}' THEN 1 ELSE 2 END;
+      CREATE TABLE page_stat_data (id_book INTEGER, page INTEGER, total_pages INTEGER, start_time INTEGER, duration INTEGER);
+      INSERT INTO page_stat_data SELECT b.id, p.page, p.total_pages, p.start_time, p.duration
+        FROM page_stat p JOIN book b ON b.md5 = p.book_md5;
+      INSERT INTO page_stat_data VALUES (1, 1000, 100, ${at('2025-11-01T23:45:00Z')}, 15);
+      DROP TABLE page_stat;
+      CREATE VIEW page_stat AS SELECT * FROM never_execute_this_view;
+    `));
+    await expect(readHistoryFile(bytes)).rejects.toThrow('Invalid KOReader page history');
+    const s = await fixture();
+    const preview = await s.upload(bytes);
+    expect(preview.status).toBe(400);
+    expect((await preview.json()).message).toContain('Invalid KOReader page history (1 malformed record)');
+    expect(s.db.prepare('SELECT * FROM documents').all()).toEqual([]);
+    expect(s.db.prepare('SELECT * FROM progress').all()).toEqual([]);
   });
 
   it('rejects ambiguous archives and views instead of executing uploaded queries', async () => {

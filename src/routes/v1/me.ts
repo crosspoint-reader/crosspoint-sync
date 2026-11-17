@@ -6,7 +6,7 @@ import { invalidateAuthCache, type AppEnv } from '../../auth/middleware.js';
 import { hashKey } from '../../auth/password.js';
 import { deleteKosyncUserData } from '../account.js';
 import { readTrackerCsv, trackerPreview, importTracker } from '../../models/tracker-import.js';
-import { MAX_HISTORY_FILE, readHistoryFile, prepareHistory, historyPreview, importHistory } from '../../models/koinsight-import.js';
+import { MAX_HISTORY_FILE, readHistoryFile, prepareHistory, historyPreview, importHistory, HistoryPageValidationError } from '../../models/koinsight-import.js';
 import { autoPauseDays, setAutoPauseDays } from '../../models/pause.js';
 import { goalTarget, goalYear, goalTimezone, readingGoals } from '../../models/reading-goals.js';
 import { claimMasterAccount, issueMasterToken } from '../auth.js';
@@ -78,14 +78,30 @@ export function meRoutes(db: DB): Hono<AppEnv> {
         return c.json(importTracker(db, c.get('user').id, tracker, choices));
       }
       const history = await readHistoryFile(bytes);
+      const skippedReasons = history.skipped ?? { nonpositive_duration: 0, unknown_page_count: 0 };
+      const skippedRecords = skippedReasons.nonpositive_duration + skippedReasons.unknown_page_count;
+      const preview = c.req.query('preview') === '1';
+      console.info(JSON.stringify({ msg: 'reading history file parsed', action: preview ? 'preview' : 'import',
+        source: history.source ?? 'unknown', books: history.books.length, accepted_pages: history.pages.length,
+        skipped_pages: skippedRecords, skipped_reasons: skippedReasons,
+        adjusted_pages: history.adjusted_pages ?? 0 }));
       const prepared = prepareHistory(db, c.get('user').id, history, timezone);
-      if (c.req.query('preview') === '1') return c.json({ kind: 'activity', source: history.source, ...historyPreview(prepared) });
+      if (preview) return c.json({ kind: 'activity', source: history.source,
+        skipped_records: skippedRecords, skipped_reasons: skippedReasons,
+        adjusted_records: history.adjusted_pages ?? 0, ...historyPreview(prepared) });
       let finishes: unknown;
       try { finishes = JSON.parse(String(form.get('choices') ?? form.get('finishes'))); }
       catch { return c.json({ message: 'Review the finished books before importing.' }, 400); }
       return c.json(importHistory(db, c.get('user').id, prepared, finishes));
     } catch (error) {
-      if (error instanceof AccountImportError) return c.json({ message: error.message }, error.status);
+      if (error instanceof AccountImportError) {
+        console.warn(JSON.stringify({ msg: 'reading history import rejected',
+          source: error instanceof HistoryPageValidationError ? error.source : 'unknown',
+          reason: error instanceof HistoryPageValidationError ? error.reason : 'validation_error',
+          rejected_records: error instanceof HistoryPageValidationError ? error.rejectedRecords : 0,
+          action: c.req.query('preview') === '1' ? 'preview' : 'import' }));
+        return c.json({ message: error.message }, error.status);
+      }
       if (error instanceof TypeError) return c.json({ message: 'Invalid history upload.' }, 400);
       throw error;
     }

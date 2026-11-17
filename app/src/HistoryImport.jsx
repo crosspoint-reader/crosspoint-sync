@@ -64,6 +64,8 @@ export default function HistoryImport({ session }) {
             </div>
           </> : <>
           <p className="text-sm text-stone-700">{preview.books.length} books · {Object.values(finishes).filter(Boolean).length} finished · {preview.books.filter(b => b.existing_history).length} with existing stats</p>
+          {preview.adjusted_records > 0 && <p role="status" className="text-sm text-amber-700">{preview.adjusted_records} KOReader page record{preview.adjusted_records === 1 ? '' : 's'} exceeded the saved page count. Saved page totals were raised to cover the original page numbers and preserve reading time. Review suggested finish dates before importing.</p>}
+          {preview.skipped_records > 0 && <p role="status" className="text-sm text-amber-700">{preview.skipped_records} incomplete KOReader page record{preview.skipped_records === 1 ? '' : 's'} skipped ({preview.skipped_reasons?.unknown_page_count || 0} without a page count; {preview.skipped_reasons?.nonpositive_duration || 0} without reading time). These records will not be included in the imported statistics.</p>}
           <p className="text-sm text-stone-500">Review suggested completions below. For new history, reaching 98% suggests a finish date; this can include a skipped-to ending. Unfinished historical books appear under Paused. Existing completion information is kept.</p>
           <div className="max-h-96 space-y-3 overflow-y-auto rounded-xl border border-stone-200 p-3">
             {preview.books.map(b => <div key={b.document} className="space-y-1 border-b border-stone-100 pb-3 last:border-0">
