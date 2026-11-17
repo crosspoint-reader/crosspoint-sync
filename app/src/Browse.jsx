@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { impactFeedback, selectionFeedback } from '@tauri-apps/plugin-haptics'
-import { ArrowLeft, BookOpen, ChevronRight, Download, GripVertical, Loader2, Pencil, Plus, Search, Send as SendIcon, Server, Trash2 } from 'lucide-react'
+import { ArrowLeft, BookOpen, ChevronRight, Download, GripVertical, LibraryBig, Loader2, Newspaper, Pencil, Plus, Search, Send as SendIcon, Server, Trash2 } from 'lucide-react'
 import { isApp } from './api.js'
 import { loadDevicePrefs } from './device.js'
 import { download, feed as fetchFeed, image, loadCatalogs, moveCatalog, navRows, needsAuthedImage, readable, saveCatalogs, search, sendDownload } from './catalogs.js'
 import { progressLabel } from './Send.jsx'
 import ConversionLog from './ConversionLog.jsx'
+import CrossPaper, { useShowCrossPaper } from './CrossPaper.jsx'
 import { transferProgress } from './epub/log.js'
 import { Card, EmptyAction, EmptyState, Eyebrow, Sheet, Spinner, folderLabel, notify } from './ui.jsx'
 import { useNativeBack } from './tabbar.js'
@@ -514,11 +515,53 @@ function SearchBox({ value, onSubmit, placeholder }) {
 
 const searchAll = (q) => (location.hash = `#/browse/search/${encodeURIComponent(q)}`)
 
+// Browse has two sides: book catalogs and CrossPaper. A pair of icons at the
+// top right switches between them; Settings can hide CrossPaper, and the switch with it.
+function Sides({ side }) {
+  if (!useShowCrossPaper()) return null
+  const item = (id, Icon, label) => (
+    <a
+      href={`#/browse/${id}`}
+      aria-label={label}
+      aria-current={side === id ? 'page' : undefined}
+      className={`grid h-9 w-11 place-items-center rounded-full transition ${side === id ? 'bg-surface text-brand-700 shadow-sm ring-1 ring-stone-950/10' : 'text-stone-500'}`}
+    >
+      <Icon className="size-5" strokeWidth={1.75} />
+    </a>
+  )
+  return (
+    <nav aria-label="Browse" className="flex shrink-0 rounded-full bg-stone-100 p-1">
+      {item('books', LibraryBig, 'Book catalogs')}
+      {item('crosspaper', Newspaper, 'CrossPaper')}
+    </nav>
+  )
+}
+
+function BrowseHeader({ eyebrow, title, side }) {
+  return (
+    <>
+      <Eyebrow className="md:hidden">{eyebrow}</Eyebrow>
+      <div className="mt-1 flex items-center justify-between gap-3 md:mt-0 md:h-11">
+        <h1 className="font-display text-3xl font-semibold tracking-tight text-stone-900 md:text-4xl">{title}</h1>
+        <Sides side={side} />
+      </div>
+    </>
+  )
+}
+
+function PaperSide({ session }) {
+  return (
+    <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
+      <BrowseHeader eyebrow="Your daily paper" title="CrossPaper" side="crosspaper" />
+      <CrossPaper session={session} />
+    </div>
+  )
+}
+
 function Storefront({ catalogs }) {
   return (
     <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
-      <Eyebrow className="md:hidden">Find something to read</Eyebrow>
-      <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">Browse</h1>
+      <BrowseHeader eyebrow="Find something to read" title="Browse" side="books" />
       <SearchBox placeholder="Search all catalogs" onSubmit={searchAll} />
       {catalogs.length === 0 && (
         <div className="mt-6 md:max-w-2xl">
@@ -929,8 +972,9 @@ function Manage({ catalogs, setCatalogs }) {
   )
 }
 
-export default function Browse({ parts }) {
+export default function Browse({ parts, session }) {
   const [catalogs, setState] = useState(loadCatalogs)
+  const paper = useShowCrossPaper()
   const setCatalogs = (list) => {
     setState(list)
     saveCatalogs(list)
@@ -946,7 +990,9 @@ export default function Browse({ parts }) {
   const [, id, kind, value] = parts
   if (id === 'manage') return <Manage catalogs={catalogs} setCatalogs={setCatalogs} />
   if (id === 'search' && kind) return <SearchAll key={kind} catalogs={catalogs} query={decodeURIComponent(kind)} />
-  const cat = catalogs.find((c) => c.id === id)
+  // With no catalogs set up, Browse opens on CrossPaper.
+  if (paper && (id === 'crosspaper' || (!id && catalogs.length === 0))) return <PaperSide session={session} />
+  const cat = id === 'books' ? null : catalogs.find((c) => c.id === id)
   if (!cat) return <Storefront catalogs={catalogs} />
   const decoded = value && decodeURIComponent(value)
   if (kind === 'b') return <BookPage key={decoded} cat={cat} entryKey={decoded} />

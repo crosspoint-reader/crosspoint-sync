@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Download, Loader2, Newspaper, Plus, Rss, Send as SendIcon, X } from 'lucide-react'
+import { CircleQuestionMark, Download, Loader2, Newspaper, Plus, Rss, Send as SendIcon, X } from 'lucide-react'
 import { api, isApp } from './api.js'
 import { sendFile } from './catalogs.js'
 import { loadDevicePrefs } from './device.js'
@@ -50,6 +50,37 @@ function UrlForm({ label, placeholder, action, onSubmit }) {
   )
 }
 
+// Whether CrossPaper appears in the Library (and the web navigation). On unless
+// turned off in Settings; remembered on this device.
+const HIDE_CROSSPAPER = 'crosspoint-hide-crosspaper'
+export function showCrossPaper() {
+  try {
+    return localStorage.getItem(HIDE_CROSSPAPER) !== '1'
+  } catch {
+    return true
+  }
+}
+export function setShowCrossPaper(on) {
+  try {
+    if (on) localStorage.removeItem(HIDE_CROSSPAPER)
+    else localStorage.setItem(HIDE_CROSSPAPER, '1')
+  } catch {
+    // this session only
+  }
+  dispatchEvent(new Event('crosspoint-crosspaper-shown'))
+}
+
+// The Settings choice to show CrossPaper, kept current while the app is open.
+export function useShowCrossPaper() {
+  const [shown, setShown] = useState(showCrossPaper)
+  useEffect(() => {
+    const update = () => setShown(showCrossPaper())
+    addEventListener('crosspoint-crosspaper-shown', update)
+    return () => removeEventListener('crosspoint-crosspaper-shown', update)
+  }, [])
+  return shown
+}
+
 // Links shared into the app wait in the import queue as tiny .url files.
 async function sharedLinks() {
   if (!isApp) return []
@@ -66,6 +97,7 @@ export default function CrossPaper({ session }) {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
   const [links, setLinks] = useState([])
+  const [help, setHelp] = useState(false)
   const [building, setBuilding] = useState(null) // the edition being fetched: 'today' or its date
 
   const load = useCallback(() => api.crossPaper(session).then(setData, setError), [session])
@@ -158,16 +190,29 @@ export default function CrossPaper({ session }) {
       ))}
 
       <Card className="mt-5 p-4">
-        <h2 className="font-semibold text-stone-900">Today&apos;s CrossPaper</h2>
-        <p className="mt-1 text-sm/6 text-stone-600">
-          A daily newspaper for your reader, made from web pages you save and feeds you follow. Each day&apos;s articles are bundled into one book.
-        </p>
-        <ol className="mt-3 list-decimal space-y-1 pl-5 text-sm/6 text-stone-600">
-          <li>Save pages or follow feeds below.</li>
-          <li>Press <span className="font-medium text-stone-800">{isApp ? 'Send to CrossPoint' : 'Download Today’s Edition'}</span> to get today&apos;s edition as a book.</li>
-          <li>Tomorrow starts a new edition. Earlier ones are kept under Editions.</li>
-        </ol>
-        <p className="mt-4 text-sm font-medium text-stone-900">
+        <div className="flex items-center gap-1">
+          <h2 className="font-semibold text-stone-900">Today&apos;s CrossPaper</h2>
+          <button
+            onClick={() => setHelp(!help)}
+            aria-expanded={help}
+            aria-controls="crosspaper-help"
+            aria-label="How CrossPaper works"
+            className={`-my-2 grid size-10 place-items-center rounded-full active:bg-stone-100 ${help ? 'text-brand-600' : 'text-stone-400'}`}
+          >
+            <CircleQuestionMark className="size-[1.125rem]" />
+          </button>
+        </div>
+        {help && (
+          <div id="crosspaper-help" className="mt-1 rounded-xl bg-stone-50 p-3 text-sm/6 text-stone-600 ring-1 ring-stone-950/5">
+            <p>A daily newspaper for your reader, made from web pages you save and feeds you follow. Each day&apos;s articles are bundled into one book.</p>
+            <ol className="mt-2 list-decimal space-y-1 pl-5">
+              <li>Save pages or follow feeds below.</li>
+              <li>Press <span className="font-medium text-stone-800">{isApp ? 'Send to CrossPoint' : 'Download Today’s Edition'}</span> to get today&apos;s edition as a book.</li>
+              <li>Tomorrow starts a new edition. Earlier ones are kept under Editions.</li>
+            </ol>
+          </div>
+        )}
+        <p className="mt-2 text-sm font-medium text-stone-900">
           {waiting.length ? `Today so far: ${waiting.length} ${waiting.length === 1 ? 'article' : 'articles'}` : 'Nothing saved yet today'}
         </p>
         <button onClick={() => fetchEdition('today')} disabled={!!building} className={`${button} mt-2`}>

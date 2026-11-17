@@ -7,6 +7,7 @@ import { onOpenUrl } from '@tauri-apps/plugin-deep-link'
 import { ArrowLeft, ChevronRight, Copy, KeyRound, ListChecks, Loader2, LogOut, Monitor, Moon, RefreshCw, Search, Server, ShieldCheck, Sun, Trash2, UserX } from 'lucide-react'
 import SparkMD5 from 'spark-md5'
 import { api, isApp, setShowUntitled, showUntitled } from './api.js'
+import { setShowCrossPaper, showCrossPaper } from './CrossPaper.jsx'
 import { ActionSheet, Bone, Card, EmptyState, notify, Toggle, useLoad } from './ui.jsx'
 import { saveFile } from './shareCard.js'
 import { useNativeBack } from './tabbar.js'
@@ -705,6 +706,24 @@ function UntitledBooks() {
   )
 }
 
+// Remembered on this device. CrossPaper keeps working when hidden: shared links still open it.
+function CrossPaperShown() {
+  const [on, setOn] = useState(showCrossPaper)
+  return (
+    <label className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-stone-800">
+      <span className="flex-1">Show CrossPaper{isApp ? ' in Browse' : ''}</span>
+      <Toggle
+        checked={on}
+        label="Show CrossPaper"
+        onChange={(next) => {
+          setShowCrossPaper(next)
+          setOn(next)
+        }}
+      />
+    </label>
+  )
+}
+
 // Pause books in progress after N days without new progress (0 = never).
 function AutoPause({ session }) {
   const [data, error, reload] = useLoad(() => api.autoPause(session), [session], `auto-pause ${session.username}@${session.server}`)
@@ -1131,6 +1150,7 @@ export default function Settings({ session, theme, onSession, onLogout, onSignIn
           <p className="mt-1 text-sm text-stone-500">Books your reader synced without a title or author are hidden. Show them to see their progress and last sync, then add the title and author so they match.</p>
           <Card className="mt-3 divide-y divide-stone-100">
             <UntitledBooks />
+            <CrossPaperShown />
             {isApp && <CatalogsLink />}
           </Card>
 

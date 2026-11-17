@@ -13,7 +13,7 @@ import Library from './Library.jsx'
 import Book from './Book.jsx'
 import Stats from './Stats.jsx'
 import Send from './Send.jsx'
-import CrossPaper from './CrossPaper.jsx'
+import CrossPaper, { useShowCrossPaper } from './CrossPaper.jsx'
 import Settings, { Matches } from './Settings.jsx'
 import Browse from './Browse.jsx'
 import Clippings from './Clippings.jsx'
@@ -278,9 +278,15 @@ const NAV = [
   ...(isApp ? [{ href: '#/browse', label: 'Browse', icon: Compass, sf: 'safari', active: (r) => r === 'browse' }] : []),
   { href: '#/clippings', label: 'Clippings', icon: MessageSquareQuote, sf: 'quote.bubble', active: (r) => r === 'clippings' },
   { href: '#/stats', label: 'Stats', icon: ChartColumn, sf: 'chart.bar', active: (r) => r === 'stats' },
-  // The app reaches CrossPaper as a Send tab (its tab bar is full); the web has no Send.
+  // In the app CrossPaper lives inside Browse (its tab bar is full); the web gives it a place of its own.
   ...(isApp ? [{ href: '#/send', label: 'Send', icon: SendIcon, sf: 'paperplane', active: (r) => r === 'send' }] : [{ href: '#/crosspaper', label: 'CrossPaper', icon: Newspaper, sf: 'newspaper', active: (r) => r === 'crosspaper' }]),
 ]
+
+// The navigation without CrossPaper when Settings hides it.
+function useVisibleNav(nav) {
+  const shown = useShowCrossPaper()
+  return shown ? nav : nav.filter((n) => n.href !== '#/crosspaper')
+}
 
 // Without an account: the tools that work on this device alone.
 const GUEST_NAV = [
@@ -314,6 +320,7 @@ function endRefresh() {
 
 // Phone: bottom tab bar (native on iPhone, see tabbar.js).
 function TabBar({ route, nav = NAV }) {
+  nav = useVisibleNav(nav)
   const current = nav.find((n) => n.active(route))?.href
   useEffect(() => {
     if (nativeTabBar) return mountTabBar(nav.map((n) => ({ id: n.href, title: n.label, sfSymbol: n.sf })), current)
@@ -356,6 +363,7 @@ function SettingsLink() {
 // iPad / desktop: sidebar. Fixed, not sticky: sticky rides along when the page rubber-bands.
 // Runs to the bottom and left screen edges; padding keeps its contents out of the insets.
 function Sidebar({ route, session, nav = NAV }) {
+  nav = useVisibleNav(nav)
   return (
     <aside className="app-sidebar fixed top-[env(safe-area-inset-top)] bottom-0 left-0 hidden w-[calc(15rem+env(safe-area-inset-left))] flex-col border-r border-stone-200 bg-surface/60 pt-6 pr-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pl-[calc(1rem+env(safe-area-inset-left))] md:flex lg:w-[calc(16rem+env(safe-area-inset-left))]">
       {/* 44px band at the top, matching each page's first row (back button / title). */}
@@ -512,14 +520,14 @@ function Home({ session, onSession, onLogout, theme }) {
 
   let page
   if (route === 'settings') page = id && id !== 'goals' ? <Matches session={session} id={id} /> : <Settings session={session} theme={theme} onSession={onSession} onLogout={onLogout} focusGoals={id === 'goals'} />
-  else if (route === 'send' && isApp) page = <Send tab={id ?? ''} session={session} />
-  else if (route === 'crosspaper') page = (
+  else if (route === 'send' && isApp) page = <Send tab={id ?? ''} />
+  else if (route === 'crosspaper' && !isApp) page = (
     <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
       <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">CrossPaper</h1>
       <CrossPaper session={session} />
     </div>
   )
-  else if (route === 'browse' && isApp) page = <Browse parts={parts} />
+  else if (route === 'browse' && isApp) page = <Browse parts={parts} session={session} />
   else if (error) page = <ErrorNote error={error} />
   else if (!books) page = <PageSkeleton route={route} />
   else if (route === 'clippings') page = <Clippings session={session} books={books} />

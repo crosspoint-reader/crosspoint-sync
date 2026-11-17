@@ -10,5 +10,6 @@ it.each([
 it('routes a homogeneous batch to its tab and a mixed batch to Send', () => {
  expect(importRoute([{name:'A.ttf'},{name:'B.cpfont'}])).toBe('#/send/fonts')
  expect(importRoute([{name:'A.png'}])).toBe('#/send/wallpaper')
+ expect(importRoute([{name:'link.url'}])).toBe('#/browse/crosspaper')
  expect(importRoute([{name:'A.epub'},{name:'A.ttf'}])).toBe('#/send')
 })

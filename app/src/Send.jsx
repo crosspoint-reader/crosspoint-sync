@@ -28,7 +28,6 @@ import { listImports, addImport, readImport, removeImport } from './importQueue.
 import Plugins from './Plugins.jsx'
 import ReaderFonts from './ReaderFonts.jsx'
 import Wallpaper from './Wallpaper.jsx'
-import CrossPaper from './CrossPaper.jsx'
 import { transferProgress } from './epub/log.js'
 
 const size = (n) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`)
@@ -410,10 +409,9 @@ const TABS = [
   ['fonts', 'Fonts'],
   ['wallpaper', 'Sleep screens'],
   ['plugins', 'Plugins'],
-  ['crosspaper', 'CrossPaper'],
 ]
 
-export default function Send({ tab = '', session }) {
+export default function Send({ tab = '' }) {
   const [prefs, setPrefsState] = useState(loadDevicePrefs)
   const [device, setDevice] = useState({ state: 'searching', dirs: [] })
   const [attempt, setAttempt] = useState(0)
@@ -571,8 +569,6 @@ export default function Send({ tab = '', session }) {
           <Tabs route="send" tabs={TABS.map(([key, label]) => [key, importCounts[key || 'books'] ? `${label} (${importCounts[key || 'books']})` : label])} tab={tab} />
           {tab === 'wallpaper' ? (
             <Wallpaper />
-          ) : tab === 'crosspaper' ? (
-            <CrossPaper session={session} />
           ) : (
             <div className="max-w-3xl">
               {tab === 'fonts' ? (

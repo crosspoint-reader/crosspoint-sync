@@ -12,5 +12,6 @@ export function importKind({ name }) {
 export function importRoute(entries) {
   const kinds = new Set(entries.map(importKind).filter(Boolean))
   const kind = kinds.size === 1 ? [...kinds][0] : 'books'
-  return kind === 'books' ? '#/send' : `#/send/${kind}`
+  // A shared link opens CrossPaper, inside Browse; everything else goes to its Send tab.
+  return kind === 'books' ? '#/send' : kind === 'crosspaper' ? '#/browse/crosspaper' : `#/send/${kind}`
 }
