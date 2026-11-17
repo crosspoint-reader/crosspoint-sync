@@ -60,6 +60,7 @@ describe('newspaper', () => {
     expect(res.headers.get('content-type')).toBe('application/epub+zip');
     const files = await entries(Buffer.from(await res.arrayBuffer()));
     expect(Object.keys(files)[0]).toBe('mimetype');
+    expect(files['OEBPS/content.opf']).toContain('<dc:creator>CrossPoint</dc:creator>');
     expect(files['OEBPS/content.opf']).toContain('<item id="cover" href="cover.jpg" media-type="image/jpeg" properties="cover-image"/>');
     // Saved pages lead; feed items follow under their feed's name.
     expect(files['OEBPS/nav.xhtml']).toMatch(/Saved<\/span>.*Saved Story.*Example Blog<\/span>.*Post 1.*Post 2/s);

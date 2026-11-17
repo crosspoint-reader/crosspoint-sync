@@ -9,7 +9,7 @@ import ConversionLog from './ConversionLog.jsx'
 import CrossPaper, { useShowCrossPaper } from './CrossPaper.jsx'
 import { transferProgress } from './epub/log.js'
 import { Card, EmptyAction, EmptyState, Eyebrow, Sheet, Spinner, folderLabel, notify } from './ui.jsx'
-import { useNativeBack } from './tabbar.js'
+import { useNativeBack, useNativeButton } from './tabbar.js'
 
 // Hash routes:
 //   #/browse                         storefront: a block of rails per catalog
@@ -518,7 +518,18 @@ const searchAll = (q) => (location.hash = `#/browse/search/${encodeURIComponent(
 // Browse has two sides: book catalogs and CrossPaper. A pair of icons at the
 // top right switches between them; Settings can hide CrossPaper, and the switch with it.
 function Sides({ side }) {
-  if (!useShowCrossPaper()) return null
+  return useShowCrossPaper() ? <SideSwitch side={side} /> : null
+}
+
+function SideSwitch({ side }) {
+  // iPhone with native chrome: one glass button beside the status bar, like
+  // Settings on the Library, showing the side a tap goes to.
+  const other = side === 'books' ? 'crosspaper' : 'books'
+  useNativeButton(
+    'browse-side',
+    { sfSymbol: other === 'crosspaper' ? 'newspaper' : 'books.vertical', anchor: 'topTrailing', label: other === 'crosspaper' ? 'CrossPaper' : 'Book catalogs' },
+    () => (location.hash = `#/browse/${other}`)
+  )
   const item = (id, Icon, label) => (
     <a
       href={`#/browse/${id}`}
@@ -530,7 +541,7 @@ function Sides({ side }) {
     </a>
   )
   return (
-    <nav aria-label="Browse" className="flex shrink-0 rounded-full bg-stone-100 p-1">
+    <nav aria-label="Browse" className="native-hide flex shrink-0 rounded-full bg-stone-100 p-1">
       {item('books', LibraryBig, 'Book catalogs')}
       {item('crosspaper', Newspaper, 'CrossPaper')}
     </nav>
