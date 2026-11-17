@@ -20,6 +20,8 @@ export interface Config {
    * multi-user/hosted install — the setup CLI is the supported path there.
    */
   kindleServerRegistration: boolean;
+  /** Bearer token for GET /api/catalog/books; the route does not exist when unset. */
+  catalogExportToken?: string;
 }
 
 export function fromEnv(env: NodeJS.ProcessEnv = process.env): Config {
@@ -40,6 +42,7 @@ export function fromEnv(env: NodeJS.ProcessEnv = process.env): Config {
       : '*',
     kindleServerRegistration:
       env.KINDLE_SERVER_REGISTRATION === 'true' || env.KINDLE_SERVER_REGISTRATION === '1',
+    catalogExportToken: env.CATALOG_EXPORT_TOKEN || undefined,
   };
 }
 

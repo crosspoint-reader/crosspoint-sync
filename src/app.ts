@@ -20,6 +20,7 @@ import { connectorRoutes, oauthCallbackRoutes } from './routes/v1/connectors.js'
 import { profileSettingsRoutes, publicProfileRoutes } from './routes/profile.js';
 import { kindleRegisterRoutes } from './routes/v1/kindle-register.js';
 import { newspaperOpdsRoutes, newspaperRoutes } from './routes/v1/newspaper.js';
+import { catalogRoutes } from './routes/catalog.js';
 import { safeFetch } from './safe-fetch.js';
 import { createProgressRefresh } from './connectors/refresh.js';
 import type { HttpTransport } from './connectors/types.js';
@@ -104,6 +105,8 @@ export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<A
     v1.route('/', kindleRegisterRoutes(db, opts.connectorTransport, config.trustProxy));
   }
   app.route('/api/v1', v1);
+  // Operator export for an external metadata catalog (off unless a token is set).
+  if (config.catalogExportToken) app.route('/api/catalog', catalogRoutes(db, config.catalogExportToken));
   // The daily paper as an OPDS catalog (HTTP Basic), for readers to fetch directly.
   app.route('/', newspaperOpdsRoutes(v1, basePath));
 

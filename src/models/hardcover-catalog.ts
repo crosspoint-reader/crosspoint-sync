@@ -163,6 +163,52 @@ export async function searchHardcover(
   return top?.book ?? null;
 }
 
+/**
+ * The same lookup against a book-metadata API (METADATA_API_URL) instead of
+ * Hardcover: one request returns details, cover and page count, so a server
+ * needs no catalog keys of its own. Only the title and author are sent. The
+ * result has no Hardcover slug or series id, so Hardcover links and "next in
+ * series" are unavailable for books found this way.
+ */
+export async function searchMetadataApi(
+  http: HttpTransport,
+  title: string,
+  author: string,
+  baseUrl: string
+): Promise<HardcoverBook | null | 'later'> {
+  let body: any;
+  try {
+    const res = await http(`${baseUrl.replace(/\/+$/, '')}/books?${new URLSearchParams({ title, author })}`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(20000),
+    });
+    if (res.status !== 200) return 'later'; // busy, rate limited or down: not a miss
+    body = await res.json();
+  } catch {
+    return 'later';
+  }
+  const b = body?.books?.[0];
+  if (!b?.id || typeof b.title !== 'string') return null;
+  const num = (v: unknown) => (typeof v === 'number' ? v : null);
+  return {
+    id: String(b.id),
+    slug: null,
+    title: b.title,
+    author: typeof b.author === 'string' ? b.author : null,
+    moods: tidy(b.moods, 12),
+    genres: tidy(b.genres, 6),
+    content_warnings: tidy(b.content_warnings, 8),
+    rating: num(b.rating),
+    series: typeof b.series === 'string' ? b.series : null,
+    series_id: null,
+    series_position: num(b.series_position),
+    release_year: num(b.release_year),
+    pages: num(b.page_count),
+    cover: typeof b.cover_url === 'string' ? b.cover_url : null,
+    description: typeof b.description === 'string' && b.description.trim() ? b.description.trim().slice(0, 6000) : null,
+  };
+}
+
 export const cacheKey = (title: string, author: string) => `${normalizeText(coreTitle(title))}|${normalizeAuthor(author)}`;
 
 /** Shared, cached lookup: one Hardcover request per distinct book across all users. */
@@ -177,7 +223,9 @@ export async function hardcoverBook(
   http: HttpTransport,
   title: string,
   author: string,
-  key: string
+  key: string,
+  /** METADATA_API_URL: when set, that API is asked instead of Hardcover. */
+  api?: string
 ): Promise<HardcoverBook | null | 'later'> {
   const k = cacheKey(title, author);
   const hit = db.prepare('SELECT data, checked_at FROM catalog_cache WHERE key = ?').get(k) as
@@ -186,7 +234,7 @@ export async function hardcoverBook(
   if (hit && (hit.data || nowSeconds() - hit.checked_at < RETRY_AFTER)) {
     return hit.data ? (JSON.parse(hit.data) as HardcoverBook) : null;
   }
-  const found = await searchHardcover(http, title, author, key);
+  const found = api ? await searchMetadataApi(http, title, author, api) : await searchHardcover(http, title, author, key);
   if (found === 'later') return 'later';
   db.prepare(
     `INSERT INTO catalog_cache (key, data, checked_at) VALUES (?, ?, ?)

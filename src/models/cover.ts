@@ -349,8 +349,8 @@ export async function documentInfo(
   if (!row) return { cover: null, pages: null }; // no metadata, nothing to search on
   const want = extractTitleAuthor(documentMeta(db, userId, document));
   let hc: HardcoverBook | null = null;
-  if (hardcover && want && env.HARDCOVER_API_KEY && row.hc_checked_at == null) {
-    const found = await hardcoverBook(db, http, want.title, want.author, env.HARDCOVER_API_KEY);
+  if (hardcover && want && (env.METADATA_API_URL || env.HARDCOVER_API_KEY) && row.hc_checked_at == null) {
+    const found = await hardcoverBook(db, http, want.title, want.author, env.HARDCOVER_API_KEY ?? '', env.METADATA_API_URL);
     if (found !== 'later') {
       saveHardcover(db, userId, document, found);
       hc = found;
@@ -401,7 +401,7 @@ export const pagesCheckedSince = () => nowSeconds() - AMAZON_RETRY_AFTER;
 // time (lookups are throttled, so this never holds up a request).
 const enriching = new Set<number>();
 export function enrichSoon(db: DB, userId: number, http: HttpTransport = fetchTransport, env: NodeJS.ProcessEnv = process.env, limit = 10): void {
-  if (!env.HARDCOVER_API_KEY || enriching.has(userId)) return;
+  if (!(env.METADATA_API_URL || env.HARDCOVER_API_KEY) || enriching.has(userId)) return;
   const docs = db
     .prepare(
       `SELECT document FROM documents WHERE user_id = ? AND hc_checked_at IS NULL
