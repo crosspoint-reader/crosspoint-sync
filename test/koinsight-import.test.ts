@@ -144,6 +144,42 @@ describe('KOInsight file import', () => {
     expect((await s.app.request('/api/v1/account/import/koinsight', { method: 'POST' })).status).toBe(401);
   });
 
+  it('deduplicates KOInsight page turns before preview and keeps imported history and totals consistent', async () => {
+    const when = at('2025-11-01T23:30:00Z');
+    const bytes = database(db => {
+      const turn = db.prepare('INSERT INTO page_stat VALUES (?, ?, ?, ?, ?)');
+      turn.run(OLD, 1, 100, when, 20);
+      turn.run(OLD, 1, 100, when, 45);
+    });
+    const history = await readHistoryFile(bytes);
+    expect(history.source).toBe('KOInsight');
+    expect(history.pages).toHaveLength(3);
+    expect(history.pages.find(p => p.book_md5 === OLD && p.page === 1)).toMatchObject({
+      duration: 45, start_time: when,
+    });
+
+    const s = await fixture();
+    const preview = await s.upload(bytes);
+    expect(preview.status).toBe(200);
+    expect((await preview.json()).books).toEqual(expect.arrayContaining([
+      expect.objectContaining({ document: OLD, records: 2 }),
+      expect.objectContaining({ document: SECOND, records: 1 }),
+    ]));
+    expect(s.db.prepare('SELECT * FROM reader_history_pages').all()).toEqual([]);
+
+    const finishes = { [OLD]: '2025-11-02', [SECOND]: null };
+    const imported = await s.upload(bytes, finishes);
+    expect(imported.status).toBe(200);
+    const stored = () => s.db.prepare('SELECT COUNT(*) AS pages, SUM(duration) AS seconds FROM reader_history_pages').get();
+    expect(stored()).toEqual({ pages: 3, seconds: 125 });
+    expect(JSON.parse(String(s.db.prepare('SELECT payload FROM stats_device_global').get()!.payload))).toMatchObject({
+      pages: 3, seconds: 125,
+    });
+    expect((await s.upload(bytes, finishes)).status).toBe(200);
+    expect(stored()).toEqual({ pages: 3, seconds: 125 });
+    expect(s.db.prepare('SELECT * FROM progress').all()).toEqual([]);
+  });
+
   it('reads KOReader raw page records without executing its page_stat view, and deduplicates copies', async () => {
     const bytes = database(db => db.exec(`
       ALTER TABLE book ADD COLUMN id INTEGER;
@@ -298,6 +334,30 @@ describe('KOInsight file import', () => {
     expect(preview.status).toBe(400);
     expect(s.db.prepare('SELECT * FROM documents').all()).toEqual([]);
     expect(s.db.prepare('SELECT * FROM reader_history_pages').all()).toEqual([]);
+  });
+
+  it('rejects a native overrun above the persisted page-count ceiling before preview or import', async () => {
+    const bytes = database(db => db.exec(`
+      ALTER TABLE book ADD COLUMN id INTEGER;
+      UPDATE book SET id = CASE WHEN md5 = '${OLD}' THEN 1 ELSE 2 END;
+      CREATE TABLE page_stat_data (id_book INTEGER, page INTEGER, total_pages INTEGER, start_time INTEGER, duration INTEGER);
+      INSERT INTO page_stat_data SELECT b.id, p.page, p.total_pages, p.start_time, p.duration
+        FROM page_stat p JOIN book b ON b.md5 = p.book_md5;
+      INSERT INTO page_stat_data VALUES (1, 1000001, 1000000, ${at('2025-11-01T23:45:00Z')}, 20);
+      DROP TABLE page_stat;
+      CREATE VIEW page_stat AS SELECT * FROM never_execute_this_view;
+    `));
+    await expect(readHistoryFile(bytes)).rejects.toThrow('Invalid KOReader page history (1 malformed record)');
+    const s = await fixture();
+    const preview = await s.upload(bytes);
+    expect(preview.status).toBe(400);
+    expect((await preview.json()).message).toContain('Invalid KOReader page history (1 malformed record)');
+    const attemptedImport = await s.upload(bytes, { [OLD]: null, [SECOND]: null });
+    expect(attemptedImport.status).toBe(400);
+    expect((await attemptedImport.json()).message).toContain('Invalid KOReader page history (1 malformed record)');
+    expect(s.db.prepare('SELECT * FROM documents').all()).toEqual([]);
+    expect(s.db.prepare('SELECT * FROM reader_history_pages').all()).toEqual([]);
+    expect(s.db.prepare('SELECT * FROM progress').all()).toEqual([]);
   });
 
   it('rejects malformed native KOReader positions with a source-specific error and no writes', async () => {

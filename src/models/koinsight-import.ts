@@ -63,7 +63,7 @@ function readDatabase(bytes: Buffer, path: string): History | null {
       // KOReader records incomplete turns. Match Deluxe-Sync's duration/page-count
       // filtering, but reject malformed positions and timestamps.
       if (typeof p.book_md5 !== 'string' || ![p.page, p.total_pages, p.start_time, p.duration].every(Number.isSafeInteger) ||
-          p.page < 0 || p.total_pages < 0 || p.total_pages > 1_000_000 || p.start_time < 946684800 ||
+          p.page < 0 || p.page > 1_000_000 || p.total_pages < 0 || p.total_pages > 1_000_000 || p.start_time < 946684800 ||
           p.start_time > 4102444799 || p.duration > 86400) {
         invalidPages++;
         continue;
@@ -115,7 +115,7 @@ function readDatabase(bytes: Buffer, path: string): History | null {
         normalizedPages.set(key, { ...existing, duration });
       } else normalizedPages.set(key, p);
     }
-    return { books: uniqueBooks, pages: native ? [...normalizedPages.values()] : validPages,
+    return { books: uniqueBooks, pages: native ? [...normalizedPages.values()] : [...uniquePages.values()],
       source: sourceName, ...(native ? { skipped, adjusted_pages: adjustedPages } : {}) };
   } finally { source.close(); }
 }
