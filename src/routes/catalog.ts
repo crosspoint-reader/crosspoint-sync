@@ -12,7 +12,7 @@ import type { DB } from '../db/db.js';
  *
  *   GET /api/catalog/books?after=<next from the previous page>&limit=<1..500>
  *   -> { books: [{ isbn | null, title, author, description, cover_url, series, series_position,
- *                  genres, moods, content_warnings, page_count, release_year, rating }], next }
+ *                  genres, moods, content_warnings, page_count, release_year, rating, language }], next }
  */
 export function catalogRoutes(db: DB, token: string): Hono {
   const app = new Hono();
@@ -38,6 +38,7 @@ export function catalogRoutes(db: DB, token: string): Hono {
               MAX(CASE WHEN release_year_manual = 0 THEN release_year END) AS release_year,
               MAX(page_count) AS page_count,
               MAX(rating) AS rating,
+              MAX(language) AS language,
               MAX(cover_url) AS cover_url
          FROM documents
         WHERE isbn IS NOT NULL OR (hc_id IS NOT NULL AND meta_manual = 0)

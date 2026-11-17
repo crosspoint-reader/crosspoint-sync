@@ -19,6 +19,7 @@ describe('catalog export', () => {
     add.run(ids[0], 'a', 'Dune', 'Frank Herbert', '9780441013593', 'Spice.', 0, '["Science Fiction"]', 'https://x/c.jpg', 0, null);
     add.run(ids[1], 'b', 'my dune copy', 'me', '9780441013593', 'private note', 1, null, null, 1, null);
     add.run(ids[0], 'c', 'Emma', 'Jane Austen', '9780141439587', null, 0, null, null, 0, null);
+    db.prepare("UPDATE documents SET language = 'en-GB' WHERE document = 'c'").run();
     // No ISBN: exported once per title and author, and only when Hardcover recognised it.
     add.run(ids[0], 'd', 'Piranesi', 'Susanna Clarke', null, 'A house.', 0, null, null, 0, '42');
     add.run(ids[1], 'e', 'piranesi', 'susanna clarke', null, null, 0, '["Fantasy"]', null, 0, '42');
@@ -30,11 +31,11 @@ describe('catalog export', () => {
 
     const get = async (q: string) => (await app.request(`/api/catalog/books${q}`, { headers: { authorization: 'Bearer tok' } })).json();
     const page1 = await get('?limit=1');
-    expect(page1).toEqual({ books: [{ isbn: '9780141439587', title: 'Emma', author: 'Jane Austen', description: null, genres: [], cover_url: null, moods: [], content_warnings: [], series: null, series_position: null, release_year: null, page_count: null, rating: null }], next: '9780141439587' });
+    expect(page1).toEqual({ books: [{ isbn: '9780141439587', title: 'Emma', author: 'Jane Austen', description: null, genres: [], cover_url: null, moods: [], content_warnings: [], series: null, series_position: null, release_year: null, page_count: null, rating: null, language: 'en-GB' }], next: '9780141439587' });
     const page2 = await get(`?after=${encodeURIComponent(page1.next)}`);
     expect(page2).toEqual({ next: null, books: [
-      { isbn: '9780441013593', title: 'Dune', author: 'Frank Herbert', description: 'Spice.', genres: ['Science Fiction'], cover_url: 'https://x/c.jpg', moods: [], content_warnings: [], series: null, series_position: null, release_year: null, page_count: null, rating: null },
-      { isbn: null, title: 'piranesi', author: 'susanna clarke', description: 'A house.', genres: ['Fantasy'], cover_url: null, moods: [], content_warnings: [], series: null, series_position: null, release_year: null, page_count: null, rating: null },
+      { isbn: '9780441013593', title: 'Dune', author: 'Frank Herbert', description: 'Spice.', genres: ['Science Fiction'], cover_url: 'https://x/c.jpg', moods: [], content_warnings: [], series: null, series_position: null, release_year: null, page_count: null, rating: null, language: null },
+      { isbn: null, title: 'piranesi', author: 'susanna clarke', description: 'A house.', genres: ['Fantasy'], cover_url: null, moods: [], content_warnings: [], series: null, series_position: null, release_year: null, page_count: null, rating: null, language: null },
     ] });
     // The cursor works across the ISBN / no-ISBN boundary.
     expect((await get('?limit=2')).next).toBe('9780441013593');
