@@ -75,7 +75,7 @@ function readDatabase(bytes: Buffer, path: string): History | null {
         // Validate original KOReader coordinates before deduplication or
         // increasing stale page totals, so distinct source turns remain distinct.
         const excess = p.page - p.total_pages;
-        if (!native || excess > 32 || p.page > p.total_pages * 1.25) {
+        if (!native || excess > 32 || p.page >= p.total_pages * 1.25) {
           invalidPages++;
           continue;
         }

@@ -317,6 +317,29 @@ describe('KOInsight file import', () => {
     expect(s.db.prepare('SELECT * FROM progress').all()).toEqual([]);
   });
 
+  it('rejects an exact 25-percent native page overrun (page 5 of 4) before writing', async () => {
+    const bytes = database(db => db.exec(`
+      ALTER TABLE book ADD COLUMN id INTEGER;
+      UPDATE book SET id = CASE WHEN md5 = '${OLD}' THEN 1 ELSE 2 END;
+      CREATE TABLE page_stat_data (id_book INTEGER, page INTEGER, total_pages INTEGER, start_time INTEGER, duration INTEGER);
+      INSERT INTO page_stat_data SELECT b.id, p.page, p.total_pages, p.start_time, p.duration
+        FROM page_stat p JOIN book b ON b.md5 = p.book_md5;
+      INSERT INTO page_stat_data VALUES (1, 5, 4, ${at('2025-11-01T23:45:00Z')}, 20);
+      DROP TABLE page_stat;
+      CREATE VIEW page_stat AS SELECT * FROM never_execute_this_view;
+    `));
+    await expect(readHistoryFile(bytes)).rejects.toThrow('Invalid KOReader page history (1 malformed record)');
+    const s = await fixture();
+    const preview = await s.upload(bytes);
+    expect(preview.status).toBe(400);
+    expect((await preview.json()).message).toContain('Invalid KOReader page history (1 malformed record)');
+    const attemptedImport = await s.upload(bytes, { [OLD]: null, [SECOND]: null });
+    expect(attemptedImport.status).toBe(400);
+    expect(s.db.prepare('SELECT * FROM documents').all()).toEqual([]);
+    expect(s.db.prepare('SELECT * FROM reader_history_pages').all()).toEqual([]);
+    expect(s.db.prepare('SELECT * FROM progress').all()).toEqual([]);
+  });
+
   it('rejects page 4 of 3 rather than rounding the 25-percent threshold up', async () => {
     const bytes = database(db => db.exec(`
       ALTER TABLE book ADD COLUMN id INTEGER;
