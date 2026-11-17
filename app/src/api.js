@@ -598,6 +598,25 @@ export const api = {
   cover: (s, doc) => call(s, `/api/v1/documents/${doc}/cover`),
   next: (s, doc) => call(s, `/api/v1/documents/${doc}/next`),
   about: (s, doc) => call(s, `/api/v1/documents/${doc}/about`),
+  // CrossPaper: saved pages and RSS feeds, bundled into a daily EPUB.
+  // tz closes out past days into their own editions, by the reader's local date.
+  crossPaper: (s) => call(s, `/api/v1/newspaper?tz=${new Date().getTimezoneOffset()}`, {}, false),
+  refreshCrossPaper: (s) => call(s, '/api/v1/newspaper/refresh', { method: 'POST' }),
+  saveArticle: (s, url) => call(s, '/api/v1/newspaper/articles', { method: 'POST', body: JSON.stringify({ url }) }),
+  removeArticle: (s, id) => call(s, `/api/v1/newspaper/articles/${id}`, { method: 'DELETE' }),
+  addFeed: (s, url) => call(s, '/api/v1/newspaper/feeds', { method: 'POST', body: JSON.stringify({ url }) }),
+  removeFeed: (s, id) => call(s, `/api/v1/newspaper/feeds/${id}`, { method: 'DELETE' }),
+  // An edition as a File, named by the server: today's, or a past one by its YYYY-MM-DD date.
+  async crossPaperEpub(s, date = 'today') {
+    const res = await http(`${s.server}/api/v1/newspaper/issue/${date}.epub?tz=${new Date().getTimezoneOffset()}`, {
+      credentials: 'omit',
+      cache: 'no-store',
+      headers: { 'x-auth-user': s.username, 'x-auth-key': s.key },
+    })
+    if (!res.ok) throw new Error((await res.json().catch(() => null))?.message || `Server error ${res.status}`)
+    const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? 'CrossPaper.epub'
+    return new File([await res.blob()], name, { type: 'application/epub+zip' })
+  },
   // Connected services (same endpoints as the web dashboard).
   connectors: (s) => call(s, '/api/v1/connectors'),
   linkConnector: (s, id, credential) => call(s, `/api/v1/connectors/${id}`, { method: 'PUT', body: JSON.stringify({ credential }) }),

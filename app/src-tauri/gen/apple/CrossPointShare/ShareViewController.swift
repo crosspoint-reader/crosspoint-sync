@@ -16,7 +16,7 @@ final class ShareViewController: UIViewController {
         let title = UILabel()
         title.text = "CrossPoint Sync"
         title.font = .preferredFont(forTextStyle: .title2)
-        message.text = "Saving files…"
+        message.text = "Saving…"
         message.font = .preferredFont(forTextStyle: .body)
         message.numberOfLines = 0
         done.setTitle("Done", for: .normal)
@@ -44,8 +44,8 @@ final class ShareViewController: UIViewController {
 
     private func receive(_ providers: [NSItemProvider], at index: Int) {
         guard index < providers.count else {
-            let summary = saved == 1 ? "1 file queued." : "\(saved) files queued."
-            message.text = (saved > 0 ? summary + " Open CrossPoint Sync to send them to your reader." : "No files queued.") +
+            let summary = saved == 1 ? "1 item queued." : "\(saved) items queued."
+            message.text = (saved > 0 ? summary + " Open CrossPoint Sync to finish." : "Nothing queued.") +
                 (failures.isEmpty ? "" : "\n\n" + failures.joined(separator: "\n"))
             done.isEnabled = true
             return
@@ -63,6 +63,20 @@ final class ShareViewController: UIViewController {
                 guard let url = item as? URL else { finish(error ?? ImportFailure.unreadable); return }
                 do { try ImportStore.copy(url, suggestedName: provider.suggestedName); finish(nil) }
                 catch { finish(error) }
+            }
+            return
+        }
+        // A web page shared from a browser: queue its address for CrossPaper.
+        if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
+            provider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { item, error in
+                guard let url = item as? URL, url.scheme == "http" || url.scheme == "https" else { finish(error ?? ImportFailure.unsupported); return }
+                let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true).appendingPathComponent("link.url")
+                do {
+                    try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try url.absoluteString.write(to: file, atomically: true, encoding: .utf8)
+                    try ImportStore.copy(file, suggestedName: nil)
+                    finish(nil)
+                } catch { finish(error) }
             }
             return
         }
@@ -95,7 +109,7 @@ enum ImportStore {
     static func validName(_ name: String) -> Bool {
         !name.isEmpty && !name.hasPrefix(".") && !name.contains("/") && !name.contains("\\") &&
             name.rangeOfCharacter(from: .controlCharacters) == nil &&
-            ["epub", "acsm", "md", "txt", "ttf", "otf", "cpfont", "png", "jpg", "jpeg", "webp", "gif", "bmp"].contains((name as NSString).pathExtension.lowercased())
+            ["epub", "acsm", "md", "txt", "ttf", "otf", "cpfont", "png", "jpg", "jpeg", "webp", "gif", "bmp", "url"].contains((name as NSString).pathExtension.lowercased())
     }
 
     static func copy(_ source: URL, suggestedName: String?) throws {

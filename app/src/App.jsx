@@ -5,7 +5,7 @@ import { widgetRoute } from './widgetLinks.js'
 import { watchImports } from './importQueue.js'
 import { importRoute } from './importTypes.js'
 import { listen } from '@tauri-apps/api/event'
-import { ChartColumn, CloudOff, Compass, MessageSquareQuote, Eye, EyeOff, LibraryBig, Loader2, Lock, Send as SendIcon, Server, Settings as SettingsIcon, ShieldCheck, User } from 'lucide-react'
+import { ChartColumn, CloudOff, Compass, MessageSquareQuote, Eye, EyeOff, LibraryBig, Loader2, Lock, Newspaper, Send as SendIcon, Server, Settings as SettingsIcon, ShieldCheck, User } from 'lucide-react'
 import { useTheme } from './theme.js'
 import { DEFAULT_SERVER, syncShortcutsCache, api, hostedServer, isApp, lastServer, loadSession, login, logout, offline, cached, recover, register, saveSession } from './api.js'
 import { ErrorNote, LoadCacheProvider, PageSkeleton, RefreshPill, Toaster, useLoad, notify } from './ui.jsx'
@@ -13,6 +13,7 @@ import Library from './Library.jsx'
 import Book from './Book.jsx'
 import Stats from './Stats.jsx'
 import Send from './Send.jsx'
+import CrossPaper from './CrossPaper.jsx'
 import Settings, { Matches } from './Settings.jsx'
 import Browse from './Browse.jsx'
 import Clippings from './Clippings.jsx'
@@ -272,12 +273,13 @@ const BACK_LABELS = { stats: 'Stats', clippings: 'Clippings', browse: 'Browse', 
 const backTo = (hash) => ({ href: hash, label: BACK_LABELS[hash.replace(/^#\/?/, '').split('/')[0]] ?? 'Library' })
 
 const NAV = [
-  { href: '#/', label: 'Library', icon: LibraryBig, sf: 'books.vertical', active: (r) => !['stats', 'send', 'browse', 'clippings', 'settings'].includes(r) },
+  { href: '#/', label: 'Library', icon: LibraryBig, sf: 'books.vertical', active: (r) => !['stats', 'send', 'browse', 'clippings', 'settings', 'crosspaper'].includes(r) },
   // Browse and Send need the app (catalog access and the reader on your Wi-Fi), so the web leaves them out.
   ...(isApp ? [{ href: '#/browse', label: 'Browse', icon: Compass, sf: 'safari', active: (r) => r === 'browse' }] : []),
   { href: '#/clippings', label: 'Clippings', icon: MessageSquareQuote, sf: 'quote.bubble', active: (r) => r === 'clippings' },
   { href: '#/stats', label: 'Stats', icon: ChartColumn, sf: 'chart.bar', active: (r) => r === 'stats' },
-  ...(isApp ? [{ href: '#/send', label: 'Send', icon: SendIcon, sf: 'paperplane', active: (r) => r === 'send' }] : []),
+  // The app reaches CrossPaper as a Send tab (its tab bar is full); the web has no Send.
+  ...(isApp ? [{ href: '#/send', label: 'Send', icon: SendIcon, sf: 'paperplane', active: (r) => r === 'send' }] : [{ href: '#/crosspaper', label: 'CrossPaper', icon: Newspaper, sf: 'newspaper', active: (r) => r === 'crosspaper' }]),
 ]
 
 // Without an account: the tools that work on this device alone.
@@ -510,7 +512,13 @@ function Home({ session, onSession, onLogout, theme }) {
 
   let page
   if (route === 'settings') page = id && id !== 'goals' ? <Matches session={session} id={id} /> : <Settings session={session} theme={theme} onSession={onSession} onLogout={onLogout} focusGoals={id === 'goals'} />
-  else if (route === 'send' && isApp) page = <Send tab={id ?? ''} />
+  else if (route === 'send' && isApp) page = <Send tab={id ?? ''} session={session} />
+  else if (route === 'crosspaper') page = (
+    <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
+      <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">CrossPaper</h1>
+      <CrossPaper session={session} />
+    </div>
+  )
   else if (route === 'browse' && isApp) page = <Browse parts={parts} />
   else if (error) page = <ErrorNote error={error} />
   else if (!books) page = <PageSkeleton route={route} />

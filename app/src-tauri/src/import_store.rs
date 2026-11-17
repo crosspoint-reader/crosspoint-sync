@@ -8,7 +8,7 @@ pub struct Entry { pub id: String, pub name: String, pub size: u64 }
 fn invalid() -> io::Error { io::Error::new(io::ErrorKind::InvalidInput, "Invalid queued file") }
 pub fn valid_name(name: &str) -> bool {
   !name.is_empty() && !name.starts_with('.') && !name.chars().any(|c| c == '/' || c == '\\' || c.is_control()) &&
-    name.rsplit_once('.').is_some_and(|(_, ext)| ["epub", "acsm", "md", "txt", "ttf", "otf", "cpfont", "png", "jpg", "jpeg", "webp", "gif", "bmp"].contains(&ext.to_ascii_lowercase().as_str()))
+    name.rsplit_once('.').is_some_and(|(_, ext)| ["epub", "acsm", "md", "txt", "ttf", "otf", "cpfont", "png", "jpg", "jpeg", "webp", "gif", "bmp", "url"].contains(&ext.to_ascii_lowercase().as_str()))
 }
 fn entry_dir(root: &Path, id: &str) -> io::Result<PathBuf> {
   if id.is_empty() || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') { return Err(invalid()); }
@@ -95,8 +95,8 @@ mod tests {
     assert!(list(&root).unwrap().is_empty());
     assert!(read(&root, "../elsewhere").is_err());
     assert!(remove(&root, "..").is_err());
-    for name in ["book.epub", "loan.acsm", "notes.md", "notes.TXT", "font.TTF", "font.otf", "font.cpfont", "sleep.PNG", "sleep.jpg", "sleep.jpeg", "sleep.webp", "sleep.gif", "sleep.bmp"] { add(&root, name, b"ok").unwrap(); }
-    assert_eq!(list(&root).unwrap().len(), 13);
+    for name in ["book.epub", "loan.acsm", "notes.md", "notes.TXT", "font.TTF", "font.otf", "font.cpfont", "sleep.PNG", "sleep.jpg", "sleep.jpeg", "sleep.webp", "sleep.gif", "sleep.bmp", "link.url"] { add(&root, name, b"ok").unwrap(); }
+    assert_eq!(list(&root).unwrap().len(), 14);
     fs::remove_dir_all(root).unwrap();
   }
 }

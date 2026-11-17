@@ -23,8 +23,11 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
+    "@mozilla/readability": "^0.6.0",
     "@xmldom/xmldom": "^0.9.12",
     "hono": "^4.6.16",
+    "jpeg-js": "^0.4.4",
+    "linkedom": "^0.18.15",
     "opentype.js": "^1.3.4",
     "pngjs": "^7.0.0",
     "yauzl": "^3.4.0"

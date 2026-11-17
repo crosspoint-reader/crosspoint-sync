@@ -5,9 +5,12 @@ import { PNG } from 'pngjs';
 type Point = { x: number; y: number };
 type Rotate = { cx: number; cy: number; angle: number };
 const fonts = new Map<string, Font>();
-function fontFor(weight: 'regular' | 'semibold' | 'bold'): Font {
+/** Lora in three weights, plus a blackletter face for the CrossPaper masthead. */
+export type Weight = 'regular' | 'semibold' | 'bold' | 'masthead';
+function fontFor(weight: Weight): Font {
   if (!fonts.has(weight)) {
-    const bytes = fs.readFileSync(new URL(`../../assets/fonts/sleep-journal/lora-${weight}.woff`, import.meta.url));
+    const file = weight === 'masthead' ? 'crosspaper/masthead.woff' : `sleep-journal/lora-${weight}.woff`;
+    const bytes = fs.readFileSync(new URL(`../../assets/fonts/${file}`, import.meta.url));
     fonts.set(weight, opentype.parse(new Uint8Array(bytes).buffer));
   }
   return fonts.get(weight)!;
@@ -78,7 +81,10 @@ export class SleepGraphics {
       this.roundRect(x+border,y+border,width-2*border,height-2*border,Math.max(0,radius-border),gray);
     } else this.fill([points], gray);
   }
-  text(text: string, x: number, baseline: number, size: number, options: { weight?: 'regular' | 'semibold' | 'bold'; align?: 'left' | 'center' | 'right'; maxWidth?: number; tracking?: number; gray?: number; rotate?: Rotate } = {}) {
+  measure(text: string, size: number, weight: Weight = 'regular'): number {
+    return fontFor(weight).getAdvanceWidth(text, size, { kerning: true });
+  }
+  text(text: string, x: number, baseline: number, size: number, options: { weight?: Weight; align?: 'left' | 'center' | 'right'; maxWidth?: number; tracking?: number; gray?: number; rotate?: Rotate } = {}) {
     const font = fontFor(options.weight ?? 'regular');
     const settings = { kerning: true, tracking: options.tracking ?? 0 };
     const measured = font.getAdvanceWidth(text, size, settings);

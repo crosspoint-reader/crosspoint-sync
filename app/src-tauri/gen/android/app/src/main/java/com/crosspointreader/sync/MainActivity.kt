@@ -79,11 +79,17 @@ class MainActivity : TauriActivity() {
   private fun receiveFiles(incoming: Intent?, delivery: String) {
     if (incoming == null) return
     val uris = IncomingFiles.uris(incoming)
-    if (uris.isEmpty()) return
+    // A page shared from a browser arrives as text, with no file attached.
+    val link = if (uris.isEmpty()) IncomingFiles.link(incoming) else null
+    if (uris.isEmpty() && link == null) return
     // Resolve and copy content:// streams while the activity holds the sender's
     // temporary URI grant. No external-storage permission or network fetch.
     importExecutor.execute {
       val failures = mutableListOf<String>()
+      if (link != null) {
+        try { IncomingFiles.saveLink(applicationContext, link, "$delivery-link") }
+        catch (error: Exception) { failures.add(error.message ?: "Couldn't save link") }
+      }
       for ((index, uri) in uris.withIndex()) {
         try { IncomingFiles.copy(applicationContext, uri, "$delivery-$index") }
         catch (error: Exception) { failures.add(error.message ?: "Couldn't import file") }

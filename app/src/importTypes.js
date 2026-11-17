@@ -2,6 +2,8 @@ export const IMPORT_EXTENSIONS = {
   books: ['epub', 'md', 'txt', 'acsm'],
   fonts: ['ttf', 'otf', 'cpfont'],
   wallpaper: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'],
+  // A shared web link, saved for CrossPaper.
+  crosspaper: ['url'],
 }
 export function importKind({ name }) {
   const ext = name.split('.').pop().toLowerCase()

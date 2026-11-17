@@ -19,6 +19,8 @@ import { documentRoutes } from './routes/v1/documents.js';
 import { connectorRoutes, oauthCallbackRoutes } from './routes/v1/connectors.js';
 import { profileSettingsRoutes, publicProfileRoutes } from './routes/profile.js';
 import { kindleRegisterRoutes } from './routes/v1/kindle-register.js';
+import { newspaperOpdsRoutes, newspaperRoutes } from './routes/v1/newspaper.js';
+import { safeFetch } from './safe-fetch.js';
 import { createProgressRefresh } from './connectors/refresh.js';
 import type { HttpTransport } from './connectors/types.js';
 
@@ -96,11 +98,14 @@ export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<A
   v1.route('/', connectorRoutes(db, opts.connectorTransport, config.trustProxy, basePath, config.allowHttpLocalhost));
   v1.route('/', meRoutes(db));
   v1.route('/', profileSettingsRoutes(db));
+  v1.route('/', newspaperRoutes(db, opts.connectorTransport ?? safeFetch));
   // Self-host-only Amazon device registration (off unless explicitly enabled).
   if (config.kindleServerRegistration) {
     v1.route('/', kindleRegisterRoutes(db, opts.connectorTransport, config.trustProxy));
   }
   app.route('/api/v1', v1);
+  // The daily paper as an OPDS catalog (HTTP Basic), for readers to fetch directly.
+  app.route('/', newspaperOpdsRoutes(v1, basePath));
 
   const root = new Hono<AppEnv>();
   // OS app-link discovery always happens at the domain root.

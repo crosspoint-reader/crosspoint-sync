@@ -21,6 +21,27 @@ internal object IncomingFiles {
     return (streams + clips).filter { it.scheme == "content" || it.scheme == "file" }.distinct()
   }
 
+  /** A web link shared as text (how browsers share a page), for CrossPaper. */
+  fun link(intent: Intent): String? =
+    if (intent.action == Intent.ACTION_SEND) intent.getStringExtra(Intent.EXTRA_TEXT)?.let { Regex("https?://\\S+").find(it)?.value } else null
+
+  /** Queue a shared link as a one-line link.url file, in the same atomic format as copy(). */
+  fun saveLink(context: Context, url: String, id: String) {
+    require(id.matches(Regex("[a-zA-Z0-9-]+")))
+    val delivered = context.getSharedPreferences("import-deliveries", Context.MODE_PRIVATE)
+    if (delivered.getBoolean(id, false)) return
+    val root = File(context.applicationInfo.dataDir, "ImportQueue").apply { check(mkdirs() || isDirectory) }
+    val destination = File(root, id)
+    if (!destination.isDirectory) {
+      val staging = File(root, ".$id")
+      staging.deleteRecursively()
+      check(staging.mkdir()) { "Couldn't create import folder" }
+      File(staging, "link.url").writeText(url)
+      check(staging.renameTo(destination)) { "Couldn't save link" }
+    }
+    check(delivered.edit().putBoolean(id, true).commit()) { "Couldn't record shared link" }
+  }
+
   fun copy(context: Context, uri: Uri, id: String) {
     require(id.matches(Regex("[a-zA-Z0-9-]+")))
     // Persist completion separately from the queue: rotating or restoring the
@@ -61,5 +82,5 @@ internal object IncomingFiles {
 
   private fun validName(name: String): Boolean =
     name.isNotEmpty() && !name.startsWith('.') && name.none { it == '/' || it == '\\' || it.isISOControl() } &&
-      name.substringAfterLast('.', "").lowercase() in setOf("epub", "acsm", "md", "txt", "ttf", "otf", "cpfont", "png", "jpg", "jpeg", "webp", "gif", "bmp")
+      name.substringAfterLast('.', "").lowercase() in setOf("epub", "acsm", "md", "txt", "ttf", "otf", "cpfont", "png", "jpg", "jpeg", "webp", "gif", "bmp", "url")
 }
