@@ -221,7 +221,7 @@ function Clippings({ session, book, revision = 0 }) {
           {chapter && <p className="mt-5 mb-2 text-sm font-medium text-stone-500">{chapter}</p>}
           <div className="space-y-3 md:grid md:grid-cols-2 md:gap-x-8 md:space-y-0">
             {clips.map((c) => (
-              <article key={c.id} className="group relative border-b border-stone-200 py-5 md:pr-8 select-none [-webkit-touch-callout:none]" {...hold(() => setDeleting(c))}>
+              <article key={c.id} className="group relative border-b border-stone-200 py-5 md:pr-8 pointer-coarse:select-none [-webkit-touch-callout:none]" {...hold(() => setDeleting(c))}>
                 <ClipMenu onDelete={() => setDeleting(c)} />
                 <blockquote className="font-display text-lg/relaxed text-stone-800">
                   {c.text}

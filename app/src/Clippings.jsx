@@ -27,7 +27,7 @@ function markdown(groups) {
 
 function Clip({ session, clip, book, onShare, onDelete, showBook, onMicroblog, sending }) {
   return (
-    <article className={`group relative select-none [-webkit-touch-callout:none] ${showBook
+    <article className={`group relative pointer-coarse:select-none [-webkit-touch-callout:none] ${showBook
       ? 'border-b border-stone-200 pt-6 pb-4 md:px-8 md:pt-4'
       : 'border-b border-stone-200 py-5 md:pr-8'}`} {...hold(() => onDelete(clip))}>
       <ClipMenu onDelete={() => onDelete(clip)} />
