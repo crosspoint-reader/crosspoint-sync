@@ -1,8 +1,8 @@
 /**
  * The public landing page (served at / unless LEGACY_WEB=1). Static HTML in the
  * app's own visual language: Lora headlines, Inter text, Caveat accents, stone
- * neutrals and forest green, light and dark. The screenshots in assets/landing
- * are the real app, captured with a seeded demo account.
+ * neutrals and forest green, light and dark. The art in assets/landing is made by
+ * app/store/make-assets.mjs from the real app with sample data.
  */
 const GITHUB = 'https://github.com/crosspoint-reader/crosspoint-sync';
 const IOS = 'https://apps.apple.com/us/app/crosspoint-sync-stats/id6824581923';
@@ -36,18 +36,23 @@ export const metaTags = (title: string, description = SITE_DESCRIPTION) =>
 <meta name="twitter:description" content="${description}">
 <meta name="twitter:image" content="${OG_IMAGE}">`;
 
-const SERVICES: [string, string, string, 'ready' | 'beta'][] = [
-  ['hardcover', 'Hardcover', 'Your shelf and progress update each time you sync.', 'ready'],
-  ['bookfusion', 'BookFusion', 'Reading positions both ways for books from BookFusion.', 'ready'],
-  ['readwise', 'Readwise', 'Sync reading progress both ways with matched books in Readwise Reader.', 'ready'],
-  ['spotify', 'Spotify', 'Listen ahead in the audiobook and your progress moves forward. Resume it in one tap.', 'beta'],
-  ['microblog', 'Micro.blog', 'Keep your Currently reading and Finished shelves current.', 'ready'],
-  ['audiobookshelf', 'Audiobookshelf', 'Switch between the ebook and the audiobook without losing your place.', 'ready'],
-  ['jellyfin', 'Jellyfin', 'Keep your place in sync with books on your Jellyfin server.', 'beta'],
-  ['bookorbit', 'BookOrbit', 'Two-way progress with your own library, clippings as highlights.', 'beta'],
-  ['seekquel', 'Seekquel', 'Log your progress, finished books and highlights in your Seekquel library.', 'beta'],
-  ['readest', 'Readest', 'Two-way progress and highlights with the Readest app.', 'beta'],
+// The services it syncs with, as [icon id, name], in ring order.
+const SERVICES = [
+  ['hardcover', 'Hardcover'], ['bookfusion', 'BookFusion'], ['readwise', 'Readwise'], ['spotify', 'Spotify'], ['microblog', 'Micro.blog'],
+  ['audiobookshelf', 'Audiobookshelf'], ['jellyfin', 'Jellyfin'], ['bookorbit', 'BookOrbit'], ['seekquel', 'Seekquel'], ['readest', 'Readest'],
 ];
+// Hero art: the service icons on a slowly turning ring, each joined to its neighbours and
+// to the icon three places round, with dots marching along the lines.
+const RING = 36; // ring radius, in percent of the tile
+const ringAt = SERVICES.map((_, i) => {
+  const a = (i / SERVICES.length - 0.25) * 2 * Math.PI;
+  return [50 + RING * Math.cos(a), 50 + RING * Math.sin(a)].map((v) => v.toFixed(2));
+});
+const ringArt = (basePath: string) => `<div class="ring" role="img" aria-label="The services CrossPoint Sync connects, joined in a ring: ${SERVICES.map(([, name]) => name).join(', ')}">
+<div class="ring-orbit">
+  <svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="${RING}"/><path d="${ringAt.map(([x, y], i) => `M${x} ${y}L${ringAt[(i + 3) % ringAt.length].join(' ')}`).join('')}"/></svg>
+  <ul>${SERVICES.map(([icon], i) => `<li style="left:${ringAt[i][0]}%;top:${ringAt[i][1]}%;--i:${i}"><img src="${basePath}/icons/${icon}.png" alt="" width="56" height="56"></li>`).join('')}</ul>
+</div></div>`;
 
 const STYLE = `
 :root{
@@ -102,7 +107,6 @@ nav a.link:hover{color:var(--ink);background:var(--wash)}
 nav .btn{height:38px;padding:0 16px;font-size:14px}
 .stores{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
 .hero .stores{margin-top:32px}
-.closing .stores{justify-content:center}
 .store{display:inline-flex;align-items:center;gap:8px;height:44px;padding:0 14px 0 12px;border-radius:9px;background:#000;color:#fff;
   box-shadow:inset 0 0 0 1px #a6a6a6;transition:transform .15s}
 .store:active{transform:scale(.98)}
@@ -110,30 +114,49 @@ nav .btn{height:38px;padding:0 16px;font-size:14px}
 .store span{display:flex;flex-direction:column;font-size:18px;font-weight:600;line-height:1.05;letter-spacing:-.01em}
 .store small{font-size:10px;font-weight:500;letter-spacing:.01em}
 
-/* Screenshots: a tinted panel holding one wide shot and one phone shot, each in a
-   white frame with a hard offset shadow (the main site's .reader-screenshot). */
-.screens{position:relative;aspect-ratio:1.25;background:var(--panel);border-radius:12px}
-.shot{position:absolute}
-.shot img{border:7px solid var(--frame);border-radius:12px;box-shadow:8px 12px 0 var(--frame-shadow);object-fit:cover;object-position:top}
-.shot.wide{width:86%;top:10%;left:5%}
-.shot.wide img{aspect-ratio:1280/800}
-.shot.wide.tab{width:74%}
-.shot.wide.tab img{aspect-ratio:1100/820}
-.shot.wide.short img{aspect-ratio:1280/660}
-.shot.tall{width:27%;right:6%;bottom:7%}
-.shot.tall img{aspect-ratio:390/844}
-.shot.tall.solo{width:30%;left:35%;right:auto;top:9%;bottom:auto}
-@media (max-width:640px){.shot img{border-width:4px;box-shadow:5px 7px 0 var(--frame-shadow)}}
-
 /* hero */
 .hero{display:grid;grid-template-columns:1fr;gap:48px;padding-block:56px 72px;align-items:center}
 .hero .eyebrow{font-size:24px;transform:rotate(-2deg);display:inline-block}
 .hero h1{font-size:clamp(2.2rem,5.2vw,4.75rem);line-height:1.25;margin-top:6px}
-.hero h1 .u{position:relative;white-space:nowrap}
-.hero h1 .u::after{content:"";position:absolute;left:-2%;right:-2%;bottom:-6px;height:14px;
+.u{position:relative;white-space:nowrap}
+.u::after{content:"";position:absolute;left:-2%;right:-2%;bottom:-6px;height:14px;
   background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 12' preserveAspectRatio='none'%3E%3Cpath d='M2 8 C 45 2, 80 11, 120 6 S 188 3, 198 7' stroke='%234a7a62' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") bottom/100% 100% no-repeat}
 .hero p.sub{font-size:18px;line-height:1.8;color:var(--soft);max-width:30rem;margin:22px 0 0}
-@media (min-width:900px){.hero{grid-template-columns:1fr 1fr;gap:65px;padding-block:72px 96px}}
+@media (min-width:900px){.hero{grid-template-columns:1fr 1fr;gap:65px;padding-block:72px 64px}}
+.art{border-radius:12px}
+/* Hero ring (ringArt). The orbit turns; each icon turns back by the same amount to stay upright. */
+.ring{position:relative;aspect-ratio:1;overflow:hidden;border-radius:12px;background:radial-gradient(120% 80% at 50% 0%,#315243,#1a2c24)}
+.ring-orbit,.ring svg{position:absolute;inset:0}
+.ring svg{width:100%;height:100%;fill:none;stroke:rgb(179 207 194/.5);stroke-width:1.5;stroke-dasharray:2 9;stroke-linecap:round}
+.ring svg *{vector-effect:non-scaling-stroke}
+.ring ul{margin:0;padding:0;list-style:none}
+.ring li{position:absolute;display:grid;place-items:center;width:17%;aspect-ratio:1;translate:-50% -50%;border-radius:50%;background:#fff;
+  box-shadow:0 10px 24px rgb(0 0 0/.3)}
+.ring li img{width:56%;height:auto;border-radius:24%}
+@media (prefers-reduced-motion:no-preference){
+  .ring-orbit{animation:ring-turn 120s linear infinite}
+  .ring li{animation:ring-turn 120s linear infinite reverse,ring-pulse 5s ease-in-out infinite;animation-delay:0s,calc(var(--i)*.5s)}
+  .ring svg{animation:ring-march 1.2s linear infinite}
+  @keyframes ring-turn{to{rotate:360deg}}
+  @keyframes ring-pulse{0%,20%,100%{scale:1}10%{scale:1.1}}
+  @keyframes ring-march{to{stroke-dashoffset:-11}}
+}
+
+/* The services by name, drifting under the hero. Three copies so the loop never shows a gap. */
+.names{padding-bottom:72px}
+.names-window{overflow:hidden;mask-image:linear-gradient(to right,transparent,#000 8%,#000 92%,transparent)}
+.names-track{display:flex;width:max-content;animation:names-drift 60s linear infinite}
+.names-window:hover .names-track{animation-play-state:paused}
+.names ul{display:flex;flex:none;margin:0;padding:0;list-style:none}
+.names li{font:400 1.6rem/1.6 "Lora",serif;letter-spacing:-.03em;color:var(--soft);white-space:nowrap}
+.names li::after{content:"\\00b7";margin:0 22px;color:var(--ring)}
+@keyframes names-drift{to{transform:translateX(-33.3333%)}}
+@media (prefers-reduced-motion:reduce){
+  .names-window{mask-image:none}
+  .names-track{animation:none;width:auto}
+  .names ul{flex-wrap:wrap;justify-content:center;flex:1}
+  .names ul[aria-hidden]{display:none}
+}
 
 /* sections: heading left, short paragraph right, as on the main site */
 section{padding:88px 0}
@@ -141,66 +164,56 @@ section.tight{padding-top:24px}
 h2{font-size:clamp(2.25rem,3.8vw,3.5rem);line-height:1.25}
 .lead p{font-size:15px;line-height:1.8;color:var(--soft);max-width:340px;margin:16px 0 0}
 @media (min-width:641px){.lead{display:flex;justify-content:space-between;align-items:end;gap:36px}.lead p{margin:0}}
-.steps{display:grid;gap:32px;margin-top:40px}
-.step{border-top:1px solid var(--line);padding-top:20px}
-.step h3{font-size:21px;margin-top:2px}
-.step p{margin:8px 0 0;color:var(--soft)}
-@media (min-width:800px){.steps{grid-template-columns:repeat(3,1fr)}}
-
-/* Feature sections: copy beside a screenshot panel, alternating sides. */
-.split{display:grid;gap:40px;align-items:center}
-.split .copy p{font-size:15px;line-height:1.8;color:var(--soft);max-width:430px;margin:16px 0 0}
+/* feature cards: a generated art tile with its copy underneath */
+.cards{display:grid;gap:56px 20px;margin-top:40px}
+.card h3{font-size:2rem;line-height:1.2;margin-top:26px}
+.card p{font-size:14px;line-height:1.8;color:var(--soft);max-width:440px;margin:12px 0 0}
 @media (min-width:900px){
-  .split{grid-template-columns:1fr 1.25fr;gap:80px}
-  .split.flip{grid-template-columns:1.25fr 1fr}
-  .split.flip .copy{order:2}
+  .cards{grid-template-columns:1fr 1fr}
+  .card.big{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:0 20px}
+  .card.big .art{grid-column:1/-1}
 }
-.points{list-style:none;padding:0;margin:24px 0 0;display:grid;gap:12px;font-size:15px}
+
+/* dark green band: how it works, as numbered steps */
+section.band{padding:0;background:#243c31;color:#f5f2e9}
+.band .wrap{display:grid;gap:40px;padding-block:65px}
+.band h2{color:inherit;font-size:clamp(3rem,4.5vw,4.5rem)}
+.band .copy p{max-width:420px;margin:24px 0;line-height:1.8;color:#e0e5da}
+.textlink{font-size:13px;font-weight:600;text-underline-offset:5px}
+.textlink:hover{text-decoration:underline}
+.steps{list-style:none;margin:0;padding:0;counter-reset:step}
+.steps li{display:grid;grid-template-columns:3.4rem 1fr;gap:20px;padding:22px 0;border-top:1px solid rgb(245 242 233/.18);counter-increment:step}
+.steps li:last-child{border-bottom:1px solid rgb(245 242 233/.18)}
+.steps li::before{content:"0" counter(step);font:400 2.6rem/1 "Lora",serif;letter-spacing:-.045em;color:#8fb9a6}
+.steps h3{color:inherit;font-size:1.45rem}
+.steps p{margin:6px 0 0;font-size:14px;line-height:1.7;color:#bdc9bd}
+@media (min-width:900px){.band .wrap{grid-template-columns:1fr 1fr;gap:80px;align-items:center}}
+
+/* self-hosting: the actual command */
+.pair{display:grid;gap:40px;align-items:center}
+.pair>*{min-width:0} /* lets the code block scroll instead of widening the page */
+.pair .copy p{font-size:15px;line-height:1.8;color:var(--soft);max-width:430px;margin:24px 0 0}
+.pair .cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:28px}
+.pair .hand{display:inline-block;font-size:22px;transform:rotate(-2deg);margin-bottom:10px}
+.code{margin:0;padding:28px;background:#1a2c24;color:#e0e5da;font:13px/1.9 "Geist Mono",ui-monospace,monospace;overflow-x:auto;
+  border-radius:12px;box-shadow:8px 12px 0 var(--frame-shadow)}
+.code b{font-weight:500;color:#8fb9a6}
+@media (min-width:900px){.pair{grid-template-columns:1fr 1fr;gap:80px}.pair.flip .copy{order:2}}
+/* CrossPaper: the edition's cover as the reader draws it, in the print frame */
+.paper{display:grid;place-items:center;padding:48px 24px;background:var(--panel)}
+.paper img{width:min(260px,70%);border:7px solid var(--frame);border-radius:12px;box-shadow:8px 12px 0 var(--frame-shadow)}
+
+.points{list-style:none;padding:0;margin:18px 0 0;display:grid;gap:8px;font-size:13px}
 .points li{display:flex;gap:12px;color:var(--text)}
-.points li::before{content:"";flex:0 0 18px;height:18px;margin-top:2px;border-radius:50%;
+.points li::before{content:"";flex:0 0 18px;height:18px;margin-top:1px;border-radius:50%;
   /* Lucide's check glyph. */
   background:var(--brand-wash) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234a7a62' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center/11px no-repeat;
   box-shadow:inset 0 0 0 1px var(--brand-line)}
 
-/* Integrations hub: a slow marquee of the service icons.
-   Three copies of the list so the loop never shows a gap inside .wrap. */
-.hub{position:relative;margin-top:40px;overflow:hidden;mask-image:linear-gradient(to right,transparent,#000 8%,#000 92%,transparent)}
-.hub-track{display:flex;width:max-content;padding-block:8px;animation:hub-drift 60s linear infinite}
-.hub:hover .hub-track{animation-play-state:paused}
-.hub ul{display:flex;gap:16px;margin:0;padding:0 16px 0 0;list-style:none;flex:none}
-.hub li{display:grid;place-items:center;width:100px;height:100px;border-radius:50%;background:var(--surface);box-shadow:inset 0 0 0 1px var(--line)}
-.hub li img{width:56px;height:56px;border-radius:14px}
-@keyframes hub-drift{to{transform:translateX(-33.3333%)}}
-@media (prefers-reduced-motion:reduce){
-  .hub{mask-image:none}
-  .hub-track{animation:none;width:auto}
-  .hub ul{flex-wrap:wrap;justify-content:center;padding:0;flex:1}
-  .hub ul[aria-hidden]{display:none}
-}
-.more{margin-top:28px}
-.more summary{display:flex;width:fit-content;margin:0 auto;cursor:pointer;list-style:none}
-@media (max-width:640px){
-  .hub li{width:72px;height:72px}
-  .hub li img{width:40px;height:40px;border-radius:10px}
-}
-.more summary::-webkit-details-marker{display:none}
-
-/* services */
-.services{display:grid;gap:12px;margin-top:28px}
-@media (min-width:760px){.services{grid-template-columns:1fr 1fr}}
-.svc{display:flex;gap:14px;align-items:flex-start;padding:24px;border-radius:6px;background:var(--panel)}
-.svc img{width:40px;height:40px;border-radius:10px;flex:0 0 auto}
-.svc .name{display:flex;align-items:center;gap:8px;font-weight:600;color:var(--ink)}
-.svc .desc{font-size:14px;color:var(--soft);margin-top:2px;line-height:1.5}
-.pill{font-size:11px;font-weight:600;padding:1px 8px;border-radius:999px;text-transform:uppercase;letter-spacing:.04em;
-  color:#8a6a1c;background:#faf5e6;box-shadow:inset 0 0 0 1px #ecdcae}
-:root[data-theme="dark"] .pill{color:#e5c97a;background:#2a2412;box-shadow:inset 0 0 0 1px #4a3f1c}
-
-/* closing */
-.closing{text-align:center;padding-block:96px 72px}
-.closing h2{font-size:clamp(32px,4.5vw,48px)}
-.closing p{color:var(--soft);font-size:18px;margin:14px auto 0;max-width:30rem}
-.closing .cta{display:flex;gap:12px;justify-content:center;margin-top:28px;flex-wrap:wrap}
+/* closing row, as on the main site */
+.start{display:flex;justify-content:space-between;align-items:center;gap:32px;flex-wrap:wrap;padding-block:50px;border-top:1px solid var(--line)}
+.start h2{font-size:2rem}
+.start .stores{margin:0}
 footer{border-top:1px solid var(--line);padding:28px 0 40px;color:var(--soft);font-size:14px}
 footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
 footer a:hover{color:var(--ink)}
@@ -209,21 +222,14 @@ footer a:hover{color:var(--ink)}
 #theme-toggle:hover{background:var(--wash)}
 
 @media (prefers-reduced-motion:no-preference){
-  .hero .copy,.hero .stage{animation:rise .7s cubic-bezier(.16,1,.3,1) both}
-  .hero .stage{animation-delay:.12s}
+  .hero .copy,.ring{animation:rise .7s cubic-bezier(.16,1,.3,1) both}
+  .ring{animation-delay:.12s}
   @keyframes rise{from{opacity:0;transform:translateY(16px)}}
 }
 `;
 
 export function landingPage(fontFaces: string, basePath = ''): string {
-  // Dark screenshots follow the explicit landing-page preference.
-  // cls: "wide" (desktop/tablet shot) or "tall" (phone shot), placed inside a .screens panel.
-  const shot = (name: string, alt: string, cls: string, eager = false) =>
-    `<div class="shot ${cls}"><picture><source srcset="${basePath}/landing/${name}-dark.webp" media="not all">` +
-    `<img src="${basePath}/landing/${name}-light.webp" alt="${alt}"${eager ? ' fetchpriority="high"' : ' loading="lazy"'} decoding="async"></picture></div>`;
-  const hubIcons = SERVICES.map(
-    ([icon, name]) => `<li><img src="${basePath}/icons/${icon}.png" alt="${name}" width="56" height="56" loading="lazy"></li>`
-  ).join('');
+  const names = SERVICES.map(([, name]) => `<li>${name}</li>`).join('');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CrossPoint Sync: Your reading, in sync everywhere</title>
@@ -252,90 +258,89 @@ try {
     <p class="sub">Your e-reader's progress, clippings and stats on your phone and the web, and in the services you already use.</p>
     ${STORES}
   </div>
-  <div class="screens">
-    ${shot('desktop-library', 'The CrossPoint Sync library on the web', 'wide', true)}
-    ${shot('phone-timeline', 'Your reading timeline in the CrossPoint Sync app', 'tall', true)}
-  </div>
+  ${ringArt(basePath)}
 </div>
 
-<section class="tight"><div class="wrap">
-  <div class="lead"><h2>Sync progress, highlights, and stats anywhere</h2>
-    <p>Link the services you already use. Progress and highlights go to them each time you sync.</p></div>
-  <div class="hub">
-    <div class="hub-track"><ul>${hubIcons}</ul><ul aria-hidden="true">${hubIcons}</ul><ul aria-hidden="true">${hubIcons}</ul></div>
+<div class="wrap names" aria-label="Services CrossPoint Sync works with"><div class="names-window"><div class="names-track">
+  <ul>${names}</ul><ul aria-hidden="true">${names}</ul><ul aria-hidden="true">${names}</ul>
+</div></div></div>
+
+<section><div class="wrap">
+  <div class="lead"><h2>Everything you read, in one place.</h2>
+    <p>Your library, highlights and reading habits, on your phone and the web.</p></div>
+  <div class="cards">
+    <article class="card big">
+      <img class="art" src="${basePath}/landing/book.webp" alt="A book's page in the app, with its progress and its Hardcover link" width="2400" height="1200" loading="lazy">
+      <div><h3>Every book, with its story</h3>
+        <p>Open any book for its cover, description, moods and how long it took you.</p></div>
+      <ul class="points">
+        <li>Covers, descriptions and genres filled in automatically</li>
+        <li>See what comes next when you finish a book in a series</li>
+        <li>Mark books reading, paused, finished or did not finish</li>
+      </ul>
+    </article>
+    <article class="card">
+      <img class="art" src="${basePath}/landing/clippings.webp" alt="The clipping of the day in the app" width="1500" height="1200" loading="lazy">
+      <h3>Highlights that leave the device</h3>
+      <p>Every passage you highlight on your reader shows up here, searchable and ready to share.</p>
+      <ul class="points">
+        <li>A highlight of the day, pulled from everything you've saved</li>
+        <li>Search across every book, or copy them all as Markdown</li>
+        <li>Share any passage as an image card with its cover</li>
+      </ul>
+    </article>
+    <article class="card">
+      <img class="art" src="${basePath}/landing/stats.webp" alt="Pages per week in the app's reading stats" width="1500" height="1200" loading="lazy">
+      <h3>See how you read</h3>
+      <p>Pages per week, the days you read, and the moods and genres you keep coming back to.</p>
+      <ul class="points">
+        <li>Your streak, pages read and books finished</li>
+        <li>A day-by-day timeline of what you read</li>
+        <li>A yearly goal for books to finish</li>
+      </ul>
+    </article>
   </div>
-  <details class="more"><summary class="btn ghost">What each service syncs</summary>
-  <div class="services">
-    ${SERVICES.map(
-      ([icon, name, desc, state]) =>
-        `<div class="svc"><img src="${basePath}/icons/${icon}.png" alt="" width="40" height="40" loading="lazy"><div>` +
-        `<div class="name">${name}${state === 'beta' ? '<span class="pill">beta</span>' : ''}</div><div class="desc">${desc}</div></div></div>`
-    ).join('')}
-  </div></details>
 </div></section>
 
-<section id="how"><div class="wrap">
-  <div class="lead"><h2>Nothing new to learn</h2>
-    <p>It speaks KOSync, the protocol your reader already has. Point it here and keep reading.</p></div>
-  <div class="steps">
-    <div class="step"><h3>Point your reader here</h3>
-      <p>Sign in under KOReader Sync on CrossPoint, CrossInk or KOReader. No plugin to install.</p></div>
-    <div class="step"><h3>Sync when you want to</h3>
-      <p>Send your progress from KOReader Sync, then pick up on another device right where you left off.</p></div>
-    <div class="step"><h3>View &amp; share in app</h3>
-      <p>Your library, highlights and reading habits, on your phone and the web.</p></div>
-  </div>
-</div></section>
-
-<section><div class="wrap split">
-  <div class="copy">
-    <h2>Every book, with its story</h2>
-    <p>Open any book for its cover, description, moods and how long it took you.</p>
+<section><div class="wrap pair flip">
+  <div class="copy"><span class="hand">new in the app</span>
+    <h2>CrossPaper: your feeds as a daily EPUB</h2>
+    <p>Follow RSS feeds and save pages you want to read later. Each day's edition bundles them into one EPUB for your reader.</p>
     <ul class="points">
-      <li>Covers, descriptions and genres filled in automatically</li>
-      <li>See what comes next when you finish a book in a series</li>
-      <li>Mark books reading, paused, finished or did not finish</li>
-    </ul>
-  </div>
-  <div class="screens">
-    ${shot('tablet-book', 'The Three-Body Problem on a tablet: its cover, stats and description', 'wide tab')}
-    ${shot('phone-book-details', 'Moods, genres and the next book in the series', 'tall')}
-  </div>
+      <li>Follow up to 30 feeds, or paste any site address</li>
+      <li>Article text only: no ads, no images, no links</li>
+      <li>Download an edition or send it to your reader</li>
+      <li>Past editions are kept for two weeks</li>
+    </ul></div>
+  <div class="paper"><img src="${basePath}/landing/crosspaper.webp" alt="The front page of a CrossPaper edition, drawn for an e-ink screen" width="720" height="1200" loading="lazy"></div>
 </div></section>
 
-<section><div class="wrap split flip">
-  <div class="copy">
-    <h2>Highlights that leave the device</h2>
-    <p>Every passage you highlight on your reader shows up here, searchable and ready to share.</p>
-    <ul class="points">
-      <li>A highlight of the day, pulled from everything you've saved</li>
-      <li>Search across every book, or copy them all as Markdown</li>
-      <li>Share any passage as an image card with its cover</li>
-    </ul>
-  </div>
-  <div class="screens">
-    ${shot('phone-clippings', 'Clippings in the app', 'tall solo')}
-  </div>
+<section class="band" id="how"><div class="wrap">
+  <div class="copy"><h2>Works with any KOSync reader</h2>
+    <p>CrossPoint, CrossInk and KOReader already speak KOSync. Change one setting, the sync server address, and keep reading.</p>
+    <a class="textlink" href="https://crosspointreader.com/docs#367-koreader-sync-quick-setup?doc=user_guide">Set up your reader →</a></div>
+  <ol class="steps">
+    <li><div><h3>Point your reader here</h3>
+      <p>Sign in under KOReader Sync on CrossPoint, CrossInk or KOReader. No plugin to install.</p></div></li>
+    <li><div><h3>Sync when you want to</h3>
+      <p>Send your progress from KOReader Sync, then pick up on another device right where you left off.</p></div></li>
+    <li><div><h3>View &amp; share in app</h3>
+      <p>Your library, highlights and reading habits, on your phone and the web.</p></div></li>
+  </ol>
 </div></section>
 
-<section><div class="wrap split">
-  <div class="copy">
-    <h2>See how you read</h2>
-    <p>Pages per week, the days you read, and the moods and genres you keep coming back to.</p>
-  </div>
-  <div class="screens">
-    ${shot('desktop-calendar', 'Reading stats on the web: moods, genres and a year of reading days', 'wide short')}
-    ${shot('phone-stats', 'Mood and genre stats in the app', 'tall')}
-  </div>
+<section><div class="wrap pair">
+  <div class="copy"><h2>Run it here, or <span class="u">host it yourself.</span></h2>
+    <p>Free to use and open source. The hosted service and self-hosted installs run the exact same thing: one Docker image.</p>
+    <div class="cta"><a class="btn primary" href="${basePath}/app/">Sync Dashboard</a><a class="btn ghost" href="${GITHUB}">Self-Host Sync</a></div></div>
+  <div><span class="hand">one command, your own server</span>
+<pre class="code"><code><b>$</b> docker run -d --name crosspoint-sync \\
+    -p 8080:8080 \\
+    -v crosspoint-data:/data \\
+    ghcr.io/crosspoint-reader/crosspoint-sync:main</code></pre></div>
 </div></section>
 
-
-<div class="wrap closing">
-  <h2>Start syncing in a minute</h2>
-  <p>Free to use and open source. Run it here, or on your own server with one Docker image.</p>
-  <div class="cta"><a class="btn primary" href="${basePath}/app/">Sync Dashboard</a><a class="btn ghost" href="${GITHUB}">Self-Host Sync</a></div>
-  ${STORES}
-</div>
+<div class="wrap start"><h2>Start syncing in a minute.</h2>${STORES}</div>
 </main>
 
 <footer><div class="wrap">
@@ -348,7 +353,6 @@ function applyLandingTheme() {
   const dark = document.documentElement.dataset.theme === 'dark';
   themeToggle.setAttribute('aria-pressed', String(dark));
   document.querySelector('meta[name="theme-color"]').setAttribute('content', dark ? '#121110' : '#faf8f3');
-  document.querySelectorAll('picture source').forEach(source => { source.media = dark ? 'all' : 'not all'; });
 }
 applyLandingTheme();
 themeToggle.addEventListener('click', () => {

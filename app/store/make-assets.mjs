@@ -1,4 +1,4 @@
-// Builds the Google Play and App Store images from the real app UI: seeds a throwaway sync
+// Builds the Google Play and App Store images, and the landing page's art, from the real app UI: seeds a throwaway sync
 // server, serves the app with Vite, captures each screen in Chrome, then frames the
 // captures with frame.html. Usage: node make-assets.mjs [out-dir]. See README.md.
 import { execFileSync, spawn } from 'node:child_process'
@@ -164,6 +164,23 @@ try {
     execFileSync('magick', [path.join(OUT, name), '-alpha', 'off', `PNG24:${path.join(OUT, name)}`])
   }
   await renderIcon(browser, icon)
+  // Landing page art, written straight into assets/landing as WebP: feature tiles from the iPhone
+  // captures, and a CrossPaper front page as the reader draws it.
+  const LANDING = path.join(ROOT, 'assets/landing')
+  const webp = (src, name, ...resize) => execFileSync('magick', [src, ...resize, '-quality', '82', path.join(LANDING, `${name}.webp`)])
+  for (const [name, w, h, spec] of [
+    ['book', 1600, 800, { layout: 'land-book', dev: 'iphone', shot: raw('iphone-book'), cards }],
+    ['clippings', 1000, 800, { layout: 'land-quote', dev: 'iphone', shot: raw('iphone-clippings'), cards }],
+    ['stats', 1000, 800, { layout: 'land-stats', dev: 'iphone', shot: raw('iphone-stats'), cards }],
+  ]) {
+    await frame(browser, w, h, spec, `landing-${name}.png`, 1.5)
+    webp(path.join(OUT, `landing-${name}.png`), name)
+  }
+  const paper = path.join(TMP, 'crosspaper.jpg')
+  execFileSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e',
+    "import { writeFileSync } from 'node:fs'; import { renderCover } from './src/render/crosspaper-cover.ts'; writeFileSync(process.argv[1], renderCover({ name: 'CrossPaper', date: process.argv[2] }))",
+    paper, iso(0)], { cwd: ROOT })
+  webp(paper, 'crosspaper', '-resize', '720x')
   console.log(`Store assets written to ${OUT}`)
 } finally {
   for (const stop of stops.reverse()) await stop()

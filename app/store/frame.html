@@ -143,6 +143,12 @@ const layouts = {
   },
   'search-logos': () => `<div class="cap left" style="left:440px;right:auto;top:420px;width:580px;--k:52px;--h:70px"><div class="kick">${s.kick}</div><h1>${s.head}</h1></div>`
     + s.logos.map((l, i) => `<div class="logo" style="--s:150px;left:${1060 + (i % 3) * 270}px;top:${235 + Math.floor(i / 3) * 290}px"><img src="${l.src}">${l.name}</div>`).join(''),
+  // Landing page art (assets/landing), drawn without captions: the page sets its own headings.
+  // Feature tiles 1600x800 and 1000x800: an iPhone running off the bottom, with UI cards beside it.
+  'land-book': () => dev('left:140px;top:80px;width:440px') + card('book', 'left:700px;top:90px;width:560px;transform:rotate(-2deg)')
+    + card('services', 'left:900px;top:430px;width:600px;transform:rotate(2deg)'),
+  'land-quote': () => paper() + dev('left:500px;top:110px;width:420px;transform:rotate(-6deg)') + card('quote', 'left:60px;top:250px;width:560px'),
+  'land-stats': () => dev('left:470px;top:90px;width:420px;transform:rotate(6deg)') + card('chart', 'left:60px;top:380px;width:580px;transform:rotate(-3deg)'),
   // Feature graphic, 1024x500
   feature: () => `<div class="feature"><img src="${s.icon}"><div class="kick" style="--k:40px;margin-top:22px;transform-origin:left">${s.kick}</div>
     <h1 style="--h:64px;line-height:1.05;margin-top:0">${s.head}</h1><p>Progress, highlights and reading stats from your CrossPoint e-reader, on your phone.</p></div>`

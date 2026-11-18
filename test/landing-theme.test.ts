@@ -6,7 +6,6 @@ function preview(saved?: string, blocked = false) {
   const html = landingPage('', '/reading');
   const root = { dataset: {} as Record<string, string> };
   const attributes: Record<string, string> = {};
-  const sources = [{ media: 'not all' }];
   let click = () => {};
   const context = {
     localStorage: {
@@ -20,26 +19,23 @@ function preview(saved?: string, blocked = false) {
         addEventListener: (_event: string, handler: () => void) => { click = handler; },
       }),
       querySelector: () => ({ setAttribute: (key: string, value: string) => { attributes[key] = value; } }),
-      querySelectorAll: () => sources,
     },
   };
   for (const script of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) runInNewContext(script[1], context);
-  return { root, attributes, sources, click: () => click(), saved: () => saved, html };
+  return { root, attributes, click: () => click(), saved: () => saved, html };
 }
 
-it('defaults to light and switches the page, screenshots and browser chrome together', () => {
+it('defaults to light and switches the page and browser chrome together', () => {
   const page = preview();
   expect(page.html).not.toContain('prefers-color-scheme');
-  expect(page.html).toContain('/reading/landing/desktop-library-dark.webp');
+  expect(page.html).toContain('/reading/landing/book.webp');
   expect(page.attributes).toMatchObject({ 'aria-pressed': 'false', content: '#faf8f3' });
   page.click();
   expect(page.root.dataset.theme).toBe('dark');
   expect(page.attributes).toMatchObject({ 'aria-pressed': 'true', content: '#121110' });
-  expect(page.sources[0].media).toBe('all');
   expect(preview(page.saved()).root.dataset.theme).toBe('dark');
   page.click();
   expect(page.saved()).toBe('light');
-  expect(page.sources[0].media).toBe('not all');
 });
 
 it('still switches when browser storage is blocked', () => {

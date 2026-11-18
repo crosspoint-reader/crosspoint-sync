@@ -23,6 +23,7 @@ Output:
 | `appstore-search.png` | 3840x2560 | App Store search result card (iOS 27+) |
 | `appstore-*-logos.png` | same | The same two placements with the services it syncs to |
 | `icon-512.png` | 512x512 | Play app icon |
+| `landing-*.png` | 1.5x | Landing page art, also written to `assets/landing/*.webp` |
 
 It needs Google Chrome, ImageMagick (`magick`), `npm install` already run in the repo root and in `app/`, and ports 1430, 8798 and 8799 free. A run takes about two minutes.
 
