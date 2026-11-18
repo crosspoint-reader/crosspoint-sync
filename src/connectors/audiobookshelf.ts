@@ -240,19 +240,35 @@ function noEpubKey(c: AbsCred, externalId: string): string {
   return `${baseUrl(c.server)}\n${externalId}`;
 }
 
-/** The item's primary EPUB from ABS (`GET /api/items/:id/ebook`), briefly cached (text entries only). */
+/**
+ * The item's EPUB, briefly cached (text entries only). Prefers the primary ebook,
+ * but falls back to the ebook file ABS lists as supplementary - libraries with
+ * "Audiobooks only" set never promote the EPUB to `media.ebookFile`, so the
+ * primary endpoint answers 404 even though the file is right there.
+ */
 function absEpub(http: HttpTransport, c: AbsCred, externalId: string): Promise<TextEpub> {
+  const headers = { authorization: `Bearer ${c.token}` };
+  const itemUrl = `${baseUrl(c.server)}/api/items/${encodeURIComponent(externalId)}`;
   return cachedEpub(['audiobookshelf', baseUrl(c.server), c.token, externalId], async () => {
-    const res = await http(`${baseUrl(c.server)}/api/items/${encodeURIComponent(externalId)}/ebook`, {
-      method: 'GET',
-      headers: { authorization: `Bearer ${c.token}` },
-    });
-    if (res.status === 404 || res.status === 400) noEpub.set(noEpubKey(c, externalId), Date.now() + NO_EPUB_TTL);
-    if (res.status < 200 || res.status >= 300) {
-      // A missing EPUB is permanent for this item; rate limits and outages are not.
-      throw new ConnectorOperationError(`ABS ebook download failed (${res.status})`, res.status >= 500 || res.status === 429);
+    const res = await http(`${itemUrl}/ebook`, { method: 'GET', headers });
+    if (res.status >= 200 && res.status < 300) return res;
+    const item = await http(`${itemUrl}?expanded=1`, { method: 'GET', headers });
+    if (item.status < 200 || item.status >= 300) {
+      throw new ConnectorOperationError(
+        `ABS ebook download failed (${res.status})`, item.status >= 500 || item.status === 429
+      );
     }
-    return res;
+    const expanded: any = await item.json();
+    const files: any[] = Array.isArray(expanded?.libraryFiles) ? expanded.libraryFiles : [];
+    const ebook = files.find((file: any) =>
+      file?.fileType === 'ebook' && typeof file?.metadata?.filename === 'string' &&
+      /\.epub$/i.test(file.metadata.filename));
+    if (ebook) {
+      return http(`${itemUrl}/file/${encodeURIComponent(String(ebook.ino))}`, { method: 'GET', headers });
+    }
+    if (res.status === 404 || res.status === 400) noEpub.set(noEpubKey(c, externalId), Date.now() + NO_EPUB_TTL);
+    // A missing EPUB is permanent for this item; rate limits and outages are not.
+    throw new ConnectorOperationError(`ABS ebook download failed (${res.status})`, res.status >= 500 || res.status === 429);
   });
 }
 
