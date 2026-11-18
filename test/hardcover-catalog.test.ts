@@ -38,6 +38,36 @@ function fake(status = 200, hits = [{ document: HIT }]) {
 beforeEach(() => resetHardcoverThrottle());
 
 describe('Hardcover catalog details', () => {
+  it('asks the metadata API and Hardcover together: what the book is from the first, series and pages from Hardcover', async () => {
+    const { app, db } = makeTestApp();
+    const { username, headers } = await registerUser(app);
+    await app.request('/syncs/progress', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ document: DOC, progress: '/body/DocFragment[2]', percentage: 0.2, device: 'X4', device_id: 'x4',
+        metadata: { title: 'Foundryside', authors: 'Robert Jackson Bennett' } }),
+    });
+    const { id } = db.prepare('SELECT id FROM users WHERE username = ?').get(username) as { id: number };
+    const asked: string[] = [];
+    const http: HttpTransport = async (url) => {
+      asked.push(url.includes('hardcover') ? 'hardcover' : url.startsWith('https://meta.test/') ? 'metadata' : 'other');
+      if (url.includes('hardcover')) return Response.json({ data: { search: { results: { hits: [{ document: HIT }] } } } });
+      if (url.startsWith('https://meta.test/')) {
+        return Response.json({ books: [{ id: '9781524760366', title: 'Foundryside', author: 'Robert Jackson Bennett', description: 'A thief in a city of industrialised magic.',
+          cover_url: 'https://meta.test/covers/9781524760366', series: 'Founders', series_position: 3, genres: ['Fantasy'], page_count: 600, release_year: 2018 }] });
+      }
+      return Response.json({});
+    };
+    const info = await documentInfo(db, id, DOC, http, { HARDCOVER_API_KEY: 'k', METADATA_API_URL: 'https://meta.test' }, { hardcover: true });
+    expect(asked.filter((a) => a !== 'other').sort()).toEqual(['hardcover', 'metadata']);
+    expect(asked.some((a) => a === 'other')).toBe(false); // cover and pages were both answered: no free source asked
+    expect(info).toEqual({ cover: 'https://meta.test/covers/9781524760366', pages: 512 });
+    expect(db.prepare('SELECT hc_id, hc_slug, hc_series_id, series, series_position, genres, description FROM documents WHERE document = ?').get(DOC)).toEqual({
+      hc_id: '41398', hc_slug: 'foundryside', hc_series_id: 4975, series: 'The Founders Trilogy', series_position: 1,
+      genres: '["Fantasy"]', description: 'A thief in a city of industrialised magic.',
+    });
+  });
+
   it('maps a search hit and tidies user-entered moods', async () => {
     const book = await searchHardcover(fake().http, 'Foundryside', 'Robert Jackson Bennett', 'hc_pat_x');
     expect(book).toMatchObject({

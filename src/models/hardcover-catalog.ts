@@ -164,22 +164,26 @@ export async function searchHardcover(
 }
 
 /**
- * The same lookup against a book-metadata API (METADATA_API_URL) instead of
- * Hardcover: one request returns details, cover and page count, so a server
- * needs no catalog keys of its own. Only the title and author are sent. The
- * result has no Hardcover slug or series id, so Hardcover links and "next in
- * series" are unavailable for books found this way.
+ * The same lookup against a book-metadata API (METADATA_API_URL): one request
+ * returns details, cover and page count, so a server needs no catalog keys of
+ * its own. Only the title and author are sent. The result has no Hardcover
+ * slug or series id: with HARDCOVER_API_KEY also set, hardcoverBook asks
+ * Hardcover as well and those come from it; without, Hardcover links and
+ * "next in series" are unavailable.
  */
 export async function searchMetadataApi(
   http: HttpTransport,
   title: string,
   author: string,
-  baseUrl: string
+  baseUrl: string,
+  /** METADATA_API_KEY: sent as a bearer token when set, so the API can tell this server apart. */
+  apiKey?: string
 ): Promise<HardcoverBook | null | 'later'> {
   let body: any;
   try {
     const res = await http(`${baseUrl.replace(/\/+$/, '')}/books?${new URLSearchParams({ title, author })}`, {
       method: 'GET',
+      ...(apiKey && { headers: { authorization: `Bearer ${apiKey}` } }),
       signal: AbortSignal.timeout(20000),
     });
     if (res.status !== 200) return 'later'; // busy, rate limited or down: not a miss
@@ -287,6 +291,16 @@ export async function searchIsbndb(
   };
 }
 
+/**
+ * The book-metadata API to ask, or '' for none. It is metadata.dev unless told otherwise, so a
+ * self-hosted server gets book details without finding a URL or a catalog key. It sends each
+ * book's title and author to that service: METADATA_API=false turns it off. METADATA_API_URL
+ * names a different API.
+ */
+export const DEFAULT_METADATA_API_URL = 'https://api.metadata.dev';
+export const metadataApiUrl = (env: NodeJS.ProcessEnv): string =>
+  /^(0|false|no|off)$/i.test(env.METADATA_API?.trim() ?? '') ? '' : env.METADATA_API_URL?.trim() || DEFAULT_METADATA_API_URL;
+
 export const cacheKey =(title: string, author: string) => `${normalizeText(coreTitle(title))}|${normalizeAuthor(author)}`;
 
 /** Shared, cached lookup: one Hardcover request per distinct book across all users. */
@@ -302,10 +316,12 @@ export async function hardcoverBook(
   title: string,
   author: string,
   key: string,
-  /** METADATA_API_URL: when set, that API is asked instead of Hardcover. */
+  /** METADATA_API_URL: when set, that API says what the book is; Hardcover (with a key) adds what only it has. */
   api?: string,
   /** ISBNDB_API_KEY: fills what the source above lacks, or answers alone without one. */
-  isbndb?: string
+  isbndb?: string,
+  /** METADATA_API_KEY: optional key for the metadata API. */
+  apiKey?: string
 ): Promise<HardcoverBook | null | 'later'> {
   const k = cacheKey(title, author);
   const hit = db.prepare('SELECT data, checked_at FROM catalog_cache WHERE key = ?').get(k) as
@@ -314,8 +330,27 @@ export async function hardcoverBook(
   if (hit && (hit.data || nowSeconds() - hit.checked_at < RETRY_AFTER)) {
     return hit.data ? (JSON.parse(hit.data) as HardcoverBook) : null;
   }
-  let found = api ? await searchMetadataApi(http, title, author, api) : key ? await searchHardcover(http, title, author, key) : null;
-  if (found === 'later') return 'later';
+  const [meta, hc] = await Promise.all([
+    api ? searchMetadataApi(http, title, author, api, apiKey) : null,
+    key ? searchHardcover(http, title, author, key) : null,
+  ]);
+  if (meta === 'later' || hc === 'later') return 'later';
+  // Both answered: the metadata API for what the book is (description, genres, cover, year),
+  // Hardcover for what only it has (its id and link, the series and the book's place in it,
+  // moods, content warnings, rating) and for the print page count.
+  let found: HardcoverBook | null =
+    hc && meta
+      ? {
+          ...hc,
+          genres: meta.genres.length ? meta.genres : hc.genres,
+          description: meta.description ?? hc.description,
+          cover: meta.cover ?? hc.cover,
+          release_year: meta.release_year ?? hc.release_year,
+          pages: hc.pages ?? meta.pages,
+          series: hc.series ?? meta.series,
+          series_position: hc.series ? hc.series_position : meta.series_position,
+        }
+      : (hc ?? meta);
   if (isbndb && (!found || !found.pages || !found.cover || !found.description)) {
     const extra = await searchIsbndb(http, title, author, isbndb);
     // ponytail: a match from the first source is kept (and cached) without ISBNdb's gaps when ISBNdb is busy.

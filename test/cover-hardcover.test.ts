@@ -30,19 +30,22 @@ describe('covers', () => {
     expect((await documentInfo(db, 1, 'a'.repeat(32), offline, {})).cover).toBe('https://hc.test/hobbit.jpg');
   });
 
-  it('asks the metadata API instead of Hardcover when METADATA_API_URL is set', async () => {
+  it('asks the metadata API alone when METADATA_API_URL is set without a Hardcover key', async () => {
     const db = openDatabase(':memory:');
     migrate(db);
     db.prepare("INSERT INTO users (id, username, key_hash, created_at) VALUES (1, 'u', 'h', 0)").run();
     db.prepare("INSERT INTO documents (user_id, document, title, author, updated_at) VALUES (1, ?, 'dune', 'Herbert, Frank', 0)").run('b'.repeat(32));
     const asked: string[] = [];
-    const api: HttpTransport = async (url) => {
+    let auth: unknown;
+    const api: HttpTransport = async (url, init) => {
       asked.push(String(url));
+      auth = (init?.headers as Record<string, string> | undefined)?.authorization;
       return Response.json({ books: [{ id: '9780441013593', isbn: '9780441013593', title: 'Dune', author: 'Frank Herbert', description: 'Spice.',
         cover_url: 'https://meta.test/covers/9780441013593', series: 'Dune', series_position: 1, genres: ['Science Fiction'], moods: ['adventurous'],
         content_warnings: [], page_count: 604, release_year: 1965, rating: 4.26 }] });
     };
-    const info = await documentInfo(db, 1, 'b'.repeat(32), api, { METADATA_API_URL: 'https://meta.test/' }, { hardcover: true });
+    const info = await documentInfo(db, 1, 'b'.repeat(32), api, { METADATA_API_URL: 'https://meta.test/', METADATA_API_KEY: 'mk_test' }, { hardcover: true });
+    expect(auth).toBe('Bearer mk_test'); // the key, when one is set
     // One request answers details, cover and pages: nothing else is asked.
     expect(asked).toEqual(['https://meta.test/books?title=dune&author=Herbert%2C+Frank']);
     expect(info).toEqual({ cover: 'https://meta.test/covers/9780441013593', pages: 604 });
@@ -51,7 +54,11 @@ describe('covers', () => {
       release_year: 1965, description: 'Spice.', rating: 4.26,
     });
 
-    // Busy (503) is not a miss: the book stays unchecked and is asked again later.
+    // On at metadata.dev unless METADATA_API is false; METADATA_API_URL names another API.
+    const { metadataApiUrl } = await import('../src/models/hardcover-catalog.js');
+    expect([metadataApiUrl({}), metadataApiUrl({ METADATA_API: 'true' }), metadataApiUrl({ METADATA_API: 'false' }), metadataApiUrl({ METADATA_API_URL: 'https://other.test' }), metadataApiUrl({ METADATA_API: 'false', METADATA_API_URL: 'https://other.test' })])
+      .toEqual(['https://api.metadata.dev', 'https://api.metadata.dev', '', 'https://other.test', '']);
+
     db.prepare("INSERT INTO documents (user_id, document, title, author, cover_url, page_count, updated_at) VALUES (1, ?, 'Emma', 'Jane Austen', 'x', 1, 0)").run('c'.repeat(32));
     await documentInfo(db, 1, 'c'.repeat(32), async () => new Response('', { status: 503 }), { METADATA_API_URL: 'https://meta.test' }, { hardcover: true });
     expect(db.prepare('SELECT hc_checked_at FROM documents WHERE document = ?').get('c'.repeat(32))).toEqual({ hc_checked_at: null });
