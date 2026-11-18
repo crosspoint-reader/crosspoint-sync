@@ -209,7 +209,85 @@ export async function searchMetadataApi(
   };
 }
 
-export const cacheKey = (title: string, author: string) => `${normalizeText(coreTitle(title))}|${normalizeAuthor(author)}`;
+let isbndbPausedUntil = 0;
+
+/**
+ * The same lookup against ISBNdb (ISBNDB_API_KEY, a paid plan): one title
+ * and author search, scored again here. ISBNdb lists every edition, so the
+ * page count, cover and synopsis each come from the best-matching edition that
+ * has one. It knows no moods, content warnings, ratings or series.
+ */
+export async function searchIsbndb(
+  http: HttpTransport,
+  title: string,
+  author: string,
+  key: string
+): Promise<HardcoverBook | null | 'later'> {
+  const q = coreTitle(title).slice(0, 150); // ISBNdb's query limit
+  if (!q) return null;
+  if (Date.now() < isbndbPausedUntil) return 'later';
+  let body: any;
+  try {
+    // "Herbert, Frank" is searched as "Frank Herbert".
+    const who = author.trim().replace(/^([^,]+),\s*([^,]+)$/, '$2 $1').slice(0, 150);
+    const params = new URLSearchParams({ text: q, ...(who && { author: who }), pageSize: '50' });
+    const res = await http(`https://api2.isbndb.com/search/books?${params}`, {
+      method: 'GET',
+      headers: { authorization: key },
+      signal: AbortSignal.timeout(20000),
+    });
+    if (res.status === 404 || res.status === 400) return null; // nothing found / a query it won't take
+    if (res.status === 429) isbndbPausedUntil = Date.now() + 60 * 1000;
+    if (res.status !== 200) return 'later';
+    body = await res.json();
+  } catch {
+    return 'later';
+  }
+  const matched: { b: any; score: number }[] = [];
+  for (const b of Array.isArray(body?.data) ? body.data : []) {
+    if (typeof b?.title !== 'string' || !b.isbn13) continue;
+    const authors: (string | undefined)[] = Array.isArray(b.authors) && b.authors.length ? b.authors : [undefined];
+    const score = Math.max(...authors.map((a) => scoreCandidate(title, author, { externalId: String(b.isbn13), title: b.title, author: a })));
+    if (score >= THRESHOLD) matched.push({ b, score });
+  }
+  if (!matched.length) return null;
+  matched.sort((x, y) => y.score - x.score); // stable: ISBNdb's own order breaks ties
+  const first = (has: (b: any) => unknown) => matched.find(({ b }) => has(b))?.b;
+  // An audiobook's "pages" are not a print length.
+  const print = first((b) => Number.isInteger(b.pages) && b.pages > 0 && !/audio|\bcd\b|mp3|cassette/i.test(b.binding ?? ''));
+  const top = print ?? matched[0].b;
+  // The earliest of the equally good editions is the closest thing to a release year.
+  const years = matched
+    .filter((m) => m.score === matched[0].score)
+    .map(({ b }) => parseInt(String(b.date_published ?? ''), 10))
+    .filter((y) => y > 0);
+  const thema = (first((b) => Array.isArray(b.thema))?.thema ?? []).filter((t: any) => t?.type === 'subject').map((t: any) => t.name);
+  // Synopses arrive with markup ("<p>", "<br/>").
+  const synopsis = String(first((b) => typeof b.synopsis === 'string' && b.synopsis.trim())?.synopsis ?? '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return {
+    id: String(top.isbn13),
+    slug: null,
+    title: top.title,
+    author: typeof top.authors?.[0] === 'string' ? top.authors[0] : null,
+    moods: [],
+    genres: tidy(thema.length ? thema : first((b) => Array.isArray(b.subjects) && b.subjects.length)?.subjects, 6),
+    content_warnings: [],
+    rating: null,
+    series: null,
+    series_id: null,
+    series_position: null,
+    release_year: years.length ? Math.min(...years) : null,
+    pages: print?.pages ?? null,
+    // ponytail: ISBNdb may hand back a placeholder image and the URL can't tell; the free sources are asked first, so this only fills gaps.
+    cover: first((b) => typeof b.image === 'string' && b.image)?.image ?? null,
+    description: synopsis ? synopsis.slice(0, 6000) : null,
+  };
+}
+
+export const cacheKey =(title: string, author: string) => `${normalizeText(coreTitle(title))}|${normalizeAuthor(author)}`;
 
 /** Shared, cached lookup: one Hardcover request per distinct book across all users. */
 /** Hardcover's cached match for a title, without a lookup (null when none is cached). */
@@ -225,7 +303,9 @@ export async function hardcoverBook(
   author: string,
   key: string,
   /** METADATA_API_URL: when set, that API is asked instead of Hardcover. */
-  api?: string
+  api?: string,
+  /** ISBNDB_API_KEY: fills what the source above lacks, or answers alone without one. */
+  isbndb?: string
 ): Promise<HardcoverBook | null | 'later'> {
   const k = cacheKey(title, author);
   const hit = db.prepare('SELECT data, checked_at FROM catalog_cache WHERE key = ?').get(k) as
@@ -234,8 +314,25 @@ export async function hardcoverBook(
   if (hit && (hit.data || nowSeconds() - hit.checked_at < RETRY_AFTER)) {
     return hit.data ? (JSON.parse(hit.data) as HardcoverBook) : null;
   }
-  const found = api ? await searchMetadataApi(http, title, author, api) : await searchHardcover(http, title, author, key);
+  let found = api ? await searchMetadataApi(http, title, author, api) : key ? await searchHardcover(http, title, author, key) : null;
   if (found === 'later') return 'later';
+  if (isbndb && (!found || !found.pages || !found.cover || !found.description)) {
+    const extra = await searchIsbndb(http, title, author, isbndb);
+    // ponytail: a match from the first source is kept (and cached) without ISBNdb's gaps when ISBNdb is busy.
+    if (extra === 'later' && !found) return 'later';
+    if (extra && extra !== 'later') {
+      found = found
+        ? {
+            ...found,
+            pages: found.pages ?? extra.pages,
+            cover: found.cover ?? extra.cover,
+            description: found.description ?? extra.description,
+            release_year: found.release_year ?? extra.release_year,
+            genres: found.genres.length ? found.genres : extra.genres,
+          }
+        : extra;
+    }
+  }
   db.prepare(
     `INSERT INTO catalog_cache (key, data, checked_at) VALUES (?, ?, ?)
      ON CONFLICT(key) DO UPDATE SET data = excluded.data, checked_at = excluded.checked_at`
