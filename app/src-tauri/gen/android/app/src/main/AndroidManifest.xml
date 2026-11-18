@@ -6,6 +6,8 @@
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
+    <!-- CHANGE_WIFI_MULTICAST_STATE implies a hard Wi-Fi requirement; Ethernet-only devices can still use the app. -->
+    <uses-feature android:name="android.hardware.wifi" android:required="false" />
 
     <application
         android:icon="@mipmap/ic_launcher"
