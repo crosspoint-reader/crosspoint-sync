@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Download, ExternalLink, Loader2, Puzzle, RefreshCw, Search, Trash2 } from 'lucide-react'
+import { ExternalLink, Loader2, Puzzle, Search, Trash2 } from 'lucide-react'
 import { http } from './api.js'
 import { deleteFiles, joinPath, listFiles, readText, uploadTo } from './device.js'
-import { ActionSheet, Card, EmptyState, notify } from './ui.jsx'
+import { ActionSheet, EmptyState, notify } from './ui.jsx'
 
 // The same discovery the reader's Plugin Hub uses: its device.json names the catalog and extra lists.
 const HUB = 'https://pluginhub.crosspointreader.com/device.json'
@@ -110,11 +110,8 @@ export default function Plugins({ base }) {
   const match = (p) => !q || `${p.title} ${p.description} ${p.author}`.toLowerCase().includes(q)
 
   return (
-    <section className="mt-6">
-      <p className="text-sm/6 text-stone-500">
-        Plugins add services and tools to your reader. Turn on Settings › Connectivity › Plugins on the reader to use them.
-      </p>
-      <label className="mt-3 flex h-11 items-center gap-2 rounded-xl bg-surface px-3 ring-1 ring-stone-950/10 focus-within:ring-2 focus-within:ring-brand-500/60">
+    <section className="mt-5">
+      <label className="flex h-11 items-center gap-2 rounded-xl bg-surface px-3 ring-1 ring-stone-950/10 focus-within:ring-2 focus-within:ring-brand-500/60">
         <Search className="size-4 text-stone-400" />
         <input
           type="search"
@@ -125,10 +122,10 @@ export default function Plugins({ base }) {
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck={false}
-          className="h-full min-w-0 flex-1 bg-transparent text-sm text-stone-900 outline-none"
+          className="h-full min-w-0 flex-1 bg-transparent text-sm text-stone-900 outline-none placeholder:text-stone-400"
         />
       </label>
-      {!base && <p className="mt-3 text-sm text-stone-500">Connect your reader to install plugins.</p>}
+      <p className="mt-2 text-xs/5 text-stone-500">To use plugins, turn on Settings › Connectivity › Plugins on your reader.</p>
       {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
       {!catalog && !error && <Loader2 className="mx-auto mt-6 size-5 animate-spin text-stone-400" />}
 
@@ -136,16 +133,15 @@ export default function Plugins({ base }) {
         const plugins = list.plugins.filter(match)
         if (!plugins.length) return null
         return (
-          <div key={list.title} className="mt-5">
-            <h3 className="text-sm font-semibold text-stone-600">{list.title}</h3>
+          <div key={list.title} className="mt-8">
+            <h3 className="font-display text-xl text-stone-900">{list.title}</h3>
             {list.notice && <p className="text-xs/5 text-stone-500">{list.notice}</p>}
-            <Card className="mt-2 divide-y divide-stone-100">
+            <div className="mt-1 divide-y divide-stone-200">
               {plugins.map((p) => {
                 const have = installed[p.name]
                 const update = have && have.version && have.version !== p.version
                 return (
-                  <div key={p.name} className="flex items-start gap-3 px-4 py-3">
-                    <Puzzle className="mt-0.5 size-5 shrink-0 text-stone-400" strokeWidth={1.75} />
+                  <div key={p.name} className="flex items-center gap-3 py-3">
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-stone-900">{p.title}</p>
                       <p className="text-xs/5 text-stone-500">{job?.name === p.name ? job.label : p.description}</p>
@@ -169,9 +165,9 @@ export default function Plugins({ base }) {
                           <button
                             disabled={!!job || !base}
                             onClick={() => install(p)}
-                            className="flex h-9 items-center gap-1.5 rounded-full bg-brand-50 px-3 text-sm font-semibold text-brand-700 active:bg-brand-100 disabled:opacity-40"
+                            className="h-9 shrink-0 rounded-lg px-2 text-sm font-semibold text-brand-600 active:bg-stone-100 disabled:opacity-40"
                           >
-                            {update ? <RefreshCw className="size-4" /> : <Download className="size-4" />} {update ? 'Update' : 'Install'}
+                            {update ? 'Update' : 'Install'}
                           </button>
                         )}
                         {have && (
@@ -189,7 +185,7 @@ export default function Plugins({ base }) {
                   </div>
                 )
               })}
-            </Card>
+            </div>
           </div>
         )
       })}

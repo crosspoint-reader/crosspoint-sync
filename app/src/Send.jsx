@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   BookUp,
-  FilePen,
+  ChevronDown,
   ChevronRight,
   FolderPlus,
   Pencil,
@@ -9,19 +9,14 @@ import {
   CircleCheck,
   FileText,
   Folder,
-  ImageDown,
   Loader2,
-  RefreshCw,
-  Send as SendIcon,
   Trash2,
-  Wifi,
-  WifiOff,
   X,
 } from 'lucide-react'
 import { isApp } from './api.js'
 import { DEFAULT_HOST, connect, deleteFiles, folders, isBook, joinPath, listFiles, loadDevicePrefs, makeFolder, renameFile, saveDevicePrefs } from './device.js'
 import { downloads as listDownloads, removeDownload, sendDownload, sendFile } from './catalogs.js'
-import { ActionSheet, Card, EmptyState, folderLabel, notify, Tabs, Toggle } from './ui.jsx'
+import { ActionSheet, EmptyState, folderLabel, notify, Tabs, Toggle } from './ui.jsx'
 import ConversionLog from './ConversionLog.jsx'
 import { importKind } from './importTypes.js'
 import { listImports, addImport, readImport, removeImport } from './importQueue.js'
@@ -39,129 +34,127 @@ export function progressLabel(p) {
   return 'Sending to reader…'
 }
 
+const settingRow = 'flex min-h-12 items-center gap-3 py-2'
+
+// One line under the tabs: is the reader there, and where files will land. Opens to the transfer settings.
 function Device({ prefs, setPrefs, device, onRetry }) {
   const [editing, setEditing] = useState(false)
   const [host, setHost] = useState(prefs.host)
   const { state, status, error, dirs } = device
   return (
-    <Card className="mt-8 p-4">
-      <div className="flex items-start gap-3">
-        <div className={`grid size-10 shrink-0 place-items-center rounded-full ${state === 'ok' ? 'bg-brand-50 text-brand-600' : 'bg-stone-100 text-stone-500'}`}>
-          {state === 'searching' ? <Loader2 className="size-5 animate-spin" /> : state === 'ok' ? <Wifi className="size-5" /> : <WifiOff className="size-5" />}
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="font-semibold text-stone-900">
-            {state === 'searching' ? `Looking for ${prefs.host}…` : state === 'ok' ? `CrossPoint ${status.device ?? ''}`.trim() : 'Reader not found'}
-          </p>
-          <p className="mt-0.5 text-sm/6 text-stone-500">
-            {state === 'ok'
-              ? `${status.ip ?? prefs.host} · firmware ${status.version}`
-              : state === 'error'
-                ? 'On your reader, open File Transfer and keep it on the same Wi-Fi as this device.'
-                : 'Make sure File Transfer is open on your reader.'}
-          </p>
-          {state === 'error' && error && <p className="mt-1 font-mono text-[0.7rem] break-all text-stone-400">{error}</p>}
-        </div>
-        <button onClick={onRetry} className="grid size-10 place-items-center rounded-full text-stone-500 active:bg-stone-100" aria-label="Retry">
-          <RefreshCw className="size-5" />
-        </button>
-      </div>
+    <details className="group border-b border-stone-200">
+      <summary className="flex list-none items-center gap-2.5 py-3 text-sm [&::-webkit-details-marker]:hidden">
+        {state === 'searching' ? (
+          <Loader2 className="size-3.5 shrink-0 animate-spin text-stone-400" />
+        ) : (
+          <span className={`mx-[3px] size-2 shrink-0 rounded-full ${state === 'ok' ? 'bg-brand-500' : 'bg-red-500'}`} />
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-stone-500">
+            <span className="font-medium text-stone-900">
+              {state === 'searching' ? `Looking for ${prefs.host}…` : state === 'ok' ? `CrossPoint ${status.device ?? ''}`.trim() : 'Reader not found'}
+            </span>
+            {state === 'ok' && ` · ${folderLabel(prefs.folder)}`}
+          </span>
+          {state === 'error' && <span className="block text-xs/5 text-stone-500">Open File Transfer on your reader, on the same Wi-Fi.</span>}
+        </span>
+        {state === 'error' && (
+          <button
+            onClick={(e) => {
+              e.preventDefault()
+              onRetry()
+            }}
+            className="h-9 rounded-lg px-2 font-semibold text-brand-600 active:bg-stone-100"
+          >
+            Retry
+          </button>
+        )}
+        <ChevronDown className="size-4 shrink-0 text-stone-400 transition group-open:rotate-180" />
+      </summary>
 
-      <details className="mt-3 border-t border-stone-200">
-        <summary className="cursor-pointer py-3 text-sm font-medium text-stone-600">Transfer settings · {folderLabel(prefs.folder)}</summary>
-        <div className="mt-2 grid gap-3 sm:grid-cols-2">
-          <label className="block text-xs font-medium text-stone-500">
-            Save to folder
-            <div className="mt-1 flex h-11 items-center gap-2 rounded-xl bg-stone-50 px-3 ring-1 ring-stone-950/10">
-              <Folder className="size-4 text-stone-400" />
-              <select
-                value={prefs.folder}
-                onChange={(e) => setPrefs({ ...prefs, folder: e.target.value })}
-                className="h-full min-w-0 flex-1 bg-transparent text-sm text-stone-900 outline-none"
-              >
-                {[...new Set(['/', ...dirs.map((d) => `/${d}`), prefs.folder])].map((f) => (
-                  <option key={f} value={f}>
-                    {f === '/' ? 'SD card (top level)' : f}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </label>
-          <div className="text-xs font-medium text-stone-500">
-            Reader address
-            {editing ? (
-              <form
-                className="mt-1 flex gap-2"
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  setPrefs({ ...prefs, host: host.trim() || DEFAULT_HOST })
-                  setEditing(false)
-                }}
-              >
-                <input
-                  autoFocus
-                  value={host}
-                  onChange={(e) => setHost(e.target.value)}
-                  placeholder="crosspoint.local or 192.168.1.40"
-                  inputMode="url"
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  className="h-11 min-w-0 flex-1 rounded-xl bg-surface px-3 text-sm text-stone-900 ring-1 ring-stone-950/10 outline-none focus:ring-2 focus:ring-brand-500/60"
-                />
-                <button className="h-11 rounded-xl bg-brand-500 px-4 text-sm font-semibold text-white">Save</button>
-              </form>
-            ) : (
-              <button
-                onClick={() => setEditing(true)}
-                className="mt-1 flex h-11 w-full items-center justify-between rounded-xl bg-stone-50 px-3 font-mono text-sm text-stone-700 ring-1 ring-stone-950/10"
-              >
-                {prefs.host}
-                <span className="font-sans text-xs font-semibold text-brand-600">Change</span>
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="mt-4 border-t border-stone-100 pt-4">
-          <div className="flex items-center gap-3">
-            <ImageDown className="size-5 shrink-0 text-stone-400" strokeWidth={1.75} />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-stone-900">Optimize EPUB</p>
-              <p className="text-xs/5 text-stone-500">Fits images to your reader in grayscale, fixes SVG covers, and removes embedded fonts.</p>
-            </div>
-            <Toggle label="Optimize EPUB" checked={prefs.optimize} onChange={(optimize) => setPrefs({ ...prefs, optimize })} />
-          </div>
-          {prefs.optimize && (
-            <label className="mt-3 flex items-center gap-3 pl-8 text-xs text-stone-500">
-              Quality
-              <input
-                type="range"
-                min="30"
-                max="95"
-                step="5"
-                value={prefs.quality}
-                onChange={(e) => setPrefs({ ...prefs, quality: Number(e.target.value) })}
-                className="flex-1 accent-brand-500"
-              />
-              <span className="w-8 text-right font-mono text-stone-700">{prefs.quality}</span>
-            </label>
-          )}
-          <div className="mt-4 flex items-center gap-3">
-            <FilePen className="size-5 shrink-0 text-stone-400" strokeWidth={1.75} />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-stone-900">Rename from book metadata</p>
-              <p className="text-xs/5 text-stone-500">Use Title - Author.epub when available.</p>
-            </div>
-            <Toggle
-              label="Rename from book metadata"
-              checked={prefs.renameFromMetadata}
-              onChange={(renameFromMetadata) => setPrefs({ ...prefs, renameFromMetadata })}
+      <div className="divide-y divide-stone-100 pb-1 text-sm text-stone-900">
+        <label className={settingRow}>
+          <span className="flex-1">Save to</span>
+          <select
+            value={prefs.folder}
+            onChange={(e) => setPrefs({ ...prefs, folder: e.target.value })}
+            className="h-9 max-w-[60%] min-w-0 bg-transparent text-stone-600 outline-none"
+          >
+            {[...new Set(['/', ...dirs.map((d) => `/${d}`), prefs.folder])].map((f) => (
+              <option key={f} value={f}>
+                {folderLabel(f)}
+              </option>
+            ))}
+          </select>
+        </label>
+        {editing ? (
+          <form
+            className={settingRow}
+            onSubmit={(e) => {
+              e.preventDefault()
+              setPrefs({ ...prefs, host: host.trim() || DEFAULT_HOST })
+              setEditing(false)
+            }}
+          >
+            <input
+              autoFocus
+              aria-label="Reader address"
+              value={host}
+              onChange={(e) => setHost(e.target.value)}
+              placeholder="crosspoint.local or 192.168.1.40"
+              inputMode="url"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              className="h-9 min-w-0 flex-1 rounded-lg bg-surface px-3 font-mono text-sm ring-1 ring-stone-950/10 outline-none focus:ring-2 focus:ring-brand-500/60"
             />
+            <button className="h-9 rounded-lg bg-brand-500 px-3 font-semibold text-white">Save</button>
+          </form>
+        ) : (
+          <div className={settingRow}>
+            <span className="flex-1">Reader address</span>
+            <button onClick={() => setEditing(true)} className="h-9 truncate font-mono text-stone-600 underline decoration-stone-300 underline-offset-4">
+              {prefs.host}
+            </button>
           </div>
+        )}
+        <div className={settingRow}>
+          <div className="min-w-0 flex-1">
+            <p>Optimize EPUB</p>
+            <p className="text-xs/5 text-stone-500">Grayscale images sized for your reader, no embedded fonts.</p>
+          </div>
+          <Toggle label="Optimize EPUB" checked={prefs.optimize} onChange={(optimize) => setPrefs({ ...prefs, optimize })} />
         </div>
-      </details>
-    </Card>
+        {prefs.optimize && (
+          <label className={settingRow}>
+            Image quality
+            <input
+              type="range"
+              min="30"
+              max="95"
+              step="5"
+              value={prefs.quality}
+              onChange={(e) => setPrefs({ ...prefs, quality: Number(e.target.value) })}
+              className="min-w-0 flex-1 accent-brand-500"
+            />
+            <span className="w-6 text-right font-mono text-xs text-stone-600">{prefs.quality}</span>
+          </label>
+        )}
+        <div className={settingRow}>
+          <div className="min-w-0 flex-1">
+            <p>Rename from metadata</p>
+            <p className="text-xs/5 text-stone-500">Title - Author.epub</p>
+          </div>
+          <Toggle
+            label="Rename from book metadata"
+            checked={prefs.renameFromMetadata}
+            onChange={(renameFromMetadata) => setPrefs({ ...prefs, renameFromMetadata })}
+          />
+        </div>
+        {state === 'ok' && <p className="py-3 font-mono text-xs text-stone-400">{status.ip ?? prefs.host} · firmware {status.version}</p>}
+        {state === 'error' && error && <p className="py-3 font-mono text-xs break-all text-stone-400">{error}</p>}
+      </div>
+    </details>
   )
 }
 
@@ -203,13 +196,13 @@ function Shelf({ prefs, ready }) {
   }
 
   return (
-    <section className="mt-8">
-      <h2 className="font-display text-xl font-semibold text-stone-900">Downloaded books</h2>
-      <Card className="mt-3 divide-y divide-stone-100">
+    <section className="mt-10">
+      <h2 className="font-display text-xl text-stone-900">Downloaded</h2>
+      <div className="mt-1 divide-y divide-stone-200">
         {books.map((b) => {
           const job = jobs[b.name] ?? {}
           return (
-            <div key={b.name} className="px-4 py-3">
+            <div key={b.name} className="py-3">
               <ConversionLog entries={job.logs}>
                 {(details) => (
                   <div className="flex items-center gap-3">
@@ -234,9 +227,9 @@ function Shelf({ prefs, ready }) {
                         <button
                           disabled={!ready}
                           onClick={() => send(b.name)}
-                          className="flex h-9 items-center gap-1.5 rounded-full bg-brand-50 px-3 text-sm font-semibold text-brand-700 active:bg-brand-100 disabled:opacity-40"
+                          className="h-9 rounded-lg px-2 text-sm font-semibold text-brand-600 active:bg-stone-100 disabled:opacity-40"
                         >
-                          <SendIcon className="size-4" /> Send
+                          Send
                         </button>
                         <button
                           onClick={() => removeDownload(b.name).then(reload)}
@@ -253,7 +246,7 @@ function Shelf({ prefs, ready }) {
             </div>
           )
         })}
-      </Card>
+      </div>
     </section>
   )
 }
@@ -295,18 +288,19 @@ function ReaderFiles({ base, onFoldersChanged }) {
   const locked = busy || !!deleting || !!renaming || creatingIn !== null
 
   return (
-    <section className="mt-8">
+    <section className="mt-10">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="font-display text-xl font-semibold text-stone-900">Files on your reader</h2>
+        <h2 className="font-display text-xl text-stone-900">On your reader</h2>
         <button
           disabled={locked}
           onClick={() => setCreatingIn(path)}
-          className="flex h-9 items-center gap-1.5 rounded-full bg-surface px-3 text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100"
+          aria-label="New folder"
+          className="-mr-2 grid size-9 place-items-center rounded-full text-stone-500 active:bg-stone-100"
         >
-          <FolderPlus className="size-4" /> New folder
+          <FolderPlus className="size-5" strokeWidth={1.75} />
         </button>
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-1 text-sm">
+      <div className="-ml-1.5 flex flex-wrap items-center gap-1 text-sm">
         <button disabled={locked} onClick={() => setPath('/')} className="rounded-md px-1.5 py-0.5 font-medium text-brand-600 active:bg-stone-100">
           SD card
         </button>
@@ -320,7 +314,7 @@ function ReaderFiles({ base, onFoldersChanged }) {
         ))}
       </div>
       {listError && <p className="mt-2 text-sm text-red-600">{listError}</p>}
-      <Card className="mt-3 divide-y divide-stone-100">
+      <div className="mt-1 divide-y divide-stone-200 border-t border-stone-200">
         {!files ? (
           <div className="py-6">
             <Loader2 className="mx-auto size-5 animate-spin text-stone-400" />
@@ -331,7 +325,7 @@ function ReaderFiles({ base, onFoldersChanged }) {
           files.map((f) => {
             const full = joinPath(path, f.name)
             return (
-              <div key={f.name} className="flex items-center gap-3 px-4 py-2.5">
+              <div key={f.name} className="flex items-center gap-3 py-2">
                 <button
                   disabled={locked || !f.isDirectory}
                   onClick={() => setPath(full)}
@@ -363,7 +357,7 @@ function ReaderFiles({ base, onFoldersChanged }) {
             )
           })
         )}
-      </Card>
+      </div>
       {creatingIn !== null && (
         <ActionSheet
           title="New folder"
@@ -556,14 +550,11 @@ export default function Send({ tab = '' }) {
   return (
     <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
       <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">Send to your reader</h1>
-      <p className="mt-2 max-w-xl text-sm/6 text-stone-500">
-        Books, fonts, sleep screens and plugins, straight to your reader over Wi-Fi.
-      </p>
 
       {!isApp ? (
-        <Card className="mt-6 p-4 text-sm/6 text-stone-600">
-          Sending to your reader needs the CrossPoint Sync app: a browser can&apos;t talk to your reader on the local network.
-        </Card>
+        <p className="mt-3 max-w-md text-sm/6 text-stone-500">
+          Sending needs the CrossPoint Sync app: a browser can&apos;t reach your reader on the local network.
+        </p>
       ) : (
         <>
           <Tabs route="send" tabs={TABS.map(([key, label]) => [key, importCounts[key || 'books'] ? `${label} (${importCounts[key || 'books']})` : label])} tab={tab} />
@@ -571,6 +562,7 @@ export default function Send({ tab = '' }) {
             <Wallpaper />
           ) : (
             <div className="max-w-3xl">
+              <Device prefs={prefs} setPrefs={setPrefs} device={device} onRetry={() => setAttempt((a) => a + 1)} />
               {tab === 'fonts' ? (
                 <ReaderFonts base={device.base} device={device.status?.device} />
               ) : tab === 'plugins' ? (
@@ -601,15 +593,16 @@ export default function Send({ tab = '' }) {
                       setDragging(false)
                       add(e.dataTransfer.files)
                     }}
-                    className={`mt-6 flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed px-4 py-8 text-center transition active:scale-[0.99] ${
-                      dragging ? 'border-brand-400 bg-brand-50' : 'border-stone-300 bg-surface/60'
+                    className={`mt-5 flex w-full items-center gap-3 rounded-xl border border-dashed p-4 text-left transition active:scale-[0.99] ${
+                      dragging ? 'border-brand-400 bg-brand-50' : 'border-stone-300 md:hover:border-stone-400'
                     }`}
                   >
-                    <BookUp className="size-8 text-brand-500" strokeWidth={1.5} />
-                    <span className="font-semibold text-stone-900">Choose books from this device</span>
-                    <span className="text-xs text-stone-500">
-                      .epub, .md, .txt or .acsm <span className="hidden md:inline">· or drop them here</span>
+                    <BookUp className="size-6 shrink-0 text-brand-500" strokeWidth={1.5} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-medium text-stone-900">Add books</span>
+                      <span className="block font-mono text-xs text-stone-500">epub · md · txt · acsm</span>
                     </span>
+                    <span className="hidden text-xs text-stone-400 md:block">or drop them here</span>
                   </button>
                   {skipped > 0 && (
                     <p className="mt-2 text-xs text-stone-500">
@@ -618,9 +611,9 @@ export default function Send({ tab = '' }) {
                   )}
 
                   {files.length > 0 && (
-                    <Card className="mt-4 divide-y divide-stone-100">
+                    <div className="mt-2 divide-y divide-stone-200">
                       {files.map(({ id, file, state, error, sentAs, progress, logs }) => (
-                        <div key={id} className="px-4 py-3">
+                        <div key={id} className="py-3">
                           <ConversionLog entries={logs}>
                             {(details) => (
                               <div className="flex items-center gap-3">
@@ -652,14 +645,14 @@ export default function Send({ tab = '' }) {
                           </ConversionLog>
                         </div>
                       ))}
-                    </Card>
+                    </div>
                   )}
 
                   {pending > 0 && (
                     <button
                       disabled={busy || device.state !== 'ok'}
                       onClick={sendAll}
-                      className="mt-4 flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-brand-500 text-base font-semibold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-50"
+                      className="mt-2 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-brand-500 text-base font-semibold text-white transition active:scale-[0.98] disabled:opacity-50 md:hover:bg-brand-600"
                     >
                       {sending ? <Loader2 className="size-5 animate-spin" /> : `Send ${pending} book${pending === 1 ? '' : 's'}`}
                     </button>
@@ -669,7 +662,6 @@ export default function Send({ tab = '' }) {
                   {device.state === 'ok' && <ReaderFiles base={device.base} onFoldersChanged={() => folders(device.base).then((dirs) => setDevice((d) => ({ ...d, dirs })), () => {})} />}
                 </div>
               )}
-              <Device prefs={prefs} setPrefs={setPrefs} device={device} onRetry={() => setAttempt((a) => a + 1)} />
             </div>
           )}
         </>

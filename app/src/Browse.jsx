@@ -563,8 +563,7 @@ function BrowseHeader({ eyebrow, title, side }) {
 function PaperSide({ session }) {
   return (
     <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
-      <BrowseHeader eyebrow="Your daily paper" title="CrossPaper" side="crosspaper" />
-      <CrossPaper session={session} />
+      <CrossPaper session={session} aside={<Sides side="crosspaper" />} />
     </div>
   )
 }

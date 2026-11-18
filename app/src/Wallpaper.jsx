@@ -6,7 +6,7 @@ import { reader, sendFile } from './catalogs.js'
 import { connect, folders, loadDevicePrefs, makeFolder } from './device.js'
 import { findReader, readerFor, readers, refreshReaders } from './readers.js'
 import { saveImage } from './shareCard.js'
-import { Card, EmptyState, notify } from './ui.jsx'
+import { EmptyState, notify } from './ui.jsx'
 import { CATEGORIES, canFilter, communityPage, fullImage } from './wallpaper/community.js'
 import { DEFAULTS, DITHERS, autoLevels, placement, renderWallpaper, toBmp } from './wallpaper/render.js'
 
@@ -112,9 +112,9 @@ function Community({ onPick }) {
   if (more && items.length >= cols) items = items.slice(0, items.length - (items.length % cols))
 
   return (
-    <section className="mt-8">
+    <section className="mt-10">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-        <h2 className="font-display text-xl font-semibold text-stone-900">Community wallpapers</h2>
+        <h2 className="font-display text-xl text-stone-900">Community wallpapers</h2>
         <a href="https://www.readme.club/wallpapers" target="_blank" rel="noreferrer" className="text-xs font-medium text-stone-500">
           from readme.club
         </a>
@@ -359,17 +359,14 @@ export default function Wallpaper() {
   }
 
   const { width: w, height: h } = readerFor(s.device)
-  const actionBase = 'flex h-12 items-center justify-center gap-2 rounded-2xl text-sm font-semibold transition active:scale-[0.98] disabled:opacity-50'
+  const actionBase = 'flex h-12 items-center justify-center gap-2 rounded-xl text-sm font-semibold transition active:scale-[0.98] disabled:opacity-50'
 
   return (
-    <div className="mt-6">
+    <div className="mt-5">
       <ImportedAssets kind="wallpaper" actionLabel="Edit sleep screen" onAction={open} removeAfter={false} onRemoved={entry => {
         if (pendingImport.current === entry.id) { imageRequest.current += 1; pendingImport.current = null }
         setImg(current => current?.importId === entry.id ? { ...current, importId: null } : current)
       }} actionDisabled={!!status?.busy} removalDisabled={!!status?.busy} />
-      <p className="max-w-xl text-sm/6 text-stone-500">
-        Turn a photo into a sleep screen, dithered to your reader&apos;s four shades of grey.
-      </p>
 
       <input
         ref={input}
@@ -385,17 +382,19 @@ export default function Wallpaper() {
       {!img ? (
         <button
           onClick={() => input.current?.click()}
-          className="mt-6 flex w-full max-w-xl flex-col items-center gap-2 rounded-xl border-2 border-dashed border-stone-300 bg-surface/60 px-4 py-10 text-center transition active:scale-[0.99]"
+          className="flex w-full max-w-xl items-center gap-3 rounded-xl border border-dashed border-stone-300 p-4 text-left transition active:scale-[0.99] md:hover:border-stone-400"
         >
-          <ImagePlus className="size-8 text-brand-500" strokeWidth={1.5} />
-          <span className="font-semibold text-stone-900">Choose a photo</span>
-          <span className="text-xs text-stone-500">PNG, JPG, WebP, GIF or BMP</span>
+          <ImagePlus className="size-6 shrink-0 text-brand-500" strokeWidth={1.5} />
+          <span className="min-w-0 flex-1">
+            <span className="block font-medium text-stone-900">Choose a photo</span>
+            <span className="block text-xs text-stone-500">Dithered to your reader&apos;s four shades of grey</span>
+          </span>
         </button>
       ) : null}
       {!img && status?.text && <p className={`mt-3 text-sm ${status.error ? 'text-red-700' : 'text-stone-600'}`}>{status.text}</p>}
       {!img && <Community onPick={pick} />}
       {!img ? null : (
-        <div className="mt-6 md:grid md:grid-cols-[minmax(0,22rem)_1fr] md:items-start md:gap-8">
+        <div className="md:grid md:grid-cols-[minmax(0,22rem)_1fr] md:items-start md:gap-8">
           <div className="md:sticky md:top-6">
             <canvas
               ref={canvas}
@@ -406,7 +405,7 @@ export default function Wallpaper() {
               onPointerUp={endDrag}
               onPointerCancel={endDrag}
               style={{ imageRendering: 'pixelated' }}
-              className={`mx-auto block h-auto max-h-[60vh] w-auto max-w-full rounded-xl bg-surface shadow-sm ring-1 ring-stone-950/10 ${
+              className={`mx-auto block h-auto max-h-[60vh] w-auto max-w-full rounded-xl bg-surface ring-1 ring-stone-950/10 ${
                 s.mode === 'fill' ? 'cursor-grab touch-none active:cursor-grabbing' : ''
               }`}
             />
@@ -416,11 +415,11 @@ export default function Wallpaper() {
             </p>
           </div>
 
-          <div className="mt-4 space-y-4 md:mt-0">
-            <Card className="space-y-4 p-4">
+          <div className="mt-4 space-y-5 md:mt-0">
+            <div className="space-y-4">
               <label className="block text-xs font-medium text-stone-500">
                 Device
-                <div className="mt-1 flex h-11 items-center gap-2 rounded-xl bg-stone-50 px-3 ring-1 ring-stone-950/10">
+                <div className="mt-1 flex h-11 items-center gap-2 rounded-xl bg-surface px-3 ring-1 ring-stone-950/10">
                   <Tablet className="size-4 text-stone-400" />
                   <select value={s.device} onChange={(e) => set({ device: e.target.value })} className="h-full min-w-0 flex-1 bg-transparent text-sm text-stone-900 outline-none">
                     {devices.map((d) => (
@@ -467,11 +466,11 @@ export default function Wallpaper() {
                   <RotateCw className="size-4" /> Rotate right
                 </button>
               </div>
-            </Card>
+            </div>
 
-            <Card className="space-y-4 p-4">
+            <div className="space-y-4 border-y border-stone-200 py-5">
               <div className="flex items-center justify-between">
-                <h2 className="font-display text-lg font-semibold text-stone-900">Tone</h2>
+                <h2 className="font-display text-xl text-stone-900">Tone</h2>
                 <button
                   type="button"
                   onClick={() => setAuto(true)}
@@ -501,7 +500,7 @@ export default function Wallpaper() {
               </div>
               <label className="block text-xs font-medium text-stone-500">
                 Dithering
-                <div className="mt-1 flex h-11 items-center gap-2 rounded-xl bg-stone-50 px-3 ring-1 ring-stone-950/10">
+                <div className="mt-1 flex h-11 items-center gap-2 rounded-xl bg-surface px-3 ring-1 ring-stone-950/10">
                   <Sparkles className="size-4 text-stone-400" />
                   <select value={s.dither} onChange={(e) => set({ dither: e.target.value })} className="h-full min-w-0 flex-1 bg-transparent text-sm text-stone-900 outline-none">
                     {DITHERS.map(([v, l]) => (
@@ -512,11 +511,11 @@ export default function Wallpaper() {
                   </select>
                 </div>
               </label>
-            </Card>
+            </div>
 
             <div className="grid grid-cols-2 gap-2">
               {isApp && (
-                <button onClick={send} disabled={status?.busy} className={`${actionBase} col-span-2 bg-brand-500 text-white shadow-sm`}>
+                <button onClick={send} disabled={status?.busy} className={`${actionBase} col-span-2 bg-brand-500 text-white md:hover:bg-brand-600`}>
                   {status?.busy ? <Loader2 className="size-5 animate-spin" /> : <SendIcon className="size-5" />} Send to reader
                 </button>
               )}

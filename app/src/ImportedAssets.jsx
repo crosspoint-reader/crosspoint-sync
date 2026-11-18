@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { listImports, readImport, removeImport } from './importQueue.js'
 import { isApp } from './api.js'
 import { importKind } from './importTypes.js'
-import { Card, notify } from './ui.jsx'
+import { X } from 'lucide-react'
+import { notify } from './ui.jsx'
 
 // Shared between mounted editors, so navigating away cannot start a second
 // upload of the same file. Native copies remain authoritative across restarts.
@@ -52,18 +53,18 @@ export default function ImportedAssets({ kind, actionLabel, onAction, actionDisa
   }
   if (!entries.length) return null
   return (
-    <section className="mt-5">
-      <h3 className="text-sm font-semibold text-stone-600">Shared files waiting to send</h3>
-      {groupEntries && <p className="mt-1 text-xs text-stone-500">Available styles from the same font family send together.</p>}
-      <Card className="mt-2 divide-y divide-stone-100">
+    <section className="mb-8">
+      <h3 className="font-display text-xl text-stone-900">Waiting to send</h3>
+      {groupEntries && <p className="text-xs/5 text-stone-500">Styles from the same family send together.</p>}
+      <div className="mt-1 divide-y divide-stone-200">
         {entries.map(entry => (
-          <div key={entry.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+          <div key={entry.id} className="flex items-center gap-2 py-2">
             <span className="min-w-0 flex-1 truncate text-sm font-medium text-stone-900">{entry.name}</span>
-            <button disabled={actionDisabled || jobs.has(entry.id)} onClick={() => act(entry)} className="text-sm font-semibold text-brand-600 disabled:opacity-40">{jobs.has(entry.id) ? 'Processing…' : actionLabel}</button>
-            <button disabled={jobs.has(entry.id) || removalDisabled} onClick={() => act(entry, true)} aria-label={`Remove ${entry.name}`} className="text-sm text-stone-500 disabled:opacity-40">Remove</button>
+            <button disabled={actionDisabled || jobs.has(entry.id)} onClick={() => act(entry)} className="h-9 shrink-0 rounded-lg px-2 text-sm font-semibold text-brand-600 active:bg-stone-100 disabled:opacity-40">{jobs.has(entry.id) ? 'Processing…' : actionLabel}</button>
+            <button disabled={jobs.has(entry.id) || removalDisabled} onClick={() => act(entry, true)} aria-label={`Remove ${entry.name}`} className="-mr-2 grid size-9 shrink-0 place-items-center rounded-full text-stone-400 active:bg-stone-100 disabled:opacity-40"><X className="size-4" /></button>
           </div>
         ))}
-      </Card>
+      </div>
     </section>
   )
 }

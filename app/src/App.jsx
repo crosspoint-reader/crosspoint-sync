@@ -523,7 +523,6 @@ function Home({ session, onSession, onLogout, theme }) {
   else if (route === 'send' && isApp) page = <Send tab={id ?? ''} />
   else if (route === 'crosspaper' && !isApp) page = (
     <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
-      <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">CrossPaper</h1>
       <CrossPaper session={session} />
     </div>
   )
