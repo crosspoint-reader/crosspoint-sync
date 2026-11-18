@@ -65,6 +65,12 @@ export function enqueueMissing(db: DB, now = Date.now()): void {
          WHERE a.user_id = connector_matches.user_id
            AND a.connector_id = connector_matches.connector_id
            AND a.external_id = connector_matches.external_id
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM audio_align_jobs j
+         WHERE j.user_id = connector_matches.user_id
+           AND j.connector_id = connector_matches.connector_id
+           AND j.external_id = connector_matches.external_id
        )`
   ).all() as { user_id: number; document: string; external_id: string }[];
   for (const row of rows) {

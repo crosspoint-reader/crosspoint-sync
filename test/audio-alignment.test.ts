@@ -90,6 +90,17 @@ it('backfills jobs for books matched before alignments existed', async () => {
     .toEqual([{ user_id: id, connector_id: 'audiobookshelf', external_id: 'li_9', document: DOC, status: 'pending' }]);
 });
 
+it('does not resurrect finished or failed jobs on restart', async () => {
+  const { app, db } = makeTestApp();
+  const { username } = await registerUser(app);
+  const { id } = db.prepare('SELECT id FROM users WHERE username=?').get(username) as { id: number };
+  saveMatch(db, id, 'audiobookshelf', DOC, { externalId: 'li_9', externalEdition: '20', confidence: 1 }, 'manual');
+  enqueueMissing(db);
+  db.prepare("UPDATE audio_align_jobs SET status = 'failed', attempts = 1").run();
+  enqueueMissing(db);
+  expect(db.prepare('SELECT status, attempts FROM audio_align_jobs').get()).toEqual({ status: 'failed', attempts: 1 });
+});
+
 it('treats an item without an EPUB as a permanent failure', async () => {
   const http: HttpTransport = async (url) => {
     if (url.endsWith('/ebook')) return { status: 404, json: async () => null, text: async () => '' } as any;
