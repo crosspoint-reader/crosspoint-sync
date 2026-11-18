@@ -4,10 +4,12 @@ import { image, moveCatalog, needsAuthedImage, sendDownload, sendFile, storedCov
 import { invoke } from '@tauri-apps/api/core'
 import { connect } from './device.js'
 import { optimizeEpub } from './epub/optimize.js'
+import { repairEpub } from './epub/repair.js'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), Channel: class {} }))
 vi.mock('./device.js', () => ({ connect: vi.fn() }))
 vi.mock('./epub/optimize.js', () => ({ optimizeEpub: vi.fn() }))
+vi.mock('./epub/repair.js', () => ({ repairEpub: vi.fn() }))
 vi.mock('./api.js', () => ({ ipcBytes: async (file) => new Uint8Array(await readBytes(file)) }))
 
 function readBytes(file) {
@@ -109,4 +111,22 @@ it('keeps a public cover URL as is with a download, and drops a login-only one i
   expect(await storedCover({ auth: { kind: 'none' } }, undefined)).toBe(null)
   invoke.mockRejectedValueOnce('401')
   expect(await storedCover({ auth: { kind: 'bearer', token: 't' } }, 'https://x.org/opds/cover/2')).toBe(null)
+})
+
+it('repairs before optimizing when asked, and names a repaired book from its metadata', async () => {
+  const fixed = new File(['fixed'], 'book.epub')
+  repairEpub.mockResolvedValue(fixed)
+  await sendFile(new File(['original'], 'book.epub'), { ...prefs, fixMetadata: true, renameFromMetadata: false })
+  expect(optimizeEpub.mock.calls[0][0]).toBe(fixed)
+  expect(invoke.mock.calls[0][2].headers['x-rename']).toBe('1')
+})
+
+it('sends the original, under its own name, when the repair gives up or optimizing is off', async () => {
+  repairEpub.mockResolvedValue(null)
+  const file = new File(['original'], 'book.epub')
+  await sendFile(file, { ...prefs, fixMetadata: true, renameFromMetadata: false })
+  expect(optimizeEpub.mock.calls[0][0]).toBe(file)
+  expect(invoke.mock.calls[0][2].headers['x-rename']).toBeUndefined()
+  await sendFile(file, { ...prefs, optimize: false, fixMetadata: true })
+  expect(repairEpub).toHaveBeenCalledTimes(1)
 })

@@ -35,7 +35,7 @@ export async function folders(base, path = '/') {
 
 // Reader settings shared by Send and Browse.
 const PREFS = 'crosspoint-device'
-const DEFAULTS = { host: DEFAULT_HOST, folder: '/', optimize: false, quality: DEFAULT_QUALITY, renameFromMetadata: false }
+const DEFAULTS = { host: DEFAULT_HOST, folder: '/', optimize: false, quality: DEFAULT_QUALITY, fixMetadata: false, renameFromMetadata: false }
 export function loadDevicePrefs() {
   try {
     return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(PREFS)) }

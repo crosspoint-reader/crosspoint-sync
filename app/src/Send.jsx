@@ -30,6 +30,7 @@ const size = (n) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB`
 export function progressLabel(p) {
   if (!p) return 'Sending…'
   if (p.stage === 'downloading') return p.total ? `Downloading ${Math.round((p.done / p.total) * 100)}%` : `Downloading ${size(p.done)}`
+  if (p.stage === 'repairing') return 'Fixing cover and details…'
   if (p.stage === 'optimizing') return p.total ? `Optimizing EPUB ${Math.round(p.done / p.total * 100)}%` : 'Optimizing EPUB…'
   return 'Sending to reader…'
 }
@@ -140,6 +141,15 @@ function Device({ prefs, setPrefs, device, onRetry, books }) {
             />
             <span className="w-6 text-right font-mono text-xs text-stone-600">{prefs.quality}</span>
           </label>
+        )}
+        {prefs.optimize && (
+          <div className={settingRow}>
+            <div className="min-w-0 flex-1">
+              <p>Fix cover and details</p>
+              <p className="text-xs/5 text-stone-500">Uploads the book to metadata.dev to repair its cover, title, author and file name.</p>
+            </div>
+            <Toggle label="Fix cover and details" checked={!!prefs.fixMetadata} onChange={(fixMetadata) => setPrefs({ ...prefs, fixMetadata })} />
+          </div>
         )}
         <div className={settingRow}>
           <div className="min-w-0 flex-1">

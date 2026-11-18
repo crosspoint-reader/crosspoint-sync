@@ -2,6 +2,7 @@ import { Channel, invoke } from '@tauri-apps/api/core'
 import { connect } from './device.js'
 import { ipcBytes } from './api.js'
 import { optimizeEpub } from './epub/optimize.js'
+import { repairEpub } from './epub/repair.js'
 
 // OPDS catalogs the user added. Stored per device.
 // ponytail: credentials sit in localStorage like the sync login; move both to the OS keychain together.
@@ -152,11 +153,19 @@ export async function sendDownload(name, prefs, progress = () => {}) {
 
 // Both send paths optimize in the WebView, then pass bytes to Rust for renaming/upload.
 async function sendConnectedFile(file, prefs, { base, status }, progress) {
+  let repaired = false
   if (shouldOptimize(file.name, prefs)) {
+    // Repair first, so the optimizer fits the new cover to the reader's screen.
+    const fixed = prefs.fixMetadata && (await repairEpub(file, progress))
+    if (fixed) {
+      file = fixed
+      repaired = true
+    }
     file = await optimizeEpub(file, { device: status.device, quality: prefs.quality, onProgress: progress })
   }
   const headers = { 'x-name': encodeURIComponent(file.name), 'x-base': encodeURIComponent(base), 'x-folder': encodeURIComponent(prefs.folder) }
-  if (prefs.renameFromMetadata) headers['x-rename'] = '1'
+  // A repaired book has a trustworthy title and author, so it is named after them.
+  if (prefs.renameFromMetadata || repaired) headers['x-rename'] = '1'
   progress({ stage: 'uploading' })
   return invoke('send_bytes', await ipcBytes(file), { headers })
 }
