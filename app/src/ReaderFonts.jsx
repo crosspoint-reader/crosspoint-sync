@@ -5,7 +5,7 @@ import { convert, downloadFamily, familyName, googleFonts, localFamily, trueType
 import { cpfontFamilies, crossPointFonts, downloadPrebuilt, forgetFont, isPrebuilt, readFont, saveFont, savedFonts } from './fonts/saved.js'
 import ImportedAssets from './ImportedAssets.jsx'
 import { groupFontEntries, sendImportedFonts } from './fonts/sendImported.js'
-import { ActionSheet, EmptyState, notify, Toggle } from './ui.jsx'
+import { ActionSheet, EmptyState, filesOnly, notify, Toggle } from './ui.jsx'
 
 // X3/X4 (ESP32-C3, no external RAM) need .cpfont; ESP32-S3 readers load TrueType directly.
 export const loadsTrueType = (device) => !!device && !['X3', 'X4'].includes(device)
@@ -167,6 +167,7 @@ export default function ReaderFonts({ base, device }) {
           ref={picker}
           type="file"
           multiple
+          accept={filesOnly('.ttf,.otf,.cpfont')}
           className="hidden"
           onChange={async (e) => {
             const picked = [...e.target.files]

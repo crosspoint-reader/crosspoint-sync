@@ -539,7 +539,11 @@ export function EmptyAction({ href, onClick, children }) {
 
 // The platform's own share glyph: the box-and-arrow on Apple devices (iPadOS reports
 // itself as a Mac), the three connected dots elsewhere (Android's).
-const apple = /iphone|ipad|ipod|macintosh/i.test(navigator.userAgent)
+export const apple = /iphone|ipad|ipod|macintosh/i.test(navigator.userAgent)
+// A file input with no `accept` makes iOS offer Photo Library and Take Photo first. Naming
+// the extensions sends it straight to Files. Apple only: the app declares these types there
+// (Info.plist), while Android's chooser would hide the ones it has no MIME type for.
+export const filesOnly = (extensions) => (apple ? extensions : undefined)
 export const ShareIcon = apple ? Share : Share2
 
 export function Toggle({ checked, onChange, label }) {

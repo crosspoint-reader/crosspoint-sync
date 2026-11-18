@@ -16,7 +16,7 @@ import {
 import { isApp } from './api.js'
 import { DEFAULT_HOST, connect, deleteFiles, folders, isBook, joinPath, listFiles, loadDevicePrefs, makeFolder, renameFile, saveDevicePrefs } from './device.js'
 import { downloads as listDownloads, removeDownload, sendDownload, sendFile } from './catalogs.js'
-import { ActionSheet, EmptyState, folderLabel, notify, Tabs, Toggle } from './ui.jsx'
+import { ActionSheet, EmptyState, filesOnly, folderLabel, notify, Tabs, Toggle } from './ui.jsx'
 import ConversionLog from './ConversionLog.jsx'
 import { importKind } from './importTypes.js'
 import { listImports, addImport, readImport, removeImport } from './importQueue.js'
@@ -584,8 +584,8 @@ export default function Send({ tab = '' }) {
                     ref={input}
                     type="file"
                     multiple
-                    // Native type filters can disable unknown extensions such as ACSM on iOS.
-                    // Validate supported extensions in add() after selection instead.
+                    accept={filesOnly('.epub,.md,.txt,.acsm')}
+                    // Other platforms take any file; add() checks the extension after selection.
                     className="hidden"
                     onChange={(e) => {
                       add(e.target.files)
