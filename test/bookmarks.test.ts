@@ -30,6 +30,31 @@ describe('v1 bookmarks sync', () => {
     expect(body.items[0]).toMatchObject({ ...BM, deleted: 0 });
   });
 
+  it('keeps a name and text offset until a client changes them', async () => {
+    const { app } = makeTestApp();
+    const { headers } = await registerUser(app);
+    const put = (item: object) =>
+      app.request(`/api/v1/bookmarks/${DOC}`, { method: 'PUT', headers, body: JSON.stringify({ items: [item] }) });
+    const first = async () => (await (await app.request(`/api/v1/bookmarks/${DOC}`, { headers })).json()).items[0];
+
+    expect(await first()).toBeUndefined();
+    expect((await put({ ...BM, name: 'Start of the duel', vo: 4096 })).status).toBe(200);
+    expect(await first()).toMatchObject({ name: 'Start of the duel', vo: 4096 });
+
+    // A client that does not send them leaves them alone.
+    expect((await put(BM)).status).toBe(200);
+    expect(await first()).toMatchObject({ name: 'Start of the duel', vo: 4096 });
+
+    // An empty name clears the label.
+    expect((await put({ ...BM, name: '' })).status).toBe(200);
+    const cleared = await first();
+    expect(cleared.name).toBe('');
+    expect(cleared.vo).toBe(4096);
+
+    expect((await put({ ...BM, name: 'x'.repeat(129) })).status).toBe(403);
+    expect((await put({ ...BM, vo: -1 })).status).toBe(403);
+  });
+
   it('re-upserting the same id is idempotent (LWW)', async () => {
     const { app } = makeTestApp();
     const { headers } = await registerUser(app);

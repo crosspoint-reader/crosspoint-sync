@@ -380,6 +380,14 @@ CrossPoint devices must compute ids identically.
 `si`/`pc`/`pp` are CrossPoint's spine index / chapter page count / page-in-chapter hints
 (nullable — layout dependent).
 
+`name` is the reader's label for the bookmark (at most 128 UTF-8 bytes) and `vo` is the
+bookmarked page's visible-text offset within its spine item (unsigned 32-bit), which does not
+depend on pagination. Both are optional on upload. Responses always carry `name` (empty when
+unset), so a reader can tell an unlabelled bookmark from a server that predates labels, and omit
+`vo` when unset. An upsert that omits
+them keeps the stored values, so a client that does not know them cannot erase them; an empty
+`name` clears the label. Neither is part of the item id.
+
 #### PUT /api/v1/bookmarks/{document}
 
 Batch upsert, max 50 items:

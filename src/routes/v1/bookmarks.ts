@@ -16,6 +16,8 @@ interface BookmarkRow {
   spine_index: number | null;
   paragraph_count: number | null;
   paragraph_pos: number | null;
+  name: string | null;
+  visible_offset: number | null;
   deleted: number;
   updated_at: number;
 }
@@ -25,6 +27,9 @@ function optionalUint(v: unknown): number | null | undefined {
   if (typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 65_535) return v;
   return undefined; // invalid
 }
+
+const MAX_NAME_BYTES = 128; // the firmware's bookmark label limit
+const MAX_UINT32 = 4_294_967_295;
 
 export function bookmarkRoutes(db: DB): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -44,7 +49,7 @@ export function bookmarkRoutes(db: DB): Hono<AppEnv> {
     }
     const rows = db
       .prepare(
-        `SELECT revision, id, xpath, percentage, summary, spine_index, paragraph_count, paragraph_pos, deleted, updated_at
+        `SELECT revision, id, xpath, percentage, summary, spine_index, paragraph_count, paragraph_pos, name, visible_offset, deleted, updated_at
          FROM bookmarks WHERE user_id = ? AND document = ? AND ${cursorMode ? 'revision' : 'updated_at'} > ?
          ORDER BY ${cursorMode ? 'revision' : 'updated_at, id'} LIMIT ?`
       )
@@ -67,6 +72,9 @@ export function bookmarkRoutes(db: DB): Hono<AppEnv> {
         si: r.spine_index,
         pc: r.paragraph_count,
         pp: r.paragraph_pos,
+        // Always present, so a reader can tell "no label" from a server that predates labels.
+        name: r.name ?? '',
+        ...(r.visible_offset !== null ? { vo: r.visible_offset } : {}),
         deleted: r.deleted,
         updated_at: r.updated_at,
       })),
@@ -93,8 +101,8 @@ export function bookmarkRoutes(db: DB): Hono<AppEnv> {
     const now = nowSeconds();
 
     const upsert = db.prepare(
-      `INSERT INTO bookmarks (user_id, document, id, xpath, percentage, summary, spine_index, paragraph_count, paragraph_pos, deleted, updated_at, revision)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, (SELECT revision FROM bookmark_sync_clock WHERE id = 1))
+      `INSERT INTO bookmarks (user_id, document, id, xpath, percentage, summary, spine_index, paragraph_count, paragraph_pos, name, visible_offset, deleted, updated_at, revision)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, (SELECT revision FROM bookmark_sync_clock WHERE id = 1))
        ON CONFLICT(user_id, document, id) DO UPDATE SET
          xpath = excluded.xpath,
          percentage = excluded.percentage,
@@ -102,6 +110,8 @@ export function bookmarkRoutes(db: DB): Hono<AppEnv> {
          spine_index = excluded.spine_index,
          paragraph_count = excluded.paragraph_count,
          paragraph_pos = excluded.paragraph_pos,
+         name = COALESCE(excluded.name, bookmarks.name),
+         visible_offset = COALESCE(excluded.visible_offset, bookmarks.visible_offset),
          deleted = 0,
          updated_at = excluded.updated_at,
          revision = excluded.revision`
@@ -148,8 +158,20 @@ export function bookmarkRoutes(db: DB): Hono<AppEnv> {
       if (si === undefined || pc === undefined || pp === undefined) {
         return kosyncError(c, 403, 2003, 'Invalid request');
       }
+      // Both are kept when omitted, so a client that does not know them cannot erase them.
+      // An empty name clears the label.
+      if (o.name !== undefined && o.name !== null &&
+          (typeof o.name !== 'string' || Buffer.byteLength(o.name) > MAX_NAME_BYTES)) {
+        return kosyncError(c, 403, 2003, 'Invalid request');
+      }
+      const name = typeof o.name === 'string' ? o.name : null;
+      if (o.vo !== undefined && o.vo !== null &&
+          !(typeof o.vo === 'number' && Number.isInteger(o.vo) && o.vo >= 0 && o.vo <= MAX_UINT32)) {
+        return kosyncError(c, 403, 2003, 'Invalid request');
+      }
+      const vo = typeof o.vo === 'number' ? o.vo : null;
       const xpath = o.xpath;
-      ops.push(() => upsert.run(user.id, canonical, id, xpath, percentage, summary, si, pc, pp, now));
+      ops.push(() => upsert.run(user.id, canonical, id, xpath, percentage, summary, si, pc, pp, name, vo, now));
     }
     const bumpRevision = db.prepare('UPDATE bookmark_sync_clock SET revision = revision + 1 WHERE id = 1');
     withTransaction(db, () => {
