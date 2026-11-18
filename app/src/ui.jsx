@@ -557,8 +557,50 @@ export function Toggle({ checked, onChange, label }) {
   )
 }
 
+// Swipe left or right anywhere on the page to move to the next or previous tab.
+// Left alone: anything that scrolls sideways or is dragged itself (sliders, the
+// wallpaper canvas, [data-no-swipe]), open sheets, and the screen's left edge (iOS back).
+export function useSwipeTabs(ids, current, go) {
+  const latest = useRef()
+  latest.current = { ids, current, go }
+  useEffect(() => {
+    let start = null
+    const owned = (el) => {
+      for (; el && el !== document.body; el = el.parentElement) {
+        if (el.matches('input, textarea, select, canvas, [data-no-swipe]')) return true
+        if (el.scrollWidth > el.clientWidth + 1 && /auto|scroll/.test(getComputedStyle(el).overflowX)) return true
+      }
+      return false
+    }
+    const down = (e) => {
+      const t = e.touches[0]
+      start = e.touches.length === 1 && t.clientX > 24 && !document.querySelector('[role="dialog"]') && !owned(e.target) ? { x: t.clientX, y: t.clientY } : null
+    }
+    const up = (e) => {
+      if (!start) return
+      const dx = e.changedTouches[0].clientX - start.x
+      const dy = e.changedTouches[0].clientY - start.y
+      start = null
+      if (Math.abs(dx) < 60 || Math.abs(dx) < 2 * Math.abs(dy)) return
+      const { ids, current, go } = latest.current
+      const next = ids[ids.indexOf(current) + (dx < 0 ? 1 : -1)]
+      if (next !== undefined) go(next)
+    }
+    const cancel = () => (start = null)
+    document.addEventListener('touchstart', down, { passive: true })
+    document.addEventListener('touchend', up)
+    document.addEventListener('touchcancel', cancel)
+    return () => {
+      document.removeEventListener('touchstart', down)
+      document.removeEventListener('touchend', up)
+      document.removeEventListener('touchcancel', cancel)
+    }
+  }, [])
+}
+
 // Tabs kept in the URL (#/<route>, #/<route>/<id>) so back returns to the same tab.
 export function Tabs({ route, tabs, tab, className = 'mt-5' }) {
+  useSwipeTabs(tabs.map(([id]) => id), tab, (id) => (location.hash = id ? `#/${route}/${id}` : `#/${route}`))
   return (
     <nav className={`${className} flex gap-6 overflow-x-auto border-b border-stone-200`}>
       {tabs.map(([id, label]) => (

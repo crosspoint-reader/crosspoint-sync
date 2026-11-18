@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react'
 import { BookOpen, ChevronRight, Merge } from 'lucide-react'
 import { isApp } from './api.js'
 import { firstDuplicate } from './Book.jsx'
-import { STATUS, Cover, EmptyAction, EmptyState, ProgressBar, ago, duration, pct } from './ui.jsx'
+import { STATUS, Cover, EmptyAction, EmptyState, ProgressBar, ago, duration, pct, useSwipeTabs } from './ui.jsx'
 
 function greeting() {
   const now = new Date()
@@ -70,6 +70,7 @@ function sortForTab(list, tab, activity) {
 
 export default function Library({ session, books, summary, activity }) {
   const [tab, setTab] = useState('reading')
+  useSwipeTabs(STATUS.map((s) => s.id), tab, setTab)
   const counts = Object.fromEntries(STATUS.map((s) => [s.id, books.filter((b) => b.status === s.id).length]))
   const shown = sortForTab(books.filter((b) => b.status === tab), tab, activity)
   // First book that looks like another synced copy of itself.

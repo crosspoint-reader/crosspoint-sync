@@ -53,6 +53,7 @@ function useCellTip() {
   }
   const hide = () => setTip(null)
   const handlers = {
+    'data-no-swipe': '', // a finger dragged across the grid reads days, it doesn't change tabs
     onPointerOver: (e) => e.pointerType === 'mouse' && show(e.target),
     onPointerLeave: (e) => e.pointerType === 'mouse' && hide(),
     onPointerDown: (e) => e.pointerType !== 'mouse' && show(e.target),
