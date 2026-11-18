@@ -90,6 +90,23 @@ it('backfills jobs for books matched before alignments existed', async () => {
     .toEqual([{ user_id: id, connector_id: 'audiobookshelf', external_id: 'li_9', document: DOC, status: 'pending' }]);
 });
 
+it('treats an item without an EPUB as a permanent failure', async () => {
+  const http: HttpTransport = async (url) => {
+    if (url.endsWith('/ebook')) return { status: 404, json: async () => null, text: async () => '' } as any;
+    if (url.includes('/api/items/li_2')) return ok({ media: { duration: 10, audioFiles: [{ ino: 1, duration: 10 }] } });
+    throw new Error(`Unexpected request: ${url}`);
+  };
+  const { app, db } = makeTestApp();
+  const { username } = await registerUser(app);
+  const { id } = db.prepare('SELECT id FROM users WHERE username=?').get(username) as { id: number };
+  upsertAccount(db, id, 'audiobookshelf', { server: 'abs.test', token: 'k' }, null);
+  const job = { user_id: id, connector_id: 'audiobookshelf', external_id: 'li_2', document: DOC, attempts: 0 };
+  const error = await runAlignmentJob(db, { provider: 'local', url: 'http://aligner', apiKey: '', model: 'm', maxBytes: 1e9 }, job, http)
+    .then(() => null, (e: unknown) => e);
+  // The worker marks jobs like this failed instead of retrying for a day.
+  expect(error).toMatchObject({ name: 'ConnectorOperationError', retryable: false });
+});
+
 it('aligns transcribed audio with the EPUB and seeks the audiobook to the reader word', async () => {
   const patches: any[] = [];
   const http: HttpTransport = async (url, init) => {

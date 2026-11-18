@@ -4,7 +4,7 @@ import { absAlignmentSource } from './audiobookshelf.js';
 import { transcribe, type AsrConfig, type Fetch } from './asr.js';
 import { fetchTransport } from './registry.js';
 import { decryptCredential, getAccount } from './store.js';
-import type { HttpTransport } from './types.js';
+import { ConnectorOperationError, type HttpTransport } from './types.js';
 import { alignTranscript, type TranscriptWord } from './word-align.js';
 
 /**
@@ -123,7 +123,7 @@ export async function runAlignmentJob(
   });
 }
 
-function finish(db: DB, job: JobRow, error?: unknown): void {
+function finish(db: DB, job: JobRow, error?: unknown, retryable = true): void {
   const now = Math.floor(Date.now() / 1000);
   if (!error) {
     db.prepare(
@@ -139,7 +139,7 @@ function finish(db: DB, job: JobRow, error?: unknown): void {
     `UPDATE audio_align_jobs SET status = ?, attempts = ?, next_try_at = ?, last_error = ?, updated_at = ?
      WHERE user_id = ? AND connector_id = ? AND external_id = ?`
   ).run(
-    attempts >= MAX_ATTEMPTS ? 'failed' : 'pending',
+    retryable && attempts < MAX_ATTEMPTS ? 'pending' : 'failed',
     attempts, now + backoff, message.slice(0, 500), now,
     job.user_id, job.connector_id, job.external_id
   );
@@ -165,7 +165,9 @@ export function startAlignWorker(
           await runAlignmentJob(db, config, job, http);
           finish(db, job);
         } catch (error) {
-          finish(db, job, error);
+          // An audio-only item has no EPUB to align against: retrying for a day
+          // only burns quota.
+          finish(db, job, error, !(error instanceof ConnectorOperationError) || error.retryable);
           console.error(JSON.stringify({
             msg: 'audio alignment failed', connector: job.connector_id, item: job.external_id,
             error: error instanceof Error ? error.message : String(error),

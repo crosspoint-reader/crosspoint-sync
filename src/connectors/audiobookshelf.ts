@@ -248,7 +248,10 @@ function absEpub(http: HttpTransport, c: AbsCred, externalId: string): Promise<T
       headers: { authorization: `Bearer ${c.token}` },
     });
     if (res.status === 404 || res.status === 400) noEpub.set(noEpubKey(c, externalId), Date.now() + NO_EPUB_TTL);
-    if (res.status < 200 || res.status >= 300) throw new Error(`ABS ebook download failed (${res.status})`);
+    if (res.status < 200 || res.status >= 300) {
+      // A missing EPUB is permanent for this item; rate limits and outages are not.
+      throw new ConnectorOperationError(`ABS ebook download failed (${res.status})`, res.status >= 500 || res.status === 429);
+    }
     return res;
   });
 }
