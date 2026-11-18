@@ -482,7 +482,8 @@ export function kosyncRoutes(db: DB, config: Config, refreshProgress: ProgressRe
     const user = c.get('user');
     const canonical = resolveDocument(db, user.id, document);
     try {
-      await refreshProgress(user.id, canonical);
+      // Another instance's mirror is asking: answer from what we have (see connectors/kosync.ts).
+      if (!c.req.header('x-crosspoint-mirror')) await refreshProgress(user.id, canonical);
     } catch (error) {
       const status = error instanceof Error && error.name === 'TimeoutError' ? 504 : 502;
       return c.json({ code: 2003, message: 'BookFusion progress refresh failed' }, status);

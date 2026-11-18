@@ -75,7 +75,7 @@ it('exposes sync directions and document matching in book services', async () =>
   const f = await fixture('kosync');
   const res = await f.app.request(`/api/v1/documents/${DOC}/matches`, { headers: f.headers });
   expect((await res.json()).services).toEqual([expect.objectContaining({
-    id: 'kosync', matched: true, match_by: 'document', sync: { read: false, write: true, enabled: true },
+    id: 'kosync', matched: true, match_by: 'document', sync: { read: true, write: true, enabled: true },
   })]);
 });
 

@@ -557,7 +557,9 @@ describe('BookFusion refresh on progress GET', () => {
       release();
       await vi.advanceTimersByTimeAsync(0);
       expect(db.prepare("SELECT COUNT(*) n FROM progress WHERE device_id='bookfusion'").get()).toEqual({ n: 0 });
-      expect(fake.calls).toHaveLength(0); // No download may start after expiration.
+      // No download may start after expiration. (The kosync mirror's own pull was already in flight.)
+      expect(fake.calls.filter((c) => !c.url.includes('mirror.test'))).toHaveLength(0);
+      expect(db.prepare("SELECT COUNT(*) n FROM progress WHERE device_id='kosync'").get()).toEqual({ n: 0 });
     } finally { release(); log.mockRestore(); db.close(); }
   });
 });

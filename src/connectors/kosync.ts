@@ -1,29 +1,35 @@
 import crypto from 'node:crypto';
-import type {
-  Connector,
-  ConnectorContext,
-  Credential,
-  DocumentMeta,
-  HttpTransport,
-  Match,
-  OutboundEvent,
-  PushResult,
-  ValidateResult,
+import {
+  ConnectorOperationError,
+  type Connector,
+  type ConnectorContext,
+  type Credential,
+  type DocumentMeta,
+  type HttpTransport,
+  type InboundChange,
+  type Match,
+  type OutboundEvent,
+  type PushResult,
+  type ValidateResult,
 } from './types.js';
 import { documentMeta } from './store.js';
 
 /**
- * External kosync mirror connector. Forwards reading progress to ANOTHER kosync
- * server (e.g. sync.koreader.rocks, a friend's server, or a second CrossPoint
- * Sync instance) so other KOReader devices see it too.
+ * External kosync mirror connector. Keeps reading progress in step with ANOTHER
+ * kosync server (e.g. sync.koreader.rocks, a friend's server, or a second
+ * CrossPoint Sync instance), both ways, so other KOReader devices stay in sync.
  *
  * This is the simplest connector: kosync keys progress by the same 32-hex
  * document hash we already have, so there is NO book matching. It also speaks
  * the exact protocol we store, so mirroring is lossless (we can forward the rich
  * position + metadata superset; a plain kosync target ignores the extras).
  *
- * Outbound only for now (we push to them); fan-in would need loop suppression.
+ * Fan-in is per book, when a device asks for progress or on "Sync now": the
+ * target's newest place wins if it is newer than ours and is not our own push.
  */
+
+/** device_id on everything we push, so a pull can tell our own echo apart. */
+const MIRROR_DEVICE_ID = 'crosspoint-sync-mirror';
 
 interface KosyncCred extends Credential {
   server: string;
@@ -103,7 +109,7 @@ async function push(
     progress: ev.progress && ev.progress.length > 0 ? ev.progress : String(percentage),
     percentage,
     device: 'CrossPoint Sync',
-    device_id: 'crosspoint-sync-mirror',
+    device_id: MIRROR_DEVICE_ID,
   };
   // Forward the rich position superset (a plain kosync target ignores it).
   if (ev.position) body.position = ev.position;
@@ -133,11 +139,34 @@ async function push(
   }
 }
 
+async function pullProgress(cred: Credential, m: Match, http: HttpTransport): Promise<InboundChange | null> {
+  const c = parseCred(cred);
+  if (!c) return null;
+  const res = await http(`${baseUrl(c.server)}/syncs/progress/${encodeURIComponent(m.externalId)}`, {
+    method: 'GET',
+    // Tells a CrossPoint Sync target not to pull from its own mirrors while answering
+    // (two instances mirroring each other would otherwise wait on one another).
+    headers: { ...authHeaders(c), 'x-crosspoint-mirror': '1' },
+  });
+  if (res.status === 401) throw new ConnectorOperationError('unauthorized', false, true);
+  if (res.status >= 500 || res.status === 429) throw new ConnectorOperationError(`server ${res.status}`, true);
+  if (res.status !== 200) return null;
+  // A book the target has never seen is 200 with an empty object.
+  const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!body || typeof body.progress !== 'string' || !body.progress || typeof body.percentage !== 'number' ||
+      typeof body.timestamp !== 'number' || body.device_id === MIRROR_DEVICE_ID) return null;
+  const percentage = Math.max(0, Math.min(1, body.percentage));
+  return {
+    externalId: m.externalId, percentage, progress: body.progress,
+    finished: percentage >= 0.999, updatedAtMs: body.timestamp * 1000,
+  };
+}
+
 export const kosyncConnector: Connector = {
   id: 'kosync',
   displayName: 'Another KOSync server',
   tier: 1,
-  capabilities: { read: false, write: true },
+  capabilities: { read: true, write: true },
   carries: ['progress', 'finished'],
   credentialKind: 'kosync',
   beta: false,
@@ -146,4 +175,5 @@ export const kosyncConnector: Connector = {
   validate,
   match,
   push,
+  pullProgress,
 };

@@ -268,7 +268,7 @@ const LANDING = (basePath: string) => shell(basePath,
        <div class="desc">Sync reading positions both ways for books downloaded from BookFusion.</div></div></div>
        <span class="pill">ready</span></div>
      <div class="svc"><div class="lead"><img class="svc-icon" src="${basePath}/icons/kosync.png" alt="" width="34" height="34"><div><div class="name">Another KOSync server</div>
-       <div class="desc">Mirror your progress to sync.koreader.rocks or your own server, so your other KOReader devices stay in sync too.</div></div></div>
+       <div class="desc">Sync your progress both ways with sync.koreader.rocks or your own server, so your other KOReader devices stay in sync too.</div></div></div>
        <span class="pill">ready</span></div>
      <div class="svc"><div class="lead"><img class="svc-icon" src="${basePath}/icons/hardcover.png" alt="" width="34" height="34"><div><div class="name">Hardcover</div>
        <div class="desc">Keep your Hardcover shelf and reading progress up to date automatically.</div></div></div>

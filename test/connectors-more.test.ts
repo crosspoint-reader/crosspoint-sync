@@ -78,6 +78,35 @@ describe('kosync mirror connector (unit)', () => {
   });
 });
 
+describe('kosync mirror fan-in (end to end)', () => {
+  it('a device progress request picks up a newer place from the mirror, but not our own push', async () => {
+    const fake = fakeTransport();
+    const { app, db } = makeTestApp({}, { connectorTransport: fake.transport });
+    const { headers } = await registerUser(app);
+    await app.request('/api/v1/connectors/kosync', {
+      method: 'PUT', headers, body: JSON.stringify({ credential: { server: 'mirror.test', username: 'u', password: 'p' } }),
+    });
+    const remote = { document: DOC, progress: '/body/p[9]', percentage: 0.7, device: 'KOReader', device_id: 'kobo', timestamp: 1790000000 };
+    fake.on(`/syncs/progress/${DOC}`, 200, remote);
+    const get = async () => (await app.request(`/syncs/progress/${DOC}`, { headers })).json();
+    expect(await get()).toMatchObject({ progress: '/body/p[9]', percentage: 0.7, device_id: 'kosync', timestamp: 1790000000 });
+    // Nothing goes back to the server it came from.
+    expect(claimReady(db, 10)).toHaveLength(0);
+    // Our own mirrored push, however new, is not a remote change.
+    fake.on(`/syncs/progress/${DOC}`, 200, { ...remote, progress: '/body/p[20]', percentage: 0.9, device_id: 'crosspoint-sync-mirror', timestamp: 1790000500 });
+    expect(await get()).toMatchObject({ progress: '/body/p[9]', percentage: 0.7 });
+    // An older remote place never replaces ours, and an unknown book is an empty object.
+    fake.on(`/syncs/progress/${DOC}`, 200, { ...remote, percentage: 0.1, timestamp: 1780000000 });
+    expect(await get()).toMatchObject({ percentage: 0.7 });
+    fake.on(`/syncs/progress/${DOC}`, 200, {});
+    expect(await get()).toMatchObject({ percentage: 0.7 });
+    // A mirror asking us does not make us ask our mirrors.
+    const before = fake.calls.length;
+    await app.request(`/syncs/progress/${DOC}`, { headers: { ...headers, 'x-crosspoint-mirror': '1' } });
+    expect(fake.calls).toHaveLength(before);
+  });
+});
+
 describe('kosync mirror fan-out (end to end)', () => {
   it('explains an unreachable server instead of "fetch failed"', async () => {
     const { app } = makeTestApp({}, { connectorTransport: async () => { throw new TypeError('fetch failed'); } });
