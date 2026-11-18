@@ -53,14 +53,16 @@ const STYLE = `
 :root{
   color-scheme:light;
   --page:#faf8f3;--surface:#ffffff;--ink:#242820;--text:#41483d;--soft:#555b50;--line:#e7e5e4;--wash:#ebe7de;
-  --brand:#4a7a62;--brand-ink:#3d6652;--brand-wash:#f0f5f3;--brand-line:#d6e5de;--bezel:#1c1917;
-  --shadow:0 30px 60px -24px rgba(41,37,36,.35),0 12px 24px -16px rgba(41,37,36,.25);
+  --brand:#4a7a62;--brand-ink:#3d6652;--brand-wash:#f0f5f3;--brand-line:#d6e5de;
+  /* Print-style surfaces shared with crosspointreader.com: tinted panels, white-framed
+     screenshots with a hard offset shadow. */
+  --panel:#e7e7dc;--ring:#c8c9bb;--frame:#fff;--frame-shadow:#d4d5c7;
 }
 :root[data-theme="dark"]{
   color-scheme:dark;
   --page:#121110;--surface:#1b1917;--ink:#f3f0ed;--text:#d3cec9;--soft:#a09993;--line:#2e2a27;--wash:#221f1d;
-  --brand:#4f8268;--brand-ink:#8fb9a6;--brand-wash:#16211c;--brand-line:#284738;--bezel:#2e2a27;
-  --shadow:0 30px 60px -24px rgba(0,0,0,.7),0 12px 24px -16px rgba(0,0,0,.6);
+  --brand:#4f8268;--brand-ink:#8fb9a6;--brand-wash:#16211c;--brand-line:#284738;
+  --panel:#1b1917;--ring:#3a3531;--frame:#2e2a27;--frame-shadow:#060505;
 }
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
@@ -71,7 +73,8 @@ a{color:inherit;text-decoration:none}
 a:focus-visible,button:focus-visible{outline:2px solid var(--brand-ink);outline-offset:4px}
 p{text-wrap:pretty}
 img{display:block;width:100%;height:auto}
-.wrap{max-width:72rem;margin:0 auto;padding:0 22px}
+.wrap{max-width:1280px;margin:0 auto;padding:0 32px}
+@media (max-width:640px){.wrap{padding:0 22px}}
 h1,h2,h3{font-family:"Lora",ui-serif,serif;color:var(--ink);font-weight:400;letter-spacing:-.045em;text-wrap:balance;margin:0}
 .hand{font-family:"Caveat",cursive;font-weight:600;color:var(--brand-ink)}
 
@@ -86,15 +89,15 @@ nav{display:flex;align-items:center;gap:6px}
 nav a.link{padding:8px 12px;border-radius:999px;font-size:14px;font-weight:500;color:var(--soft)}
 nav a.link:hover{color:var(--ink);background:var(--wash)}
 
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:44px;padding:0 20px;border-radius:6px;
-  font-size:15px;font-weight:600;white-space:nowrap;transition:transform .15s,background .15s}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:44px;padding:0 16px;border-radius:4px;
+  font-size:14px;font-weight:600;white-space:nowrap;transition:transform .15s,background .15s}
 .btn:active{transform:scale(.98)}
-.btn.primary{background:var(--brand);color:#fff}
-.btn.primary:hover{background:var(--brand-ink)}
+.btn.primary{background:#315243;color:#fff}
+.btn.primary:hover{background:#253e33}
 /* The light-theme green in both themes: the dark theme's lifted green is under 4.5:1 with white text. */
 :root[data-theme="dark"] .btn.primary{background:#4a7a62}
 :root[data-theme="dark"] .btn.primary:hover{background:#3a6451}
-.btn.ghost{color:var(--ink);box-shadow:inset 0 0 0 1px var(--line);background:var(--surface)}
+.btn.ghost{color:var(--ink);box-shadow:inset 0 0 0 1px var(--ring);background:var(--page)}
 .btn.ghost:hover{background:var(--wash)}
 nav .btn{height:38px;padding:0 16px;font-size:14px}
 .stores{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
@@ -107,79 +110,85 @@ nav .btn{height:38px;padding:0 16px;font-size:14px}
 .store span{display:flex;flex-direction:column;font-size:18px;font-weight:600;line-height:1.05;letter-spacing:-.01em}
 .store small{font-size:10px;font-weight:500;letter-spacing:.01em}
 
-/* device frames */
-.phone,.tablet{container-type:inline-size}
-/* Bezel and corners scale with the device's width (cqi), so a small phone mock
-   has the same proportions as a large one. */
-.phone img{border:1.2cqi solid var(--bezel);border-radius:7cqi;aspect-ratio:390/844;object-fit:cover;object-position:top;
-  box-shadow:var(--shadow),0 0 0 1px rgba(255,255,255,.06)}
-.tablet img{border:.6cqi solid var(--bezel);border-radius:2.2cqi;aspect-ratio:1100/820;object-fit:cover;object-position:top;box-shadow:var(--shadow)}
-.browser{border-radius:14px;overflow:hidden;background:var(--surface);box-shadow:var(--shadow),0 0 0 1px var(--line)}
-.browser img{aspect-ratio:1280/800;object-fit:cover;object-position:top}
-.browser.short img{aspect-ratio:1280/660}
+/* Screenshots: a tinted panel holding one wide shot and one phone shot, each in a
+   white frame with a hard offset shadow (the main site's .reader-screenshot). */
+.screens{position:relative;aspect-ratio:1.25;background:var(--panel);border-radius:12px}
+.shot{position:absolute}
+.shot img{border:7px solid var(--frame);border-radius:12px;box-shadow:8px 12px 0 var(--frame-shadow);object-fit:cover;object-position:top}
+.shot.wide{width:86%;top:10%;left:5%}
+.shot.wide img{aspect-ratio:1280/800}
+.shot.wide.tab{width:74%}
+.shot.wide.tab img{aspect-ratio:1100/820}
+.shot.wide.short img{aspect-ratio:1280/660}
+.shot.tall{width:27%;right:6%;bottom:7%}
+.shot.tall img{aspect-ratio:390/844}
+.shot.tall.solo{width:30%;left:35%;right:auto;top:9%;bottom:auto}
+@media (max-width:640px){.shot img{border-width:4px;box-shadow:5px 7px 0 var(--frame-shadow)}}
 
 /* hero */
 .hero{display:grid;grid-template-columns:1fr;gap:48px;padding-block:56px 72px;align-items:center}
 .hero .eyebrow{font-size:24px;transform:rotate(-2deg);display:inline-block}
-.hero h1{font-size:clamp(40px,5vw,58px);line-height:1.25;margin-top:6px}
+.hero h1{font-size:clamp(2.2rem,5.2vw,4.75rem);line-height:1.25;margin-top:6px}
 .hero h1 .u{position:relative;white-space:nowrap}
 .hero h1 .u::after{content:"";position:absolute;left:-2%;right:-2%;bottom:-6px;height:14px;
   background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 12' preserveAspectRatio='none'%3E%3Cpath d='M2 8 C 45 2, 80 11, 120 6 S 188 3, 198 7' stroke='%234a7a62' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") bottom/100% 100% no-repeat}
 .hero p.sub{font-size:18px;line-height:1.8;color:var(--soft);max-width:30rem;margin:22px 0 0}
-.hero .cta{display:flex;gap:12px;margin-top:32px;flex-wrap:wrap}
-.hero .stage{position:relative;padding:0 0 40px}
-.hero .stage .browser{display:none}
-.hero .stage .phone{width:min(300px,78vw);margin:0 auto}
-@media (min-width:900px){
-  .hero{grid-template-columns:1fr 1.1fr;padding-block:72px 96px}
-  .hero .stage{padding:0 0 60px 60px}
-  .hero .stage .browser{display:block}
-  .hero .stage .phone{position:absolute;left:0;bottom:0;width:27%;margin:0}
-}
+@media (min-width:900px){.hero{grid-template-columns:1fr 1fr;gap:65px;padding-block:72px 96px}}
 
-/* sections */
+/* sections: heading left, short paragraph right, as on the main site */
 section{padding:88px 0}
 section.tight{padding-top:24px}
-.lead h2{font-size:clamp(30px,4vw,44px);line-height:1.25}
-.lead p{font-size:18px;color:var(--soft);max-width:34rem;margin:16px 0 0}
-.steps{display:grid;gap:32px;margin-top:8px}
+h2{font-size:clamp(2.25rem,3.8vw,3.5rem);line-height:1.25}
+.lead p{font-size:15px;line-height:1.8;color:var(--soft);max-width:340px;margin:16px 0 0}
+@media (min-width:641px){.lead{display:flex;justify-content:space-between;align-items:end;gap:36px}.lead p{margin:0}}
+.steps{display:grid;gap:32px;margin-top:40px}
 .step{border-top:1px solid var(--line);padding-top:20px}
 .step h3{font-size:21px;margin-top:2px}
 .step p{margin:8px 0 0;color:var(--soft)}
 @media (min-width:800px){.steps{grid-template-columns:repeat(3,1fr)}}
 
-.split{display:grid;gap:56px;align-items:center}
-.split .points{list-style:none;padding:0;margin:28px 0 0;display:grid;gap:14px}
-.split .points li{display:flex;gap:12px;color:var(--text)}
-.split .points li::before{content:"";flex:0 0 18px;height:18px;margin-top:4px;border-radius:50%;
+/* Feature sections: copy beside a screenshot panel, alternating sides. */
+.split{display:grid;gap:40px;align-items:center}
+.split .copy p{font-size:15px;line-height:1.8;color:var(--soft);max-width:430px;margin:16px 0 0}
+@media (min-width:900px){
+  .split{grid-template-columns:1fr 1.25fr;gap:80px}
+  .split.flip{grid-template-columns:1.25fr 1fr}
+  .split.flip .copy{order:2}
+}
+.points{list-style:none;padding:0;margin:24px 0 0;display:grid;gap:12px;font-size:15px}
+.points li{display:flex;gap:12px;color:var(--text)}
+.points li::before{content:"";flex:0 0 18px;height:18px;margin-top:2px;border-radius:50%;
   /* Lucide's check glyph. */
   background:var(--brand-wash) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234a7a62' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center/11px no-repeat;
   box-shadow:inset 0 0 0 1px var(--brand-line)}
-.duo{position:relative;padding:0 0 48px}
-.duo .phone{width:min(280px,72vw);margin:0 auto}
-.duo .tablet{display:none}
-@media (min-width:900px){
-  .split{grid-template-columns:1fr 1.2fr}
-  .split.flip{grid-template-columns:1.2fr 1fr}
-  .split.flip .copy{order:2}
-  .duo .tablet{display:block}
-  .duo.with-tablet .phone{position:absolute;right:-12px;bottom:0;width:34%;margin:0}
-}
-.solo .phone{width:min(300px,76vw);margin:0 auto}
 
-.wide{position:relative;margin-top:48px}
-.wide .browser{display:none}
-.wide .phone{width:min(300px,76vw);margin:0 auto}
-@media (min-width:900px){
-  .wide{padding-right:120px}
-  .wide .browser{display:block}
-  .wide .phone{position:absolute;right:0;bottom:-48px;width:23%;margin:0}
+/* Integrations hub: a slow marquee of the service icons.
+   Three copies of the list so the loop never shows a gap inside .wrap. */
+.hub{position:relative;margin-top:40px;overflow:hidden;mask-image:linear-gradient(to right,transparent,#000 8%,#000 92%,transparent)}
+.hub-track{display:flex;width:max-content;padding-block:8px;animation:hub-drift 60s linear infinite}
+.hub:hover .hub-track{animation-play-state:paused}
+.hub ul{display:flex;gap:16px;margin:0;padding:0 16px 0 0;list-style:none;flex:none}
+.hub li{display:grid;place-items:center;width:100px;height:100px;border-radius:50%;background:var(--surface);box-shadow:inset 0 0 0 1px var(--line)}
+.hub li img{width:56px;height:56px;border-radius:14px}
+@keyframes hub-drift{to{transform:translateX(-33.3333%)}}
+@media (prefers-reduced-motion:reduce){
+  .hub{mask-image:none}
+  .hub-track{animation:none;width:auto}
+  .hub ul{flex-wrap:wrap;justify-content:center;padding:0;flex:1}
+  .hub ul[aria-hidden]{display:none}
 }
+.more{margin-top:28px}
+.more summary{display:flex;width:fit-content;margin:0 auto;cursor:pointer;list-style:none}
+@media (max-width:640px){
+  .hub li{width:72px;height:72px}
+  .hub li img{width:40px;height:40px;border-radius:10px}
+}
+.more summary::-webkit-details-marker{display:none}
 
 /* services */
-.services{display:grid;gap:12px;margin-top:40px}
+.services{display:grid;gap:12px;margin-top:28px}
 @media (min-width:760px){.services{grid-template-columns:1fr 1fr}}
-.svc{display:flex;gap:14px;align-items:flex-start;padding:24px;border-radius:6px;background:var(--surface);box-shadow:0 0 0 1px var(--line)}
+.svc{display:flex;gap:14px;align-items:flex-start;padding:24px;border-radius:6px;background:var(--panel)}
 .svc img{width:40px;height:40px;border-radius:10px;flex:0 0 auto}
 .svc .name{display:flex;align-items:center;gap:8px;font-weight:600;color:var(--ink)}
 .svc .desc{font-size:14px;color:var(--soft);margin-top:2px;line-height:1.5}
@@ -208,13 +217,13 @@ footer a:hover{color:var(--ink)}
 
 export function landingPage(fontFaces: string, basePath = ''): string {
   // Dark screenshots follow the explicit landing-page preference.
-  const shot = (name: string, alt: string, eager = false) =>
-    `<picture><source srcset="${basePath}/landing/${name}-dark.webp" media="not all">` +
-    `<img src="${basePath}/landing/${name}-light.webp" alt="${alt}"${eager ? ' fetchpriority="high"' : ' loading="lazy"'} decoding="async"></picture>`;
-  const phone = (name: string, alt: string, cls = '', eager = false) =>
-    `<div class="phone ${cls}">${shot(name, alt, eager)}</div>`;
-  const browser = (name: string, alt: string, cls = '', eager = false) => `<div class="browser ${cls}">${shot(name, alt, eager)}</div>`;
-  const tablet = (name: string, alt: string, cls = '') => `<div class="tablet ${cls}">${shot(name, alt)}</div>`;
+  // cls: "wide" (desktop/tablet shot) or "tall" (phone shot), placed inside a .screens panel.
+  const shot = (name: string, alt: string, cls: string, eager = false) =>
+    `<div class="shot ${cls}"><picture><source srcset="${basePath}/landing/${name}-dark.webp" media="not all">` +
+    `<img src="${basePath}/landing/${name}-light.webp" alt="${alt}"${eager ? ' fetchpriority="high"' : ' loading="lazy"'} decoding="async"></picture></div>`;
+  const hubIcons = SERVICES.map(
+    ([icon, name]) => `<li><img src="${basePath}/icons/${icon}.png" alt="${name}" width="56" height="56" loading="lazy"></li>`
+  ).join('');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CrossPoint Sync: Your reading, in sync everywhere</title>
@@ -232,7 +241,7 @@ try {
 <body>
 <header><div class="wrap">
   <a class="mark" href="${basePath}/"><img src="${basePath}/logo.png" alt="">CrossPoint Sync</a>
-  <nav><a class="link" href="${GITHUB}">Self-Host Sync</a><a class="btn primary" href="${basePath}/app/">Sync Dashboard</a></nav>
+  <nav><a class="link" href="https://crosspointreader.com">CrossPoint Reader</a><a class="link" href="${GITHUB}">Self-Host Sync</a><a class="btn primary" href="${basePath}/app/">Sync Dashboard</a></nav>
 </div></header>
 
 <main>
@@ -243,22 +252,26 @@ try {
     <p class="sub">Your e-reader's progress, clippings and stats on your phone and the web, and in the services you already use.</p>
     ${STORES}
   </div>
-  <div class="stage">
-    ${browser('desktop-library', 'The CrossPoint Sync library on the web', '', true)}
-    ${phone('phone-timeline', 'Your reading timeline in the CrossPoint Sync app', '', true)}
+  <div class="screens">
+    ${shot('desktop-library', 'The CrossPoint Sync library on the web', 'wide', true)}
+    ${shot('phone-timeline', 'Your reading timeline in the CrossPoint Sync app', 'tall', true)}
   </div>
 </div>
 
 <section class="tight"><div class="wrap">
   <div class="lead"><h2>Sync progress, highlights, and stats anywhere</h2>
     <p>Link the services you already use. Progress and highlights go to them each time you sync.</p></div>
+  <div class="hub">
+    <div class="hub-track"><ul>${hubIcons}</ul><ul aria-hidden="true">${hubIcons}</ul><ul aria-hidden="true">${hubIcons}</ul></div>
+  </div>
+  <details class="more"><summary class="btn ghost">What each service syncs</summary>
   <div class="services">
     ${SERVICES.map(
       ([icon, name, desc, state]) =>
         `<div class="svc"><img src="${basePath}/icons/${icon}.png" alt="" width="40" height="40" loading="lazy"><div>` +
         `<div class="name">${name}${state === 'beta' ? '<span class="pill">beta</span>' : ''}</div><div class="desc">${desc}</div></div></div>`
     ).join('')}
-  </div>
+  </div></details>
 </div></section>
 
 <section id="how"><div class="wrap">
@@ -275,7 +288,7 @@ try {
 </div></section>
 
 <section><div class="wrap split">
-  <div class="copy lead">
+  <div class="copy">
     <h2>Every book, with its story</h2>
     <p>Open any book for its cover, description, moods and how long it took you.</p>
     <ul class="points">
@@ -284,14 +297,14 @@ try {
       <li>Mark books reading, paused, finished or did not finish</li>
     </ul>
   </div>
-  <div class="duo with-tablet">
-    ${tablet('tablet-book', 'The Three-Body Problem on a tablet: its cover, stats and description')}
-    ${phone('phone-book-details', 'Moods, genres and the next book in the series')}
+  <div class="screens">
+    ${shot('tablet-book', 'The Three-Body Problem on a tablet: its cover, stats and description', 'wide tab')}
+    ${shot('phone-book-details', 'Moods, genres and the next book in the series', 'tall')}
   </div>
 </div></section>
 
 <section><div class="wrap split flip">
-  <div class="copy lead">
+  <div class="copy">
     <h2>Highlights that leave the device</h2>
     <p>Every passage you highlight on your reader shows up here, searchable and ready to share.</p>
     <ul class="points">
@@ -300,17 +313,19 @@ try {
       <li>Share any passage as an image card with its cover</li>
     </ul>
   </div>
-  <div class="solo">
-    ${phone('phone-clippings', 'Clippings in the app')}
+  <div class="screens">
+    ${shot('phone-clippings', 'Clippings in the app', 'tall solo')}
   </div>
 </div></section>
 
-<section><div class="wrap">
-  <div class="lead"><h2>See how you read</h2>
-    <p>Pages per week, the days you read, and the moods and genres you keep coming back to.</p></div>
-  <div class="wide">
-    ${browser('desktop-calendar', 'Reading stats on the web: moods, genres and a year of reading days', 'short')}
-    ${phone('phone-stats', 'Mood and genre stats in the app')}
+<section><div class="wrap split">
+  <div class="copy">
+    <h2>See how you read</h2>
+    <p>Pages per week, the days you read, and the moods and genres you keep coming back to.</p>
+  </div>
+  <div class="screens">
+    ${shot('desktop-calendar', 'Reading stats on the web: moods, genres and a year of reading days', 'wide short')}
+    ${shot('phone-stats', 'Mood and genre stats in the app', 'tall')}
   </div>
 </div></section>
 
