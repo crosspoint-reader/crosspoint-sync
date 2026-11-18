@@ -37,7 +37,8 @@ export function progressLabel(p) {
 const settingRow = 'flex min-h-12 items-center gap-3 py-2'
 
 // One line under the tabs: is the reader there, and where files will land. Opens to the transfer settings.
-function Device({ prefs, setPrefs, device, onRetry }) {
+// `books` adds what only applies to sending books: the destination folder and the EPUB options.
+function Device({ prefs, setPrefs, device, onRetry, books }) {
   const [editing, setEditing] = useState(false)
   const [host, setHost] = useState(prefs.host)
   const { state, status, error, dirs } = device
@@ -54,7 +55,7 @@ function Device({ prefs, setPrefs, device, onRetry }) {
             <span className="font-medium text-stone-900">
               {state === 'searching' ? `Looking for ${prefs.host}…` : state === 'ok' ? `CrossPoint ${status.device ?? ''}`.trim() : 'Reader not found'}
             </span>
-            {state === 'ok' && ` · ${folderLabel(prefs.folder)}`}
+            {state === 'ok' && books && ` · ${folderLabel(prefs.folder)}`}
           </span>
           {state === 'error' && <span className="block text-xs/5 text-stone-500">Open File Transfer on your reader, on the same Wi-Fi.</span>}
         </span>
@@ -73,7 +74,7 @@ function Device({ prefs, setPrefs, device, onRetry }) {
       </summary>
 
       <div className="divide-y divide-stone-100 pb-1 text-sm text-stone-900">
-        <label className={settingRow}>
+        {books && <label className={settingRow}>
           <span className="flex-1">Save to</span>
           <select
             value={prefs.folder}
@@ -86,7 +87,7 @@ function Device({ prefs, setPrefs, device, onRetry }) {
               </option>
             ))}
           </select>
-        </label>
+        </label>}
         {editing ? (
           <form
             className={settingRow}
@@ -118,7 +119,7 @@ function Device({ prefs, setPrefs, device, onRetry }) {
             </button>
           </div>
         )}
-        <div className={settingRow}>
+        {books && <><div className={settingRow}>
           <div className="min-w-0 flex-1">
             <p>Optimize EPUB</p>
             <p className="text-xs/5 text-stone-500">Grayscale images sized for your reader, no embedded fonts.</p>
@@ -150,7 +151,7 @@ function Device({ prefs, setPrefs, device, onRetry }) {
             checked={prefs.renameFromMetadata}
             onChange={(renameFromMetadata) => setPrefs({ ...prefs, renameFromMetadata })}
           />
-        </div>
+        </div></>}
         {state === 'ok' && <p className="py-3 font-mono text-xs text-stone-400">{status.ip ?? prefs.host} · firmware {status.version}</p>}
         {state === 'error' && error && <p className="py-3 font-mono text-xs break-all text-stone-400">{error}</p>}
       </div>
@@ -562,7 +563,7 @@ export default function Send({ tab = '' }) {
             <Wallpaper />
           ) : (
             <div className="max-w-3xl">
-              <Device prefs={prefs} setPrefs={setPrefs} device={device} onRetry={() => setAttempt((a) => a + 1)} />
+              <Device prefs={prefs} setPrefs={setPrefs} device={device} onRetry={() => setAttempt((a) => a + 1)} books={!tab} />
               {tab === 'fonts' ? (
                 <ReaderFonts base={device.base} device={device.status?.device} />
               ) : tab === 'plugins' ? (
