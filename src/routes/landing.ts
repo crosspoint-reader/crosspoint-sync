@@ -45,7 +45,7 @@ const SERVICES: [string, string, string, 'ready' | 'beta'][] = [
   ['audiobookshelf', 'Audiobookshelf', 'Switch between the ebook and the audiobook without losing your place.', 'ready'],
   ['jellyfin', 'Jellyfin', 'Keep your place in sync with books on your Jellyfin server.', 'beta'],
   ['bookorbit', 'BookOrbit', 'Two-way progress with your own library, clippings as highlights.', 'beta'],
-  ['seekquel', 'Seekquel', 'Log your progress, finished books and highlights in your Seekquel library.', 'beta'],
+  ['seekquel', 'Seekquel', 'Log your progress, finished books, reading time and highlights in your Seekquel library.', 'beta'],
   ['readest', 'Readest', 'Two-way progress and highlights with the Readest app.', 'beta'],
 ];
 

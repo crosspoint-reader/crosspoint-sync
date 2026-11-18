@@ -24,6 +24,7 @@ import { parseReadingSession } from '../../models/reading-sessions.js';
 import { combineReadingStreak } from '../../models/reading-streak.js';
 import { importBookorbitStats } from '../../connectors/bookorbit-stats.js';
 import { seedStatsCounters, storeStatsDays, storeStatsSnapshot } from '../../models/stats-counters.js';
+import { bookStatsFor, fanOutBookStats, statsSince } from '../../connectors/fanout.js';
 
 const MAX_BOOK_BATCH = 20;
 // Books per GET /stats/activity/books request.
@@ -229,12 +230,22 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     }
     const user = c.get('user');
     const now = nowSeconds();
+    const since = parsed.map((p) => statsSince(bookStatsFor(db, user.id, p.document, deviceId)));
     withTransaction(db, () => {
       for (const p of parsed) {
         seedStatsCounters(db, user.id, deviceId, p.document);
         storeStatsSnapshot(db, user.id, deviceId, p.document, p.counterId, p.snapshot, now, '', p.legacyUpload);
         storeStatsDays(db, user.id, deviceId, p.document, p.daily, now);
       }
+    });
+    const device = typeof o.device === 'string' ? o.device.slice(0, 128) : '';
+    // Two hashes of one stats-merged book share a total: it is sent once, from where it stood before the batch.
+    const sent = new Set<string>();
+    parsed.forEach((p, i) => {
+      const canonical = resolveDocument(db, user.id, p.document);
+      if (sent.has(canonical)) return;
+      sent.add(canonical);
+      fanOutBookStats(db, user.id, p.document, deviceId, device, now, undefined, since[i]);
     });
     return c.json({ until: now, accepted: parsed.length, accepted_daily: parsed.reduce((n, p) => n + p.daily.length, 0), counter_ids: 1 });
   });

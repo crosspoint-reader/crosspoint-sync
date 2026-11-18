@@ -1,11 +1,14 @@
 import type { DB } from '../db/db.js';
 import { secretsEnabled } from '../crypto/secrets.js';
 import { getConnector } from './registry.js';
-import { enqueue } from './queue.js';
+import { enqueue, STATS_QUEUE_PREFIX } from './queue.js';
 import { activeConnectorIds, carriesFor, documentMeta, getMatch } from './store.js';
 import { extractTitleAuthor } from './matching.js';
 import { nowSeconds } from '../models/sync.js';
 import type { Connector, OutboundEvent } from './types.js';
+import { combineBookStats, type BookStatsSnapshot } from '../models/stats.js';
+import { resolveDocument, statsDocuments } from '../models/merge.js';
+import { HISTORY_DEVICE } from '../models/koinsight-import.js';
 import { scheduleMicroblogClippings } from './microblog-clippings.js';
 
 /**
@@ -46,7 +49,7 @@ function fanOut(
       const conn = getConnector(connectorId);
       if (!conn || !conn.capabilities.write || !carriesFor(db, userId, conn, ev.kind)) continue;
       if (!isAttemptable(db, userId, conn, ev.document)) continue; // no metadata/match: skip
-      enqueue(db, userId, connectorId, ev, coalesceKey);
+      enqueue(db, userId, connectorId, coalesceKey ? withFloor(db, userId, connectorId, ev, coalesceKey) : ev, coalesceKey);
     }
   } catch (err) {
     console.error(
@@ -137,6 +140,140 @@ export function fanOutHighlight(
   fanOut(db, userId, { kind: 'highlight', document, timestamp, highlight: h }, `highlight:${clippingId}`, exceptConnectorId);
 }
 
+export type StatsBaseline = NonNullable<NonNullable<OutboundEvent['stats']>['baseline']>;
+
+/**
+ * One source's running totals for a book as a reader sees them: every counter lifetime
+ * of that device, across the book's stats-merged copies, under the canonical document
+ * (the id progress is sent under). Sources are devices and the KOReader history import.
+ */
+export function bookStatsFor(
+  db: DB,
+  userId: number,
+  document: string,
+  deviceId: string
+): { document: string; book: BookStatsSnapshot; updatedAt: number } | null {
+  const canonical = resolveDocument(db, userId, document);
+  const documents = statsDocuments(db, userId, canonical);
+  const rows = db
+    .prepare(
+      `SELECT payload, updated_at FROM stats_device_book
+       WHERE user_id = ? AND device_id = ? AND document IN (${documents.map(() => '?').join(',')})
+       ORDER BY updated_at`
+    )
+    .all(userId, deviceId, ...documents) as { payload: string; updated_at: number }[];
+  const snapshots: BookStatsSnapshot[] = [];
+  let updatedAt = 0;
+  for (const r of rows) {
+    try {
+      snapshots.push(JSON.parse(r.payload) as BookStatsSnapshot);
+      updatedAt = Math.max(updatedAt, Number(r.updated_at));
+    } catch {
+      // A row that does not parse is left out; the rest still add up.
+    }
+  }
+  if (!snapshots.length) return null;
+  const book = {
+    ...snapshots[snapshots.length - 1],
+    ...combineBookStats(snapshots),
+    pace_n: snapshots.reduce((n, s) => n + s.pace_n, 0),
+  };
+  return { document: canonical, book, updatedAt };
+}
+
+/** A source's total as it stood, to measure the next upload from. */
+export function statsSince(totals: { book: BookStatsSnapshot; updatedAt: number } | null): StatsBaseline | undefined {
+  return totals ? { seconds: totals.book.seconds, pages: totals.book.pages, at: totals.updatedAt } : undefined;
+}
+
+const statsKey = (deviceId: string) => `${STATS_QUEUE_PREFIX}${deviceId}`;
+const between = (n: number, low: number, high: number) => Math.min(Math.max(n, low), high);
+
+/**
+ * Settles, for one connector, the point a stats event's new reading is measured from.
+ *
+ * Every event has a floor: its history (`baseline`, which is sent) or the source's total
+ * before the upload (`since`, which is not). A stats event replaces the pending one for
+ * its source, so whatever the pending event had not delivered yet is carried over: its
+ * history stays history, and reading it was about to report stays above the floor, so
+ * neither a retry nor a later upload can turn one into the other. A dead-lettered event
+ * is carried the same way.
+ *
+ * A source this connector has never been sent, but which already had a total here (it
+ * was read on before the link), starts from that total, so what the upload adds is
+ * credited instead of being used up as the starting point.
+ */
+function withFloor(db: DB, userId: number, connectorId: string, ev: OutboundEvent, key: string): OutboundEvent {
+  const stats = ev.stats;
+  if (!stats) return ev;
+  const row = db
+    .prepare(
+      `SELECT payload, status FROM connector_queue
+       WHERE user_id = ? AND connector_id = ? AND document = ? AND kind = ?`
+    )
+    .get(userId, connectorId, ev.document, key) as { payload: string; status: string } | undefined;
+  if (!row) {
+    if (stats.baseline || !stats.since || stats.since.seconds > stats.book.seconds) return ev;
+    return { ...ev, stats: { ...stats, baseline: stats.since, since: undefined } };
+  }
+  let last: OutboundEvent | undefined;
+  try {
+    last = JSON.parse(row.payload) as OutboundEvent;
+  } catch {
+    last = undefined;
+  }
+  const waiting = last?.stats;
+  if (row.status === 'done') {
+    // The total grew without an upload (a copy with its own stats was merged in, a
+    // history file was imported): what was added that way is history.
+    if (stats.baseline || !stats.since || !waiting) return ev;
+    if (stats.since.seconds <= waiting.book.seconds && stats.since.pages <= waiting.book.pages) return ev;
+    return { ...ev, stats: { ...stats, baseline: stats.since, since: undefined } };
+  }
+  if (!last || !waiting) return ev;
+  // A waiting event with no floor is the source's first total, which the service takes as
+  // its starting point: it is kept as history so the reading after it is still credited.
+  const first = !waiting.baseline && !waiting.since;
+  const theirs = waiting.baseline ?? waiting.since
+    ?? { seconds: waiting.book.seconds, pages: waiting.book.pages, at: last.timestamp };
+  const mine = stats.baseline ?? stats.since ?? { seconds: stats.book.seconds, pages: stats.book.pages, at: ev.timestamp };
+  const floor: StatsBaseline = {
+    seconds: between(mine.seconds - Math.max(0, waiting.book.seconds - theirs.seconds), 0, stats.book.seconds),
+    pages: between(mine.pages - Math.max(0, waiting.book.pages - theirs.pages), 0, stats.book.pages),
+    at: Math.min(theirs.at, mine.at),
+  };
+  const historyGrew = floor.seconds > theirs.seconds || floor.pages > theirs.pages;
+  return stats.baseline || waiting.baseline || first || historyGrew
+    ? { ...ev, stats: { ...stats, baseline: floor, since: undefined } }
+    : { ...ev, stats: { ...stats, since: floor } };
+}
+
+/**
+ * Send one source's current total for a book to every connector that carries stats.
+ * Call after the write commits. `baseline` marks how much of the total is history, and
+ * `since` is the source's total before this upload.
+ */
+export function fanOutBookStats(
+  db: DB,
+  userId: number,
+  document: string,
+  deviceId: string,
+  device: string,
+  timestamp: number,
+  baseline?: StatsBaseline,
+  since?: StatsBaseline
+): void {
+  const totals = bookStatsFor(db, userId, document, deviceId);
+  if (!totals) return;
+  // Totals replace the same source's earlier snapshot, but two sources on one book must not overwrite each other.
+  fanOut(
+    db,
+    userId,
+    { kind: 'stats', document: totals.document, timestamp, stats: { deviceId, device, book: totals.book, baseline, since } },
+    statsKey(deviceId)
+  );
+}
+
 /**
  * Backfill a single connector with everything already synced ("Sync now").
  * Enqueues the latest progress per document (and highlights, if it carries
@@ -195,6 +332,63 @@ export function backfillConnector(db: DB, userId: number, connectorId: string, d
         position,
         timestamp: r.updated_at,
       });
+      queued++;
+    }
+  }
+
+  if (carriesFor(db, userId, conn, 'stats')) {
+    // Totals from before the link are history: sent once as the starting point, so the
+    // next upload is credited for what it adds instead of being used up as the baseline.
+    const sources = db
+      .prepare('SELECT DISTINCT device_id, document FROM stats_device_book WHERE user_id = ?')
+      .all(userId) as { device_id: string; document: string }[];
+    const labels = new Map(
+      (db.prepare('SELECT device_id, device FROM stats_device_global WHERE user_id = ?').all(userId) as {
+        device_id: string;
+        device: string;
+      }[]).map((r) => [r.device_id, r.device])
+    );
+    const waiting = db.prepare(
+      `SELECT 1 FROM connector_queue
+       WHERE user_id = ? AND connector_id = ? AND document = ? AND kind = ? AND status = 'pending'`
+    );
+    const now = nowSeconds();
+    const seen = new Set<string>();
+    for (const s of sources) {
+      const totals = bookStatsFor(db, userId, s.document, s.device_id);
+      if (!totals || (document && totals.document !== document)) continue;
+      const key = statsKey(s.device_id);
+      if (seen.has(`${key}:${totals.document}`)) continue;
+      seen.add(`${key}:${totals.document}`);
+      // An update already on its way carries its own boundary; replacing it would lose it.
+      if (waiting.get(userId, connectorId, totals.document, key)) continue;
+      if (!isAttemptable(db, userId, conn, totals.document)) continue;
+      const { seconds, pages } = totals.book;
+      // A dead-lettered event is sent again from the floor it had, so reading it never
+      // delivered is still credited; anything else is history up to the current total.
+      enqueue(
+        db,
+        userId,
+        connectorId,
+        withFloor(
+          db,
+          userId,
+          connectorId,
+          {
+            kind: 'stats',
+            document: totals.document,
+            timestamp: now,
+            stats: {
+              deviceId: s.device_id,
+              device: s.device_id === HISTORY_DEVICE ? 'KOReader' : labels.get(s.device_id) ?? '',
+              book: totals.book,
+              baseline: { seconds, pages, at: now },
+            },
+          },
+          key
+        ),
+        key
+      );
       queued++;
     }
   }

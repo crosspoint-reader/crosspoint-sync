@@ -1,4 +1,5 @@
 import type { DB } from '../db/db.js';
+import type { BookStatsSnapshot } from '../models/stats.js';
 
 /**
  * Connector framework types. A connector adapts crosspoint-sync's canonical
@@ -15,8 +16,8 @@ export interface ConnectorContext {
   document?: string;
 }
 
-/** What data types a connector carries (progress/shelves vs highlights). */
-export type DataKind = 'progress' | 'finished' | 'highlight';
+/** What data types a connector carries (progress/shelves vs highlights vs reading stats). */
+export type DataKind = 'progress' | 'finished' | 'highlight' | 'stats';
 
 /** A per-account setting on a connector, stored in connector_accounts.options. */
 export interface ConnectorOption {
@@ -145,6 +146,24 @@ export interface OutboundEvent {
     startOffset?: number | null;
     endOffset?: number | null;
     chapter?: string | null;
+  };
+  /** For stats events: one device's running totals for this book, replacing its previous snapshot. */
+  stats?: {
+    deviceId: string;
+    device: string;
+    book: BookStatsSnapshot;
+    /**
+     * The part of the total that is history (an import, a backfill, totals from before
+     * the link), not reading done now. Delivered first as the starting point, so only
+     * what `book` adds beyond it can count as new reading. `at` is when the reading
+     * beyond it began, or when the history was taken if there is none.
+     */
+    baseline?: { seconds: number; pages: number; at: number };
+    /**
+     * The source's total before this upload, when it had one. Never sent: it is what a
+     * replaced or first-time event is measured from. `at` is when that total was stored.
+     */
+    since?: { seconds: number; pages: number; at: number };
   };
 }
 

@@ -5,8 +5,12 @@ import type { AppEnv } from '../../auth/middleware.js';
 import { AccountImportError } from '../../models/account-data.js';
 import { HISTORY_DEVICE, importHistory, prepareHistory, type History } from '../../models/koinsight-import.js';
 import { resolveDocument, statsDocuments } from '../../models/merge.js';
+import { bookStatsFor, fanOutBookStats, statsSince, type StatsBaseline } from '../../connectors/fanout.js';
 
 const MAX_PAGES = 20_000;
+const HISTORY_LABEL = 'KOReader';
+// Page records older than this are history being filled in, not reading to report as new.
+const RECENT_READING_SECONDS = 2 * 86400;
 
 export function koreaderRoutes(db: DB): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -31,6 +35,12 @@ export function koreaderRoutes(db: DB): Hono<AppEnv> {
     const userId = c.get('user').id;
     try {
       let records = 0;
+      let synced = '';
+      let before: StatsBaseline | undefined;
+      let recentPages = 0;
+      let oldAdded = false;
+      let recentSeconds = 0;
+      let recentSince = now;
       withTransaction(db, () => {
         const document = resolveDocument(db, userId, book.md5);
         const ids = statsDocuments(db, userId, document);
@@ -40,6 +50,23 @@ export function koreaderRoutes(db: DB): Hono<AppEnv> {
           AND (json_extract(payload, '$.seconds') > 0 OR json_extract(payload, '$.pages') > 0)`).get(userId, id, HISTORY_DEVICE) && !stored.some(p => p.document === id));
         if (legacy) {
           throw new AccountImportError('Re-import the original KOReader/KOInsight history file in app Settings before syncing this book. Its older import has no source records to reconcile safely.', 409);
+        }
+        before = statsSince(bookStatsFor(db, userId, document, HISTORY_DEVICE));
+        // What this upload adds, split into history and recent reading. Records already
+        // stored add nothing, so the plugin resending a whole book is neither.
+        const known = new Map<string, number>(stored.map(p => [`${p.page}:${p.total_pages}:${p.start_time}`, Number(p.duration)]));
+        const counted = new Map<string, number>();
+        for (const p of pages) {
+          const key = `${p.page}:${p.total_pages}:${p.start_time}`;
+          const had = Math.max(known.get(key) ?? 0, counted.get(key) ?? 0);
+          if (p.duration <= had && (known.has(key) || counted.has(key))) continue;
+          counted.set(key, p.duration);
+          if (p.start_time < now - RECENT_READING_SECONDS) oldAdded = true;
+          else {
+            recentSeconds += p.duration - had;
+            recentSince = Math.min(recentSince, p.start_time);
+            if (!known.has(key) && had === 0) recentPages++;
+          }
         }
         const unique = new Map<string, History['pages'][number]>();
         for (const p of [...stored, ...pages]) {
@@ -59,7 +86,27 @@ export function koreaderRoutes(db: DB): Hono<AppEnv> {
         b.existing_history = false;
         importHistory(db, userId, prepared, { [document]: b.status === 'finished' ? b.finished_date : null });
         records = unique.size;
+        synced = document;
       });
+      // Set inside the transaction's callback, which the compiler cannot see through.
+      const prior = before as StatsBaseline | undefined;
+      let baseline: StatsBaseline | undefined;
+      if (oldAdded) {
+        // The history is everything but the recent reading; that is credited from when it began.
+        const after = bookStatsFor(db, userId, synced, HISTORY_DEVICE)?.book;
+        if (after) {
+          baseline = {
+            seconds: Math.min(Math.max(after.seconds - recentSeconds, prior?.seconds ?? 0), after.seconds),
+            pages: Math.min(Math.max(after.pages - recentPages, prior?.pages ?? 0), after.pages),
+            at: recentSeconds > 0 ? recentSince : now,
+          };
+        }
+      } else if (!prior && (recentSeconds > 0 || recentPages > 0)) {
+        // A book's first total made only of recent records is reading done now: it starts from
+        // zero, or the service would take the whole of it as its starting point and credit none.
+        baseline = { seconds: 0, pages: 0, at: recentSince };
+      }
+      fanOutBookStats(db, userId, synced, HISTORY_DEVICE, HISTORY_LABEL, now, baseline, prior);
       return c.json({ version: 1, document: book.md5, accepted: pages.length, records });
     } catch (error) {
       if (error instanceof AccountImportError) return c.json({ message: error.message }, error.status);
