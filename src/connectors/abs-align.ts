@@ -51,6 +51,27 @@ export function enqueueAlignment(
   ).run(userId, connectorId, externalId, document, at, at, at);
 }
 
+/**
+ * Queue alignments for every matched Audiobookshelf book that has none yet, so
+ * books matched before this feature existed (or while the worker was down) do
+ * not need to be re-matched by hand.
+ */
+export function enqueueMissing(db: DB, now = Date.now()): void {
+  const rows = db.prepare(
+    `SELECT user_id, document, external_id FROM connector_matches
+     WHERE connector_id = 'audiobookshelf' AND external_id IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM audio_alignment a
+         WHERE a.user_id = connector_matches.user_id
+           AND a.connector_id = connector_matches.connector_id
+           AND a.external_id = connector_matches.external_id
+       )`
+  ).all() as { user_id: number; document: string; external_id: string }[];
+  for (const row of rows) {
+    enqueueAlignment(db, row.user_id, 'audiobookshelf', row.external_id, row.document, now);
+  }
+}
+
 function claim(db: DB, now = Date.now()): JobRow | null {
   const job = db.prepare(
     `SELECT user_id, connector_id, external_id, document, attempts FROM audio_align_jobs
@@ -155,6 +176,7 @@ export function startAlignWorker(
       running = false;
     }
   };
+  void enqueueMissing(db);
   void tick();
   setInterval(() => void tick(), intervalMs).unref();
 }

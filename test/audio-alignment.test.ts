@@ -2,7 +2,7 @@ import { crc32 } from 'node:zlib';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { DOC, makeTestApp, registerUser } from './helpers.js';
 import { audiobookshelfConnector } from '../src/connectors/audiobookshelf.js';
-import { enqueueAlignment, runAlignmentJob } from '../src/connectors/abs-align.js';
+import { enqueueAlignment, enqueueMissing, runAlignmentJob } from '../src/connectors/abs-align.js';
 import { saveMatch, upsertAccount } from '../src/connectors/store.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
 import { loadAlignment, msAtOffset, saveAlignment } from '../src/models/audio-alignment.js';
@@ -76,6 +76,18 @@ it('queues one job per book and skips books that are already aligned', async () 
   db.prepare('DELETE FROM audio_align_jobs').run();
   enqueueAlignment(db, id, 'audiobookshelf', 'li_1', DOC);
   expect(db.prepare('SELECT COUNT(*) AS n FROM audio_align_jobs').get()).toEqual({ n: 0 });
+});
+
+it('backfills jobs for books matched before alignments existed', async () => {
+  const { app, db } = makeTestApp();
+  const { username } = await registerUser(app);
+  const { id } = db.prepare('SELECT id FROM users WHERE username=?').get(username) as { id: number };
+  saveMatch(db, id, 'audiobookshelf', DOC, { externalId: 'li_9', externalEdition: '20', confidence: 1 }, 'manual');
+  saveMatch(db, id, 'jellyfin', 'film', { externalId: 'jf_1', externalEdition: null, confidence: 1 }, 'manual');
+  enqueueMissing(db);
+  enqueueMissing(db);
+  expect(db.prepare('SELECT user_id, connector_id, external_id, document, status FROM audio_align_jobs').all())
+    .toEqual([{ user_id: id, connector_id: 'audiobookshelf', external_id: 'li_9', document: DOC, status: 'pending' }]);
 });
 
 it('aligns transcribed audio with the EPUB and seeks the audiobook to the reader word', async () => {
