@@ -4,6 +4,10 @@ with pkgs;
 buildNpmPackage {
   pname = "crosspoint-sync";
   version = "git";
+  # node:sqlite needs Node 22.5+, and ffmpeg splits audiobooks for hosted
+  # transcription, so both must be in the runtime closure.
+  nodejs = nodejs_24;
+  buildInputs = [ ffmpeg ];
   src = ../.;
 
   npmDeps = importNpmLock {
@@ -21,6 +25,7 @@ buildNpmPackage {
     mkdir -p $out/lib $out/bin
     cp -r package.json dist node_modules assets migrations $out/lib/
     makeWrapper ${lib.getExe nodejs} $out/bin/crosspoint-sync \
+      --prefix PATH : ${lib.makeBinPath [ ffmpeg ]} \
       --add-flags "$out/lib/dist/index.js"
     runHook postInstall
   '';
