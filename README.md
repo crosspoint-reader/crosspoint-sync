@@ -183,6 +183,11 @@ DATABASE_PATH=./data/crosspoint.db PORT=8080 node dist/index.js
 | `READEST_URL` | `https://web.readest.com` | Optional. The Readest web origin the Readest connector links to and syncs with. Only for testing against a local Readest. |
 | `READEST_SUPABASE_URL` / `READEST_SUPABASE_ANON_KEY` | Readest's hosted values | Optional. The Supabase project the Readest connector refreshes its sign-in with. Only for testing against a local Readest. |
 | `CORS_ORIGINS` | `*` | Origins allowed to call the sync API from browsers (comma-separated). The default wildcard is safe: the API authenticates with headers, not cookies, and the web UI's cookie routes never get CORS headers. |
+| `GROQ_API_KEY` | _(unset)_ | Hosted speech-to-text for word-level Audiobookshelf sync (Groq's OpenAI-compatible Whisper API). Setting it switches the default provider to `groq`. |
+| `ASR_PROVIDER` | `groq` if `GROQ_API_KEY` is set, else `local` | Which transcriber builds word-level alignments: `groq` (hosted, needs a key) or `local` (the aligner sidecar). |
+| `ASR_URL` | `http://aligner:8080` | Base URL of the local aligner sidecar (`ASR_PROVIDER=local`). |
+| `ASR_MODEL` | `whisper-large-v3` | Transcription model for the hosted provider. Must support word timestamps. |
+| `ASR_MAX_BYTES` | `104857600` | Largest audio chunk the hosted provider may upload. Files over it are re-encoded and split with ffmpeg (needs `ffmpeg` on the host, included in the Docker image). |
 
 With `BASE_PATH=/crosspoint-sync`, open `https://your-host/crosspoint-sync/`
 and configure readers with `https://your-host/crosspoint-sync` as their server
@@ -241,6 +246,38 @@ For local testing, use Node 22.13 or newer, build the frontend with
 [the local app](http://localhost:8081/app/). Create a local account, sync a book
 and its clippings from a reader, link Micro.blog, and match the book before trying
 the clipping action or automatic sync. These actions publish to the linked blog.
+
+## Word-level audiobook sync
+
+For Audiobookshelf items that have **both audio files and an EPUB**, sync stops
+being percentage-based. Once a book is matched, a background job transcribes the
+audio, matches the spoken words against the EPUB text, and stores a
+word-level offset ↔ audio-time map. After that:
+
+- a position pushed from a reader seeks the audiobook to the exact word last read
+- a position pulled from Audiobookshelf (its `currentTime`) resolves to the exact
+  EPUB xpath, so the reader opens on the sentence being narrated
+
+Books without an alignment keep the old percentage behaviour, so nothing breaks
+while a job is still running (a book takes minutes and jobs run one at a time).
+
+Pick a transcriber:
+
+- **Hosted (default when `GROQ_API_KEY` is set):** nothing to run. Files over the
+  upload cap (`ASR_MAX_BYTES`, 100 MiB on Groq) are re-encoded to a 48 kbps mono
+  mp3 and split into chunks with ffmpeg, then stitched back together by shifting
+  each chunk's word times, so a single-file m4b works too. The audio is sent to
+  Groq.
+- **Local:** run the aligner sidecar (see the commented `aligner` service in
+  `docker-compose.yml`) and set `ASR_PROVIDER=local`. It downloads the audio from
+  your own Audiobookshelf, splits long files with ffmpeg, and runs
+  faster-whisper on CPU. Pick a model with `WHISPER_MODEL` (`base` is fast and
+  rough, `small`/`medium` noticeably better, `large-v3` best but slow on CPU),
+  and re-map `aligner-models` so the model download survives restarts.
+
+Alignment quality is stored per book (`coverage`: the share of book words that
+matched the transcript) and a very noisy transcript degrades to a rough map
+rather than a wrong one.
 
 ## Point your reader at it
 

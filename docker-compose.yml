@@ -14,10 +14,29 @@ services:
       # Enables linking services (Hardcover, Micro.blog, etc.). Generate once with
       # `openssl rand -hex 32` and never change it, or saved logins become unreadable.
       # TOKEN_ENC_KEY: ""
+      # Word-level Audiobookshelf sync needs speech-to-text: a hosted key (used
+      # automatically once set) or the local aligner service below.
+      # GROQ_API_KEY: ""
+      # ASR_PROVIDER: "local"
+      # ASR_URL: "http://aligner:8080"
       # Behind an HTTPS reverse proxy: block direct access to port 8080,
       # then uncomment this. See README.md for Caddy setup.
       # TRUST_PROXY: "true"
     restart: unless-stopped
 
+  # Optional local speech-to-text for word-level Audiobookshelf sync. Uncomment
+  # this service and ASR_URL above to keep transcription on your own hardware:
+  # CPU only, one book at a time, models cached in the aligner-models volume.
+  # aligner:
+  #   image: ghcr.io/crosspoint-reader/crosspoint-sync-aligner:main
+  #   volumes:
+  #     - aligner-models:/models
+  #   environment:
+  #     WHISPER_MODEL: "base"        # base/small/medium/large-v3: CPU speed vs accuracy
+  #     WHISPER_COMPUTE_TYPE: "int8"
+  #     WHISPER_LANGUAGE: ""         # empty detects the language
+  #   restart: unless-stopped
+
 volumes:
   crosspoint-data:
+  # aligner-models:

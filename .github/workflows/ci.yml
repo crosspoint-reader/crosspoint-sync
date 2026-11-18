@@ -86,3 +86,21 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+      - uses: docker/metadata-action@v5
+        id: meta-aligner
+        with:
+          images: ghcr.io/${{ github.repository }}-aligner
+          flavor: |
+            latest=false
+          tags: |
+            type=ref,event=branch
+            type=sha
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: aligner
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta-aligner.outputs.tags }}
+          labels: ${{ steps.meta-aligner.outputs.labels }}

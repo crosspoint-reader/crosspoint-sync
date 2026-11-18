@@ -1,0 +1,160 @@
+import type { DB } from '../db/db.js';
+import { loadAlignment, saveAlignment } from '../models/audio-alignment.js';
+import { absAlignmentSource } from './audiobookshelf.js';
+import { transcribe, type AsrConfig, type Fetch } from './asr.js';
+import { fetchTransport } from './registry.js';
+import { decryptCredential, getAccount } from './store.js';
+import type { HttpTransport } from './types.js';
+import { alignTranscript, type TranscriptWord } from './word-align.js';
+
+/**
+ * Builds and stores word-level alignments for matched Audiobookshelf items:
+ * transcribe each audio file, match the transcript against the EPUB text, and
+ * save the ebook-offset <-> audio-time mapping the connector then syncs on.
+ *
+ * Jobs are serialized (one transcode at a time) and retried with backoff, since
+ * a book takes minutes to transcribe and the ASR backend may rate limit.
+ */
+
+const BACKOFF_SECONDS = [60, 600, 3600, 21600, 86400];
+const MAX_ATTEMPTS = BACKOFF_SECONDS.length;
+
+interface JobRow {
+  user_id: number;
+  connector_id: string;
+  external_id: string;
+  document: string;
+  attempts: number;
+}
+
+/** Queue an alignment for a matched book, unless one already exists or is queued. */
+export function enqueueAlignment(
+  db: DB,
+  userId: number,
+  connectorId: string,
+  externalId: string,
+  document: string,
+  now = Date.now()
+): void {
+  if (connectorId !== 'audiobookshelf' || !externalId) return;
+  if (loadAlignment(db, userId, connectorId, externalId)) return;
+  const at = Math.floor(now / 1000);
+  db.prepare(
+    `INSERT INTO audio_align_jobs (user_id, connector_id, external_id, document, status, next_try_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)
+     ON CONFLICT (user_id, connector_id, external_id) DO UPDATE SET
+       document = excluded.document,
+       status = CASE WHEN audio_align_jobs.status = 'failed' THEN 'pending' ELSE audio_align_jobs.status END,
+       attempts = CASE WHEN audio_align_jobs.status = 'failed' THEN 0 ELSE audio_align_jobs.attempts END,
+       next_try_at = CASE WHEN audio_align_jobs.status = 'failed' THEN excluded.next_try_at ELSE audio_align_jobs.next_try_at END,
+       updated_at = excluded.updated_at`
+  ).run(userId, connectorId, externalId, document, at, at, at);
+}
+
+function claim(db: DB, now = Date.now()): JobRow | null {
+  const job = db.prepare(
+    `SELECT user_id, connector_id, external_id, document, attempts FROM audio_align_jobs
+     WHERE status = 'pending' AND next_try_at <= ? ORDER BY next_try_at LIMIT 1`
+  ).get(Math.floor(now / 1000)) as JobRow | undefined;
+  if (!job) return null;
+  db.prepare(
+    `UPDATE audio_align_jobs SET status = 'running', updated_at = ?
+     WHERE user_id = ? AND connector_id = ? AND external_id = ?`
+  ).run(Math.floor(now / 1000), job.user_id, job.connector_id, job.external_id);
+  return job;
+}
+
+/** Transcribe every audio file, align the transcript with the EPUB, store the mapping. */
+export async function runAlignmentJob(
+  db: DB,
+  config: AsrConfig,
+  job: JobRow,
+  http: HttpTransport = fetchTransport,
+  fetchImpl: Fetch = fetch
+): Promise<void> {
+  const account = getAccount(db, job.user_id, job.connector_id);
+  if (!account) throw new Error(`${job.connector_id} account is no longer linked`);
+  const source = await absAlignmentSource(decryptCredential(account, db), job.external_id, http);
+  const progress = db.prepare(
+    `UPDATE audio_align_jobs SET files_total = ?, files_done = ?, updated_at = ?
+     WHERE user_id = ? AND connector_id = ? AND external_id = ?`
+  );
+  progress.run(source.files.length, 0, Math.floor(Date.now() / 1000), job.user_id, job.connector_id, job.external_id);
+
+  const words: TranscriptWord[] = [];
+  let startMs = 0;
+  for (const [index, file] of source.files.entries()) {
+    const spoken = await transcribe(config, file, fetchImpl);
+    for (const word of spoken) {
+      words.push({ word: word.word, startMs: startMs + word.startMs, endMs: startMs + word.endMs });
+    }
+    // Prefer the declared duration: a narrator's trailing silence is real audio.
+    startMs += file.durationMs || spoken[spoken.length - 1]?.endMs || 0;
+    progress.run(source.files.length, index + 1, Math.floor(Date.now() / 1000), job.user_id, job.connector_id, job.external_id);
+  }
+
+  const alignment = alignTranscript(source.spines.join(''), words);
+  saveAlignment(db, job.user_id, job.connector_id, job.external_id, job.document, {
+    ...alignment,
+    spineLengths: source.spines.map(text => Array.from(text).length),
+    durationMs: Math.max(alignment.durationMs, source.durationMs),
+    source: config.provider,
+  });
+}
+
+function finish(db: DB, job: JobRow, error?: unknown): void {
+  const now = Math.floor(Date.now() / 1000);
+  if (!error) {
+    db.prepare(
+      `UPDATE audio_align_jobs SET status = 'done', last_error = NULL, updated_at = ?
+       WHERE user_id = ? AND connector_id = ? AND external_id = ?`
+    ).run(now, job.user_id, job.connector_id, job.external_id);
+    return;
+  }
+  const attempts = job.attempts + 1;
+  const message = error instanceof Error ? error.message : String(error);
+  const backoff = BACKOFF_SECONDS[Math.min(attempts - 1, BACKOFF_SECONDS.length - 1)];
+  db.prepare(
+    `UPDATE audio_align_jobs SET status = ?, attempts = ?, next_try_at = ?, last_error = ?, updated_at = ?
+     WHERE user_id = ? AND connector_id = ? AND external_id = ?`
+  ).run(
+    attempts >= MAX_ATTEMPTS ? 'failed' : 'pending',
+    attempts, now + backoff, message.slice(0, 500), now,
+    job.user_id, job.connector_id, job.external_id
+  );
+}
+
+/**
+ * Drain ready alignment jobs in the background. One at a time: transcription is
+ * CPU- and quota-heavy, and a partially transcribed book retries from scratch.
+ */
+export function startAlignWorker(
+  db: DB,
+  config: AsrConfig,
+  intervalMs = 60_000,
+  http: HttpTransport = fetchTransport
+): void {
+  let running = false;
+  const tick = async (): Promise<void> => {
+    if (running) return;
+    running = true;
+    try {
+      for (let job = claim(db); job; job = claim(db)) {
+        try {
+          await runAlignmentJob(db, config, job, http);
+          finish(db, job);
+        } catch (error) {
+          finish(db, job, error);
+          console.error(JSON.stringify({
+            msg: 'audio alignment failed', connector: job.connector_id, item: job.external_id,
+            error: error instanceof Error ? error.message : String(error),
+          }));
+        }
+      }
+    } finally {
+      running = false;
+    }
+  };
+  void tick();
+  setInterval(() => void tick(), intervalMs).unref();
+}
