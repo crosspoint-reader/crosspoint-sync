@@ -75,9 +75,8 @@ describe('connector management API', () => {
     const body = await res.json();
     expect(body.encryption).toBe('enabled');
     const ids = body.connectors.map((c: { id: string }) => c.id).sort();
-    // The classic (highlights-only) readwise connector is hidden; still
-    // registered but not listed. Kindle is stealth: hidden until revealed.
-    expect(ids).toEqual(['audiobookshelf', 'bookfusion', 'bookorbit', 'hardcover', 'jellyfin', 'kosync', 'microblog', 'readest', 'readwise-reader', 'seekquel', 'spotify']);
+    // Kindle is stealth: hidden until revealed.
+    expect(ids).toEqual(['audiobookshelf', 'bookfusion', 'bookorbit', 'hardcover', 'jellyfin', 'kosync', 'microblog', 'readest', 'readwise', 'readwise-reader', 'seekquel', 'spotify']);
     expect(body.connectors.every((c: { linked: boolean }) => !c.linked)).toBe(true);
   });
 
