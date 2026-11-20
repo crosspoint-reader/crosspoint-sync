@@ -21,6 +21,9 @@ export interface GlobalStatsSnapshot {
   seconds: number;
   pages: number;
   completed: number;
+  completed_books?: number;
+  completed_articles?: number;
+  has_articles?: boolean;
   tod: number[]; // [morning, afternoon, evening, night] seconds
   dow: number[]; // Mon..Sun seconds
   /** Days since 2000-01-01 of the most recent day covered by the history bitmap. */
@@ -37,6 +40,7 @@ export interface BookStatsSnapshot {
   seconds: number;
   pages: number;
   completed: boolean;
+  is_article?: boolean;
   avg_fwd: number;
   pace_n: number;
   eta: number;
@@ -86,6 +90,14 @@ export function parseGlobalStats(raw: unknown): GlobalStatsSnapshot | null {
   ) {
     return null;
   }
+  // Older clients only send the combined total. Validate an explicit split as a unit.
+  const split = o.completed_books !== undefined || o.completed_articles !== undefined || o.has_articles !== undefined;
+  let categories: Pick<GlobalStatsSnapshot, 'completed_books' | 'completed_articles' | 'has_articles'> = {};
+  if (split) {
+    if (!isCount(o.completed_books) || !isCount(o.completed_articles) || typeof o.has_articles !== 'boolean' ||
+        o.completed !== o.completed_books + o.completed_articles || (o.completed_articles > 0 && !o.has_articles)) return null;
+    categories = { completed_books: o.completed_books, completed_articles: o.completed_articles, has_articles: o.has_articles };
+  }
   let history: Buffer;
   try {
     history = Buffer.from(o.history_b64, 'base64');
@@ -99,6 +111,7 @@ export function parseGlobalStats(raw: unknown): GlobalStatsSnapshot | null {
     seconds: o.seconds,
     pages: o.pages,
     completed: o.completed,
+    ...categories,
     tod: o.tod,
     dow: o.dow,
     anchor_day: o.anchor_day,
@@ -116,6 +129,7 @@ export function parseBookStats(raw: unknown): BookStatsSnapshot | null {
     !isCount(o.seconds) ||
     !isCount(o.pages) ||
     typeof o.completed !== 'boolean' ||
+    (o.is_article !== undefined && typeof o.is_article !== 'boolean') ||
     !isCount(o.avg_fwd) ||
     !isCount(o.pace_n) ||
     !isCount(o.eta) ||
@@ -134,6 +148,7 @@ export function parseBookStats(raw: unknown): BookStatsSnapshot | null {
     seconds: o.seconds,
     pages: o.pages,
     completed: o.completed,
+    ...(typeof o.is_article === 'boolean' && { is_article: o.is_article }),
     avg_fwd: o.avg_fwd,
     pace_n: o.pace_n,
     eta: o.eta,
@@ -212,6 +227,9 @@ export interface GlobalStatsSummary {
   seconds: number;
   pages: number;
   completed: number;
+  completed_books?: number;
+  completed_articles?: number;
+  has_articles?: boolean;
   tod: number[];
   dow: number[];
   anchor_day: number;
@@ -238,9 +256,14 @@ export function combineGlobalStats(snapshots: GlobalStatsSnapshot[]): GlobalStat
     sum.seconds += s.seconds;
     sum.pages += s.pages;
     sum.completed += s.completed;
+    if (s.completed_articles !== undefined) {
+      sum.completed_articles = (sum.completed_articles ?? 0) + s.completed_articles;
+      sum.has_articles = !!(sum.has_articles || s.has_articles);
+    }
     for (let i = 0; i < 4; i++) sum.tod[i] += s.tod[i];
     for (let i = 0; i < 7; i++) sum.dow[i] += s.dow[i];
   }
+  if (sum.completed_articles !== undefined) sum.completed_books = sum.completed - sum.completed_articles;
   const { anchorDay, history } = combineHistory(snapshots);
   sum.anchor_day = anchorDay;
   sum.history_b64 = history.toString('base64');
@@ -255,6 +278,7 @@ export interface BookStatsCombined {
   seconds: number;
   pages: number;
   completed: boolean;
+  is_article?: boolean;
   avg_fwd: number;
   start_date: number;
   finished_date: number;
@@ -281,6 +305,7 @@ export function combineBookStats(snapshots: BookStatsSnapshot[]): BookStatsCombi
     out.seconds += s.seconds;
     out.pages += s.pages;
     out.completed = out.completed || s.completed;
+    if (s.is_article !== undefined) out.is_article = !!(out.is_article || s.is_article);
     for (let i = 0; i < 4; i++) out.tod[i] += s.tod[i];
     for (let i = 0; i < 7; i++) out.dow[i] += s.dow[i];
     if (s.pace_n > 0) {

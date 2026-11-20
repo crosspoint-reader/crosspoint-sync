@@ -30,6 +30,35 @@ async function fixture() {
 }
 
 describe('reset-aware reading stats (#80)', () => {
+  it('keeps article classification and inclusive totals through retries, reversal, and mixed devices', async () => {
+    const f = await fixture();
+    const split = (articles: number) => global(3600, {
+      counter_id: A, completed: 4, completed_books: 4 - articles, completed_articles: articles, has_articles: true,
+    });
+    await f.put('counters/global', { ...global(), device_id: 'old-reader', counter_id: B });
+    for (const articles of [0, 1, 1, 0]) {
+      expect((await f.put('counters/global', split(articles))).status).toBe(200);
+      expect((await f.put('counters/books', { device_id: 'reader', items: [book(3600, { counter_id: A, is_article: !!articles })] })).status).toBe(200);
+      expect(await f.get('summary')).toMatchObject({
+        completed: 5, completed_books: 5 - articles, completed_articles: articles, has_articles: true, seconds: 7200,
+      });
+      expect((await f.get(`books/${DOC}`)).combined).toMatchObject({ completed: true, is_article: !!articles });
+    }
+    expect((await f.put('counters/global', { ...split(1), completed_books: 4 })).status).toBe(403);
+    expect((await f.put('counters/books', { device_id: 'reader', items: [book(0, { is_article: 'yes' })] })).status).toBe(403);
+  });
+
+  it('keeps an existing split and type when a legacy sender omits both', async () => {
+    const f = await fixture();
+    const submit = (item: unknown) => f.put('counters/books', { device_id: 'reader', items: [item] });
+    await f.put('counters/global', global(3600, { counter_id: A, completed_books: 0, completed_articles: 1, has_articles: true }));
+    await submit(book(3600, { counter_id: A, is_article: true }));
+    await f.put('counters/global', global(3600, { counter_id: A, completed: 2 }));
+    await submit(book(3600, { counter_id: A }));
+    expect(await f.get('summary')).toMatchObject({ completed: 2, completed_books: 1, completed_articles: 1 });
+    expect((await f.get(`books/${DOC}`)).combined.is_article).toBe(true);
+  });
+
   it('preserves a legacy baseline, adds fresh reading, and keeps retries/restored cards idempotent', async () => {
     const f = await fixture();
     const submit = async (counter: unknown) => expect((await f.put('counters/global', counter)).status).toBe(200);

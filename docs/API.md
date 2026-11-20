@@ -523,6 +523,14 @@ Imported time is never converted into progress-log entries or extra page/sync co
 Unlinking removes imported stats; relinking clears the old import, and changing
 the BookOrbit server/user also clears stale matches, queued exports, and EPUB maps.
 
+Reading type is optional. Article-aware readers include `completed_books`,
+`completed_articles`, and `has_articles` with a global snapshot. The two
+counts add up to the existing `completed` total. Marking an unfinished article
+can set `has_articles` before either completion count changes. Per-document
+snapshots may include the boolean `is_article`. The book response retains the
+type per device and shows an article in the combined view when any reporting
+device classifies its copy that way. Older clients continue to use `completed`.
+
 #### PUT /api/v1/stats/global
 
 The device's `GlobalReadingStats` as JSON:

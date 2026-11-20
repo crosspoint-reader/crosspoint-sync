@@ -36,10 +36,13 @@ function preserveCounters(old: Snapshot, incoming: Snapshot, book: boolean, lega
     seconds: Math.max(old.seconds, incoming.seconds), pages: Math.max(old.pages, incoming.pages),
     tod: maxArray(old.tod, incoming.tod), dow: maxArray(old.dow, incoming.dow) };
   if (book) {
-    if (!legacyUpload) return result;
+    const a = old as BookStatsSnapshot, b = incoming as BookStatsSnapshot;
+    const current = result as BookStatsSnapshot;
+    // Older senders omit the type. Preserve the saved classification on their next upload.
+    current.is_article ??= a.is_article;
+    if (!legacyUpload) return current;
     // Untagged uploads cannot distinguish metadata edits from resets, even once
     // reading resumes. Library completions may have no reading counters at all.
-    const a = old as BookStatsSnapshot, b = incoming as BookStatsSnapshot;
     const start = a.start_date && b.start_date ? Math.min(a.start_date, b.start_date) : a.start_date || b.start_date;
     const finish = Math.max(a.finished_date, b.finished_date);
     return { ...result, completed: a.completed || b.completed, start_date: start, finished_date: finish,
@@ -48,8 +51,16 @@ function preserveCounters(old: Snapshot, incoming: Snapshot, book: boolean, lega
   }
   const a = old as GlobalStatsSnapshot, global = incoming as GlobalStatsSnapshot;
   const history = combineHistory([a, global]);
+  const completed = legacyUpload ? Math.max(a.completed, global.completed) : Number(result.completed);
+  const latest = result as GlobalStatsSnapshot;
+  const articles = latest.completed_articles ?? a.completed_articles;
+  const split = articles === undefined ? {} : {
+    completed_articles: Math.min(completed, articles),
+    completed_books: Math.max(0, completed - articles),
+    has_articles: latest.has_articles === true || a.has_articles === true,
+  };
   return { ...result, anchor_day: history.anchorDay, history_b64: history.history.toString('base64'),
-    completed: legacyUpload ? Math.max(a.completed, global.completed) : result.completed,
+    completed, ...split,
     streak: Math.max(a.streak, global.streak) } as GlobalStatsSnapshot;
 }
 
@@ -78,6 +89,8 @@ export function storeStatsSnapshot(
     db.prepare(`INSERT INTO stats_device_book VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(user_id, device_id, document) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at`)
       .run(userId, deviceId, document, JSON.stringify({ ...snapshot, ...combined,
+        // Reading type is an edit to this device's copy. A retired lifetime must not pin it to Article.
+        is_article: (snapshot as BookStatsSnapshot).is_article ?? combined.is_article,
         pace_n: snapshots.reduce((n, s) => n + s.pace_n, 0) }), now);
   }
 }

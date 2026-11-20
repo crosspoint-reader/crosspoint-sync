@@ -496,3 +496,12 @@ it('pins every year-calendar day to its weekday row', () => {
   const rows = { Mon: '1', Tue: '2', Wed: '3', Thu: '4', Fri: '5', Sat: '6', Sun: '7' }
   for (const el of cells) expect(el.style.gridRow).toBe(rows[el.dataset.tip.slice(0, 3)])
 })
+
+it('shows finished articles after the first mark even without a reading session', () => {
+  const summary = { seconds: 0, sessions: 0, pages: 0, completed: 0, completed_books: 0, completed_articles: 0,
+    current_streak: 0, streak: 0, daily: [], devices: [], tod: [0, 0, 0, 0], dow: Array(7).fill(0) }
+  const { rerender, queryByText, getByText } = render(<Stats session={{}} books={[]} summary={summary} />)
+  expect(queryByText('Articles finished')).toBeNull()
+  rerender(<Stats session={{}} books={[]} summary={{ ...summary, has_articles: true }} />)
+  expect(getByText('Articles finished').parentElement.textContent).toContain('0')
+})

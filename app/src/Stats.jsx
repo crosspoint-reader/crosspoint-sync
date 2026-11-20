@@ -602,7 +602,7 @@ function Finished({ list, titles }) {
   )
 }
 
-function PagesAndBooks({ activity: all, books }) {
+function PagesAndBooks({ activity: all, books, hasArticles }) {
   const titles = new Map(books.map((b) => [b.document, b.title || b.filename || 'Untitled book']))
   // Only books the library shows (metadata-less ones are hidden everywhere unless Settings shows them).
   const shown = all.books.filter((b) => titles.has(b.document))
@@ -612,7 +612,7 @@ function PagesAndBooks({ activity: all, books }) {
   const known = activity.books.filter((b) => b.page_count).length
   const tiles = [
     ['Pages read', activity.pages_total.toLocaleString()],
-    ['Books finished', activity.books.filter(b => b.completed || b.finished_at).length],
+    [hasArticles ? 'Titles finished' : 'Books finished', finished.length],
     ['Reading now', books.filter((b) => b.status === 'reading').length],
     ['Finished this year', finished.filter((b) => b.finished_at && new Date(b.finished_at * 1000).getFullYear() === new Date().getFullYear()).length],
     ['Pages per book', known ? Math.round(activity.books.reduce((n, b) => n + (b.page_count ?? 0), 0) / known) : '-'],
@@ -973,7 +973,7 @@ export default function Stats({ session, tab = '', summary, activity, books, goa
           </button>
         )}
       </div>
-      {activity ? <PagesAndBooks activity={activity} books={books} /> : !activityError && <p className="py-6 text-sm text-stone-500">Loading…</p>}
+      {activity ? <PagesAndBooks activity={activity} books={books} hasArticles={summary?.has_articles} /> : !activityError && <p className="py-6 text-sm text-stone-500">Loading…</p>}
       <WhatYouRead books={books} />
 
       {summary?.bookorbit?.excluded_sessions > 0 && (
@@ -981,7 +981,7 @@ export default function Stats({ session, tab = '', summary, activity, books, goa
           Duplicate BookOrbit session records are counted once. Reading from your other devices is included.
         </p>
       )}
-      {hasTime ? (
+      {hasTime || summary?.has_articles ? (
         <>
           <h2 className="mt-10 font-display text-xl font-semibold text-stone-900">Reading time</h2>
           <Tiles
@@ -997,7 +997,9 @@ export default function Stats({ session, tab = '', summary, activity, books, goa
               ['Time read', duration(summary.seconds)],
               ['Pages turned', summary.pages.toLocaleString()],
               ['Sessions', summary.sessions.toLocaleString()],
-              ['Books finished', books.filter((b) => b.status === 'finished').length],
+              ...(summary.has_articles
+                ? [['Books finished', summary.completed_books], ['Articles finished', summary.completed_articles]]
+                : [['Books finished', books.filter((b) => b.status === 'finished').length]]),
             ]}
           />
         </>
