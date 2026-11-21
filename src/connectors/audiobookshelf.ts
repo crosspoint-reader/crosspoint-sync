@@ -1,5 +1,8 @@
 import { ConnectorOperationError } from './types.js';
-import { cachedEpub, epubPosition, epubXPath, withEpubMap, type TextEpub } from './bookfusion-epub.js';
+import {
+  cachedEpub, epubPosition, epubSpineTexts, epubTextOffset, epubXPath, epubXPathAt, withEpubMap, type TextEpub,
+} from './bookfusion-epub.js';
+import { globalOffset, loadAlignment, msAtOffset, offsetAtMs, spineAt } from '../models/audio-alignment.js';
 import { decideMatch, extractTitleAuthor, type Candidate } from './matching.js';
 import { audioToText, textToAudio } from './spotify.js';
 import { getMatchAnchor } from './store.js';
@@ -237,16 +240,35 @@ function noEpubKey(c: AbsCred, externalId: string): string {
   return `${baseUrl(c.server)}\n${externalId}`;
 }
 
-/** The item's primary EPUB from ABS (`GET /api/items/:id/ebook`), briefly cached (text entries only). */
+/**
+ * The item's EPUB, briefly cached (text entries only). Prefers the primary ebook,
+ * but falls back to the ebook file ABS lists as supplementary - libraries with
+ * "Audiobooks only" set never promote the EPUB to `media.ebookFile`, so the
+ * primary endpoint answers 404 even though the file is right there.
+ */
 function absEpub(http: HttpTransport, c: AbsCred, externalId: string): Promise<TextEpub> {
+  const headers = { authorization: `Bearer ${c.token}` };
+  const itemUrl = `${baseUrl(c.server)}/api/items/${encodeURIComponent(externalId)}`;
   return cachedEpub(['audiobookshelf', baseUrl(c.server), c.token, externalId], async () => {
-    const res = await http(`${baseUrl(c.server)}/api/items/${encodeURIComponent(externalId)}/ebook`, {
-      method: 'GET',
-      headers: { authorization: `Bearer ${c.token}` },
-    });
+    const res = await http(`${itemUrl}/ebook`, { method: 'GET', headers });
+    if (res.status >= 200 && res.status < 300) return res;
+    const item = await http(`${itemUrl}?expanded=1`, { method: 'GET', headers });
+    if (item.status < 200 || item.status >= 300) {
+      throw new ConnectorOperationError(
+        `ABS ebook download failed (${res.status})`, item.status >= 500 || item.status === 429
+      );
+    }
+    const expanded: any = await item.json();
+    const files: any[] = Array.isArray(expanded?.libraryFiles) ? expanded.libraryFiles : [];
+    const ebook = files.find((file: any) =>
+      file?.fileType === 'ebook' && typeof file?.metadata?.filename === 'string' &&
+      /\.epub$/i.test(file.metadata.filename));
+    if (ebook) {
+      return http(`${itemUrl}/file/${encodeURIComponent(String(ebook.ino))}`, { method: 'GET', headers });
+    }
     if (res.status === 404 || res.status === 400) noEpub.set(noEpubKey(c, externalId), Date.now() + NO_EPUB_TTL);
-    if (res.status < 200 || res.status >= 300) throw new Error(`ABS ebook download failed (${res.status})`);
-    return res;
+    // A missing EPUB is permanent for this item; rate limits and outages are not.
+    throw new ConnectorOperationError(`ABS ebook download failed (${res.status})`, res.status >= 500 || res.status === 429);
   });
 }
 
@@ -262,6 +284,44 @@ function knownNoEpub(c: AbsCred, externalId: string): boolean {
 /** Test hook: forget which items were found to have no EPUB. */
 export function clearAbsNoEpubCache(): void {
   noEpub.clear();
+}
+
+export interface AlignmentSource {
+  /** Visible text of each EPUB spine item, in reading order. */
+  spines: string[];
+  /** Audio files in playback order, each fetchable by the transcriber. */
+  files: { url: string; headers: Record<string, string>; durationMs: number }[];
+  durationMs: number;
+}
+
+/**
+ * Everything word-level alignment needs for one item: the EPUB's text and the
+ * ordered audio files (with the auth header, so transcoders can pull them).
+ * Throws a non-retryable error for audio-only or EPUB-less items.
+ */
+export async function absAlignmentSource(
+  cred: Credential, externalId: string, http: HttpTransport
+): Promise<AlignmentSource> {
+  const c = parseCred(cred);
+  if (!c) throw new ConnectorOperationError('bad credential', false, true);
+  const item = await absGet(http, c, `/api/items/${encodeURIComponent(externalId)}?expanded=1`);
+  if (item.status === 401 || item.status === 403) throw new ConnectorOperationError('unauthorized', false, true);
+  if (item.status < 200 || item.status >= 300) {
+    throw new ConnectorOperationError(`Audiobookshelf item request failed (${item.status})`, item.status >= 500);
+  }
+  const audioFiles: any[] = (Array.isArray(item.body?.media?.audioFiles) ? item.body.media.audioFiles : [])
+    .filter((f: any) => f && !f.exclude && (typeof f.ino === 'string' || typeof f.ino === 'number'));
+  if (!audioFiles.length) throw new ConnectorOperationError('item has no audio files', false);
+  const epub = await absEpub(http, c, externalId);
+  const spines = await epubSpineTexts(epub);
+  const headers = { authorization: `Bearer ${c.token}` };
+  const files = audioFiles.map((file: any) => ({
+    url: `${baseUrl(c.server)}/api/items/${encodeURIComponent(externalId)}/file/${encodeURIComponent(String(file.ino))}`,
+    headers,
+    durationMs: Math.round((Number(file.duration) || 0) * 1000),
+  }));
+  const durationMs = Math.round((fetchDurationFrom(item.body?.media) ?? files.reduce((sum, f) => sum + f.durationMs / 1000, 0)) * 1000);
+  return { spines, files, durationMs };
 }
 
 /**
@@ -305,12 +365,27 @@ async function pullProgress(
   if (!pct && hasAudio && typeof p.currentTime === 'number') {
     pct = p.currentTime / p.duration;
   }
-  // "Not the right spot?" calibration: listening % -> reading %.
-  if (hasAudio && ctx) pct = audioToText(pct, getMatchAnchor(ctx.db, ctx.userId, 'audiobookshelf', m.externalId));
+  // Word-level alignment: the listening time maps to an exact ebook position, so
+  // the device can resume on the sentence being narrated, not on a percentage.
+  const alignment = ctx ? loadAlignment(ctx.db, ctx.userId, 'audiobookshelf', m.externalId) : null;
+  let progress: string | undefined;
+  const aligned = hasAudio && alignment && typeof p.currentTime === 'number'
+    ? offsetAtMs(alignment, p.currentTime * 1000)
+    : null;
+  if (hasAudio && alignment && aligned !== null) {
+    // Word-level alignment widens the ebook position beyond a fraction: ABS's
+    // listening time maps straight onto the text the device should open at.
+    const at = spineAt(alignment, aligned);
+    const total = alignment.spineLengths.reduce((sum, n) => sum + n, 0) || 1;
+    pct = Math.max(0, Math.min(1, globalOffset(alignment, at.spine, at.offset) / total));
+    progress = await withEpubMap(ctx!, 'audiobookshelf', m.externalId, () => absEpub(http, c, m.externalId), b => epubXPathAt(b, at.spine, at.offset)).catch(() => undefined);
+  } else if (hasAudio && ctx) {
+    // "Not the right spot?" calibration: listening % -> reading %.
+    pct = audioToText(pct, getMatchAnchor(ctx.db, ctx.userId, 'audiobookshelf', m.externalId));
+  }
   // Ebook-only items are read in ABS's own reader, which records its position
   // as ebookProgress + an ebookLocation CFI rather than `progress`. Items with
   // audio keep the listening position (that is the audiobook<->ebook sync).
-  let progress: string | undefined;
   if (!hasAudio && typeof p.ebookProgress === 'number') {
     pct = p.ebookProgress;
     const cfi = p.ebookLocation;
@@ -349,13 +424,25 @@ async function push(
   // displayed progress if isFinished is absent or true. So we send isFinished
   // ONLY when finishing; otherwise we omit it and let progress/currentTime land.
   const duration = await resolveDuration(http, c, m);
+  const alignment = ctx ? loadAlignment(ctx.db, ctx.userId, 'audiobookshelf', m.externalId) : null;
+  // Word-level alignment: the reader's exact position becomes an exact audio
+  // time, so the audiobook resumes on the word just read instead of on a
+  // percentage of the book.
+  let currentMs: number | null = null;
+  if (alignment && !finished && ev.progress?.startsWith('/body') && !knownNoEpub(c, m.externalId)) {
+    const at = await withEpubMap(ctx!, 'audiobookshelf', m.externalId, () => absEpub(http, c, m.externalId), b => epubTextOffset(b, ev.progress!)).catch(() => null);
+    if (at) currentMs = msAtOffset(alignment, globalOffset(alignment, at.spine, at.offset));
+  }
   // The listening side goes through the calibration; ebookProgress below stays the reading %.
-  const audio = ctx ? textToAudio(pct, getMatchAnchor(ctx.db, ctx.userId, 'audiobookshelf', m.externalId)) : pct;
+  const total = duration ?? (alignment ? alignment.durationMs / 1000 : 0);
+  const audio = currentMs !== null && total > 0
+    ? Math.max(0, Math.min(1, currentMs / 1000 / total))
+    : ctx ? textToAudio(pct, getMatchAnchor(ctx.db, ctx.userId, 'audiobookshelf', m.externalId)) : pct;
   const payload: Record<string, unknown> = { progress: finished ? 1 : audio };
   if (finished) payload.isFinished = true;
-  if (duration) {
-    payload.duration = duration;
-    payload.currentTime = Math.max(0, Math.min(duration, audio * duration));
+  if (duration || currentMs !== null) {
+    payload.duration = duration ?? total;
+    payload.currentTime = currentMs !== null ? currentMs / 1000 : Math.max(0, Math.min(total, audio * total));
   }
 
   // The ebook side of the same progress record. ABS's reader shows ebookProgress

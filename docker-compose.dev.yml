@@ -14,10 +14,28 @@ services:
       REGISTRATION_DISABLED: "false"
       # Set Listen Address so the service is accessible from outside the container
       LISTEN_ADDRESS: "::"
+      # Speech-to-text for word-level Audiobookshelf sync.
+      GROQ_API_KEY: "${GROQ_API_KEY:-}"
+      ASR_PROVIDER: "${ASR_PROVIDER:-}"
+      ASR_URL: "${ASR_URL:-http://aligner:8080}"
       # Behind an HTTPS reverse proxy: block direct access to port 8080,
       # then uncomment this. See README.md for Caddy setup.
       # TRUST_PROXY: "true"
     restart: unless-stopped
 
+  # Local speech-to-text for word-level Audiobookshelf sync (build it with
+  # `docker compose -f docker-compose.dev.yml build aligner`). Optional: without
+  # GROQ_API_KEY and without this service, alignment jobs fail with a clear error.
+  aligner:
+    build: ./aligner
+    volumes:
+      - aligner-models:/models
+    environment:
+      WHISPER_MODEL: "${WHISPER_MODEL:-base}"
+      WHISPER_COMPUTE_TYPE: "${WHISPER_COMPUTE_TYPE:-int8}"
+      WHISPER_LANGUAGE: "${WHISPER_LANGUAGE:-}"
+    restart: unless-stopped
+
 volumes:
   crosspoint-data:
+  aligner-models:

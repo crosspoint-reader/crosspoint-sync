@@ -6,6 +6,8 @@ import { secretsEnabled } from './crypto/secrets.js';
 import { loadSessionSecret } from './auth/session.js';
 import { backfillMasterAccounts } from './routes/auth.js';
 import { startQueueWorker } from './connectors/runner.js';
+import { startAlignWorker } from './connectors/abs-align.js';
+import { asrConfigFromEnv } from './connectors/asr.js';
 import { pollMatched, pollSpotify, startFanInWorker } from './connectors/fanin.js';
 import { autoPause } from './models/pause.js';
 
@@ -31,6 +33,9 @@ if (connectorsEnabled) {
   startFanInWorker(db, 60 * 60_000, (d) => pollMatched(d, 'jellyfin'));
   startFanInWorker(db, 15 * 60_000, (d) => pollMatched(d, 'audiobookshelf'));
   startFanInWorker(db, 60 * 60_000, pollSpotify);
+  // Word-level Audiobookshelf alignment (transcribe audio, match it to the EPUB).
+  // Jobs only fail with a clear message when no transcriber is reachable.
+  startAlignWorker(db, asrConfigFromEnv());
 }
 // Daily: pause books with no progress for each user's auto-pause days (reads also check lazily).
 startFanInWorker(db, 24 * 60 * 60_000, async (d) => autoPause(d));

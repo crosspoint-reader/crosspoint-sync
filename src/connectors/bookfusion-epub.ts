@@ -249,11 +249,16 @@ interface Chapter {
   body: Element;
 }
 
-async function withChapter<T>(
-  epub: Epub,
-  select: (opf: Element, spine: Element, items: Element[]) => number,
-  resolve: (chapter: Chapter) => T
-): Promise<T> {
+interface Package {
+  opfPath: string;
+  opf: Element;
+  spine: Element;
+  spineItems: Element[];
+  read: (path: string) => Buffer;
+  chapterPath: (index: number) => string;
+}
+
+async function withPackage<T>(epub: Epub, resolve: (pkg: Package) => T | Promise<T>): Promise<T> {
   const book = epub instanceof Map ? epub : await textEntries(epub);
   const read = (path: string): Buffer => {
     const data = book.get(path);
@@ -268,61 +273,96 @@ async function withChapter<T>(
   const opf = xml(read(opfPath));
   const spine = child(opf, 'spine');
   const spineItems = elements(spine).filter(e => e.localName === 'itemref');
-  const index = select(opf, spine, spineItems);
-  if (!Number.isSafeInteger(index) || index < 0 || index >= spineItems.length) invalid('chapter out of range');
-  const item = elements(child(opf, 'manifest')).find(
-    e => e.localName === 'item' && e.getAttribute('id') === spineItems[index].getAttribute('idref')
-  ) ?? invalid('spine item missing from manifest');
-  const href = item.getAttribute('href') ?? invalid('chapter path missing');
-  const chapterPath = posix.join(posix.dirname(opfPath), decodeURIComponent(href.split('#')[0]));
-  const html = xml(read(chapterPath), true);
-  const body = child(html, 'body');
-  return resolve({ opf, spine, spineItems, index, html, body });
+  const chapterPath = (index: number): string => {
+    const item = elements(child(opf, 'manifest')).find(
+      e => e.localName === 'item' && e.getAttribute('id') === spineItems[index].getAttribute('idref')
+    ) ?? invalid('spine item missing from manifest');
+    const href = item.getAttribute('href') ?? invalid('chapter path missing');
+    return posix.join(posix.dirname(opfPath), decodeURIComponent(href.split('#')[0]));
+  };
+  return resolve({ opfPath, opf, spine, spineItems, read, chapterPath });
+}
+
+async function withChapter<T>(
+  epub: Epub,
+  select: (opf: Element, spine: Element, items: Element[]) => number,
+  resolve: (chapter: Chapter) => T
+): Promise<T> {
+  return withPackage(epub, ({ read, opf, spine, spineItems, chapterPath }) => {
+    const index = select(opf, spine, spineItems);
+    if (!Number.isSafeInteger(index) || index < 0 || index >= spineItems.length) invalid('chapter out of range');
+    const html = xml(read(chapterPath(index)), true);
+    const body = child(html, 'body');
+    return resolve({ opf, spine, spineItems, index, html, body });
+  });
+}
+
+interface Located {
+  target: Node;
+  /** UTF-16 offset inside `target` when it is a text node. */
+  utf16: number;
+  /** CFI steps from the chapter's <html> down to the target. */
+  docSteps: number[];
+  textStep?: number;
+  cfiOffset: number;
+}
+
+/** Resolve a CrossPoint XPath tail (below `/body/DocFragment[n]/body`) to a node. */
+function locate(html: Element, body: Element, tail: string[]): Located {
+  const docSteps = [2 * (elements(html).indexOf(body) + 1)];
+  let target: Node = body;
+  let utf16 = 0;
+  let textStep: number | undefined;
+  let cfiOffset = 0;
+  for (const [i, part] of tail.entries()) {
+    const textMatch = /^text\(\)(?:\[(\d+)\])?(?:\.(\d+))?$/.exec(part);
+    if (textMatch) {
+      if (i !== tail.length - 1) invalid('text must end the XPath');
+      const nodes = children(target);
+      const selected = nodes.filter(text)[Number(textMatch[1] ?? 1) - 1] ?? invalid('text node missing');
+      const codepointCount = Number(textMatch[2] ?? 0);
+      let count = 0;
+      for (const character of selected.nodeValue ?? '') {
+        if (count === codepointCount) break;
+        utf16 += character.length; // CFI uses UTF-16; CrossPoint XPath offsets count codepoints.
+        count++;
+      }
+      if (!Number.isSafeInteger(codepointCount) || count !== codepointCount) invalid('text offset out of range');
+      textStep = 1;
+      // Comments/CDATA can split text nodes without creating a new CFI text slot.
+      for (const node of nodes) {
+        if (node === selected) break;
+        if (node.nodeType === 1) { textStep += 2; cfiOffset = 0; }
+        else if (text(node)) cfiOffset += node.nodeValue?.length ?? 0;
+      }
+      cfiOffset += utf16;
+      target = selected;
+    } else {
+      const element = /^([\w:.-]+)(?:\[(\d+)\])?$/.exec(part);
+      if (!element) invalid('unsupported XPath step');
+      const siblings = elements(target);
+      const found = siblings.filter(e => e.localName === element[1].split(':').pop())[Number(element[2] ?? 1) - 1];
+      if (!found) invalid('XPath element missing');
+      docSteps.push(2 * (siblings.indexOf(found) + 1));
+      target = found;
+    }
+  }
+  return { target, utf16, docSteps, textStep, cfiOffset };
+}
+
+function xpathTail(xpath: string): RegExpExecArray {
+  const match = /^\/body\/DocFragment(?:\[(\d+)\])?\/body(?:\/(.*))?$/.exec(xpath);
+  if (!match || xpath.length > 4096) invalid('expected a KOReader XPath');
+  return match;
 }
 
 /** Resolve the device's XPath in the actual EPUB, including absolute sibling indices. */
 export async function epubPosition(bytes: Epub, xpath: string): Promise<BookFusionPosition> {
-  const match = /^\/body\/DocFragment(?:\[(\d+)\])?\/body(?:\/(.*))?$/.exec(xpath);
-  if (!match || xpath.length > 4096) invalid('expected a KOReader XPath');
+  const match = xpathTail(xpath);
   return withChapter(bytes, () => Number(match[1] ?? 1) - 1, ({ opf, spine, spineItems, index, html, body }) => {
-    const steps = [2 * (elements(html).indexOf(body) + 1)];
-    let target: Node = body;
-    let offset = 0;
-    let cfiOffset = 0;
-    let textStep: number | undefined;
-    for (const [i, part] of (match[2] ? match[2].split('/') : []).entries()) {
-      const textMatch = /^text\(\)(?:\[(\d+)\])?(?:\.(\d+))?$/.exec(part);
-      if (textMatch) {
-        if (i !== match[2]!.split('/').length - 1) invalid('text must end the XPath');
-        const nodes = children(target);
-        const selected = nodes.filter(text)[Number(textMatch[1] ?? 1) - 1] ?? invalid('text node missing');
-        const codepoints = Number(textMatch[2] ?? 0);
-        let count = 0;
-        for (const character of selected.nodeValue ?? '') {
-          if (count === codepoints) break;
-          offset += character.length; // CFI uses UTF-16; CrossPoint XPath offsets count codepoints.
-          count++;
-        }
-        if (!Number.isSafeInteger(codepoints) || count !== codepoints) invalid('text offset out of range');
-        textStep = 1;
-        // Comments/CDATA can split text nodes without creating a new CFI text slot.
-        for (const node of nodes) {
-          if (node === selected) break;
-          if (node.nodeType === 1) { textStep += 2; cfiOffset = 0; }
-          else if (text(node)) cfiOffset += node.nodeValue?.length ?? 0;
-        }
-        cfiOffset += offset;
-        target = selected;
-      } else {
-        const element = /^([\w:.-]+)(?:\[(\d+)\])?$/.exec(part);
-        if (!element) invalid('unsupported XPath step');
-        const siblings = elements(target);
-        const found = siblings.filter(e => e.localName === element[1].split(':').pop())[Number(element[2] ?? 1) - 1];
-        if (!found) invalid('XPath element missing');
-        steps.push(2 * (siblings.indexOf(found) + 1));
-        target = found;
-      }
-    }
+    const { target, utf16: offset, docSteps: steps, textStep, cfiOffset } = locate(
+      html, body, match[2] ? match[2].split('/') : []
+    );
     let total = 0;
     let before = -1;
     // Iterative traversal avoids a call-stack limit on nested XHTML.
@@ -625,4 +665,92 @@ export async function epubRangeOffsets(
   });
   const range = await epubRangeCfi(bytes, found.spine, found.start, found.end);
   return { ...found, ...range };
+}
+
+interface Segment {
+  /** Codepoint offset of this text node in its spine's text. */
+  start: number;
+  end: number;
+  node: Node;
+}
+
+function codepoints(value: string): number {
+  return Array.from(value).length;
+}
+
+/**
+ * Visible text of one spine item, plus where each text node starts in it.
+ * A space joins adjacent text nodes so markup splitting a word ("Pre<em>bold") 
+ * stays two words; the firmware's own offsets skip NON_VISIBLE subtrees, which
+ * this mirrors so XPath offsets and alignment offsets agree.
+ */
+function spineText(body: Element): { text: string; segments: Segment[] } {
+  const segments: Segment[] = [];
+  let out = '';
+  const visit = (parent: Node): void => {
+    for (const child of children(parent)) {
+      if (child.nodeType === 1) {
+        if (!NON_VISIBLE.has(((child as Element).localName ?? '').toLowerCase())) visit(child);
+        continue;
+      }
+      if (!text(child)) continue;
+      const value = child.nodeValue ?? '';
+      if (!value) continue;
+      if (out && !/\s$/.test(out) && !/^\s/.test(value)) out += ' ';
+      const start = codepoints(out);
+      segments.push({ start, end: start + codepoints(value), node: child });
+      out += value;
+    }
+  };
+  visit(body);
+  return { text: out, segments };
+}
+
+/** Visible text of every spine item, in reading order. */
+export async function epubSpineTexts(bytes: Epub): Promise<string[]> {
+  return withPackage(bytes, ({ read, spineItems, chapterPath }) => {
+    const texts: string[] = [];
+    for (let index = 0; index < spineItems.length; index++) {
+      try {
+        const html = xml(read(chapterPath(index)), true);
+        texts.push(spineText(child(html, 'body')).text);
+      } catch {
+        texts.push(''); // Non-XHTML spine items carry no readable text.
+      }
+    }
+    return texts;
+  });
+}
+
+/** Codepoint offset of a CrossPoint XPath inside its spine item's visible text. */
+export async function epubTextOffset(bytes: Epub, xpath: string): Promise<{ spine: number; offset: number }> {
+  const match = xpathTail(xpath);
+  const spine = Number(match[1] ?? 1) - 1;
+  return withChapter(bytes, () => spine, ({ html, body }) => {
+    const { target, utf16 } = locate(html, body, match[2] ? match[2].split('/') : []);
+    const { segments } = spineText(body);
+    const segment = segments.find(s => s.node === target)
+      ?? segments.find(s => target.nodeType === 1 && target.contains(s.node));
+    if (!segment) return { spine, offset: 0 };
+    return { spine, offset: segment.start + codepoints((target.nodeValue ?? '').slice(0, utf16)) };
+  });
+}
+
+/** CrossPoint XPath for a codepoint offset in a spine item's visible text. */
+export async function epubXPathAt(bytes: Epub, spine: number, offset: number): Promise<string> {
+  return withChapter(bytes, () => spine, ({ body }) => {
+    const { segments } = spineText(body);
+    if (!segments.length) invalid('chapter has no text');
+    const segment = segments.find(s => offset < s.end) ?? segments[segments.length - 1];
+    const node = segment.node;
+    const textIndex = children(node.parentNode!).filter(text).indexOf(node) + 1;
+    const steps: string[] = [];
+    for (let el: Node | null = node.parentNode; el && el !== body; el = el.parentNode) {
+      const element = el as Element;
+      const siblings = elements(el.parentNode!).filter(e => e.localName === element.localName);
+      steps.unshift(`${element.localName}[${siblings.indexOf(element) + 1}]`);
+    }
+    const within = Math.max(0, Math.min(codepoints(node.nodeValue ?? ''), offset - segment.start));
+    return `/body/DocFragment[${spine + 1}]/body/${steps.length ? `${steps.join('/')}/` : ''}text()[${textIndex}].${within}`;
+  });
 }

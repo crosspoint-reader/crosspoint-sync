@@ -8,6 +8,7 @@ import { purgeConnector, queueDepth, queueErrors } from '../../connectors/queue.
 import { backfillConnector } from '../../connectors/fanout.js';
 import { pollConnector, jellyfinFirstSync, spotifyFirstSync } from '../../connectors/fanin.js';
 import { resolveMatch } from '../../connectors/runner.js';
+import { enqueueAlignment } from '../../connectors/abs-align.js';
 import { absTracks } from '../../connectors/audiobookshelf.js';
 import { CLIENT_ID_RE, CLIENT_ID_REJECTED, playWhenDeviceAppears, spotifyPlan, spotifyResume, spotifyTracks } from '../../connectors/spotify.js';
 import {
@@ -1035,6 +1036,7 @@ export function connectorRoutes(
       },
       'manual'
     );
+    enqueueAlignment(db, user.id, conn.id, externalId, document);
     // A manual pick also teaches us the book's title/author (if we lacked it),
     // so metadata-less syncs and other connectors benefit.
     backfillDocumentMeta(db, user.id, document, title, author);

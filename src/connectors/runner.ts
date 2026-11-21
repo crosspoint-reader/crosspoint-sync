@@ -20,6 +20,7 @@ import {
   setMatchNote,
 } from './store.js';
 import { decideMatch, extractTitleAuthor } from './matching.js';
+import { enqueueAlignment } from './abs-align.js';
 import { scheduleMicroblogClippings } from './microblog-clippings.js';
 import {
   ConnectorOperationError,
@@ -106,6 +107,8 @@ export async function resolveMatch(
       freshMatch?.source !== cached?.source || freshMatch?.external_id !== cached?.external_id ||
       freshMatch?.external_edition !== cached?.external_edition || freshMatch?.updated_at !== cached?.updated_at) return null;
   saveMatch(db, userId, connectorId, document, match, match ? 'auto' : 'none');
+  // Newly matched books get queued for word-level alignment (Audiobookshelf only).
+  if (match) enqueueAlignment(db, userId, connectorId, match.externalId, document);
   // A resolved match teaches us the book's title/author; keep it for future
   // metadata-less syncs and other connectors.
   if (match) backfillDocumentMeta(db, userId, document, match.title, match.author);

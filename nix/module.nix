@@ -14,7 +14,6 @@ let
     types
     ;
   cfg = config.services.crosspoint-sync;
-  crosspoint-sync = pkgs.callPackage ./package.nix { };
 
   filename =
     types.addCheck types.str (v: v != "" && !(lib.hasInfix "/" v) && v != "." && v != "..")
@@ -26,6 +25,22 @@ in
 
   options.services.crosspoint-sync = {
     enable = mkEnableOption "Enable crosspoint-sync server";
+
+    package = mkOption {
+      type = types.package;
+      description = "Package providing the crosspoint-sync server";
+      default = pkgs.callPackage ./package.nix { };
+    };
+
+    settings = mkOption {
+      type = types.attrsOf types.str;
+      description = "Extra environment variables, overriding the defaults below (for example ASR_PROVIDER or TRUST_PROXY)";
+      default = { };
+      example = {
+        ASR_PROVIDER = "local";
+        ASR_URL = "http://127.0.0.1:8090";
+      };
+    };
 
     port = mkOption {
       type = types.port;
@@ -87,10 +102,10 @@ in
           if (cfg.tokenEncryptionKeyFile != null) then
             pkgs.writeShellScript "crosspoint-sync-credential-loader" ''
               export TOKEN_ENC_KEY="$(cat "$CREDENTIALS_DIRECTORY/TOKEN_ENC_KEY_FILE")"
-              exec ${lib.getExe crosspoint-sync}
+              exec ${lib.getExe cfg.package}
             ''
           else
-            "${lib.getExe crosspoint-sync}";
+            "${lib.getExe cfg.package}";
         Restart = "on-failure";
 
         User = cfg.user;
@@ -136,7 +151,7 @@ in
         DATABASE_PATH = "/var/lib/crosspoint-sync/${cfg.databaseFile}";
         REGISTRATION_DISABLED = if !cfg.registration then "true" else "false";
         AUTH_RATE_LIMIT_PER_MINUTE = builtins.toString cfg.authRateLimit;
-      };
+      } // cfg.settings;
 
     };
 

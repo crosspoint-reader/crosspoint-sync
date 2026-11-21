@@ -34,7 +34,8 @@ COPY migrations ./migrations
 COPY assets ./assets
 COPY extension ./extension
 COPY package.json ./
-RUN mkdir -p /data && chown node:node /data
+# ffmpeg splits single-file audiobooks that exceed the hosted transcriber's upload cap.
+RUN apk add --no-cache ffmpeg && mkdir -p /data && chown node:node /data
 USER node
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- "http://127.0.0.1:${PORT}$(printf '%s' "$BASE_PATH" | sed 's:/*$::')/healthz" || exit 1
