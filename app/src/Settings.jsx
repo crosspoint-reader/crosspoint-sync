@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import HistoryImport from './HistoryImport.jsx'
+import ReaderStats from './ReaderStats.jsx'
 import MicroblogPosting from './MicroblogPosting.jsx'
 import ReadingGoals from './ReadingGoals.jsx'
 import { openUrl } from '@tauri-apps/plugin-opener'
@@ -9,7 +10,7 @@ import SparkMD5 from 'spark-md5'
 import { api, isApp, setShowUntitled, showUntitled } from './api.js'
 import { setShowCrossPaper, showCrossPaper } from './CrossPaper.jsx'
 import { ActionSheet, Bone, Card, EmptyState, notify, Toggle, useLoad } from './ui.jsx'
-import { saveFile } from './shareCard.js'
+import { saveFile, savedMessage } from './shareCard.js'
 import { useNativeBack } from './tabbar.js'
 
 // Appearance: follow the system, or force light or dark.
@@ -881,12 +882,7 @@ export function AccountTransfer({ session }) {
     setSaved(null)
     try {
       const data = await api.exportAccount(session)
-      const result = await saveFile(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), 'crosspoint-sync-account.json')
-      const filename = result.where.split('/').pop()
-      const ios = isApp && (/iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
-      setSaved(ios
-        ? `Saved ${filename} in the Files app: Browse → On My iPhone/iPad → CrossPoint Sync.`
-        : isApp ? `Saved ${filename} to ${result.where.startsWith('Download/CrossPoint Sync/') ? 'Downloads → CrossPoint Sync' : 'your Downloads folder'}.` : `Downloaded ${filename}. Check your browser’s downloads.`)
+      setSaved(savedMessage(await saveFile(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), 'crosspoint-sync-account.json')))
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
@@ -1174,6 +1170,7 @@ export default function Settings({ session, theme, onSession, onLogout, onSignIn
           <h2 className={section}>Account migration</h2>
           <AccountTransfer session={session} />
           <HistoryImport session={session} />
+          <ReaderStats session={session} />
         </div>
         <div className="lg:col-start-1 lg:row-start-2 lg:min-w-0">
           <h2 className={section}>Public profile</h2>

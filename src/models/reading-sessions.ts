@@ -11,6 +11,10 @@ export interface ReadingSession {
   utc_offset_minutes: number;
 }
 
+// Time zone offset of the per-day sessions in GET /stats/sessions/export. No real zone is UTC+00:01, so a
+// reader that uploads a seeded log back is recognized and its seeds are not stored twice.
+export const SEED_UTC_OFFSET = 1;
+
 export function parseReadingSession(raw: unknown, now: number): ReadingSession | null {
   if (!raw || typeof raw !== 'object') return null;
   const s = raw as ReadingSession;

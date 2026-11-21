@@ -3,6 +3,7 @@ import { withTransaction, type DB } from '../../db/db.js';
 import { kosyncError, type AppEnv } from '../../auth/middleware.js';
 import { isValidDocument } from '../kosync.js';
 import { nowSeconds } from '../../models/sync.js';
+import { SESSIONS_EXPORT_PURPOSE, signSession } from '../../auth/session.js';
 import {
   combineBookStats,
   combineGlobalStats,
@@ -20,7 +21,7 @@ import { resolveDocument, statsAliases, statsDocuments } from '../../models/merg
 import type { HttpTransport } from '../../connectors/types.js';
 import { bookorbitExclusions, readBookorbitStats } from '../../models/bookorbit-stats.js';
 
-import { parseReadingSession } from '../../models/reading-sessions.js';
+import { parseReadingSession, SEED_UTC_OFFSET } from '../../models/reading-sessions.js';
 import { combineReadingStreak } from '../../models/reading-streak.js';
 import { importBookorbitStats } from '../../connectors/bookorbit-stats.js';
 import { seedStatsCounters, storeStatsDays, storeStatsSnapshot } from '../../models/stats-counters.js';
@@ -85,6 +86,14 @@ function bookFilter(language?: string, genre?: string, author?: string) {
 function deviceSince(device: string | undefined, sinceRaw: string | undefined) {
   const since = Number(sinceRaw ?? 0);
   return { deviceId: device || undefined, since: Number.isSafeInteger(since) && since > 0 ? since : 0 };
+}
+
+/** A title cut to the firmware log's 80 bytes without splitting a UTF-8 character. */
+function clipTitle(title: string): string {
+  const bytes = Buffer.from(title);
+  let n = Math.min(bytes.length, 80);
+  while (n < bytes.length && n > 0 && (bytes[n] & 0xc0) === 0x80) n--;
+  return bytes.subarray(0, n).toString();
 }
 
 function tzFrom(raw: string | undefined): number {
@@ -164,14 +173,69 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id,device_id,session_id) DO UPDATE SET
           seconds=MAX(reading_sessions.seconds, excluded.seconds),
           ended_at=MAX(reading_sessions.ended_at, excluded.ended_at)`);
-      for (const s of items) insert.run(userId, deviceId, s.session_id, s.document, s.started_at,
-        s.ended_at, s.seconds, s.utc_offset_minutes, now);
+      // A reader seeded from /stats/sessions/export uploads that history back under its own IDs:
+      // acknowledge it without storing it again.
+      const known = db.prepare(`SELECT 1 FROM reading_sessions WHERE user_id=? AND document=? AND started_at=?
+        AND seconds=? AND NOT (device_id=? AND session_id=?)`);
+      for (const s of items) {
+        if (s.utc_offset_minutes === SEED_UTC_OFFSET ||
+            known.get(userId, s.document, s.started_at, s.seconds, deviceId, s.session_id)) continue;
+        insert.run(userId, deviceId, s.session_id, s.document, s.started_at,
+          s.ended_at, s.seconds, s.utc_offset_minutes, now);
+      }
     });
     for (const document of new Set<string>(items.map((s: any) => resolveDocument(db, userId, s.document)))) {
       void importBookorbitStats(db, userId, http, { document }).catch(() => {});
     }
     return c.json({ until: now, accepted_session_ids: items.map((s: any) => s.session_id) });
   });
+
+  // The account's reading as the firmware's session log (/.crosspoint/reading_sessions.jsonl), so a
+  // reader's on-device stats start from this history. Measured sessions come as they are. Time known only
+  // per day (KOReader imports, other readers' counters, BookOrbit) becomes one session per book and day at
+  // local noon, offset SEED_UTC_OFFSET; the days total what the Stats page shows for each book.
+  app.get('/stats/sessions/export', (c) => {
+    const userId = c.get('user').id;
+    const now = nowSeconds();
+    const resolve = statsAliases(db, userId);
+    const titles = new Map((db.prepare('SELECT document, COALESCE(title, filename) AS title FROM documents WHERE user_id = ?')
+      .all(userId) as { document: string; title: string | null }[]).map((r) => [r.document, r.title]));
+    const titleOf = (d: string) => clipTitle(titles.get(d) ?? titles.get(resolve.get(d) ?? d) ?? '');
+    const lines: { start: number; line: string }[] = [];
+    const add = (doc: string, start: number, secs: number, tz: number) => lines.push({ start,
+      line: JSON.stringify({ doc, start, secs, tz, from: 0, to: 0, title: titleOf(doc) }) });
+
+    const measured = new Map<string, Map<number, number>>(); // canonical book -> day -> seconds
+    for (const s of db.prepare('SELECT document, started_at, seconds, utc_offset_minutes FROM reading_sessions WHERE user_id = ?')
+      .all(userId) as { document: string; started_at: number; seconds: number; utc_offset_minutes: number }[]) {
+      add(s.document, Number(s.started_at), Number(s.seconds), Number(s.utc_offset_minutes));
+      const key = resolve.get(s.document) ?? s.document;
+      const days = measured.get(key) ?? measured.set(key, new Map()).get(key)!;
+      const d = Math.floor((Number(s.started_at) + Number(s.utc_offset_minutes) * 60) / 86400) - EPOCH_DAY;
+      days.set(d, (days.get(d) ?? 0) + Number(s.seconds));
+    }
+    const perDay = new Map<number, number>(); // seeds already on each day, so their starts differ
+    for (const [document, t] of booksFor(userId).time) {
+      for (const [d, seconds] of t.perDay) {
+        const secs = Math.min(seconds - (measured.get(document)?.get(d) ?? 0), 86400);
+        const n = perDay.get(d) ?? 0;
+        const start = (d + EPOCH_DAY) * 86400 + 43200 - SEED_UTC_OFFSET * 60 + n;
+        if (d < 0 || secs < 10 || start + secs > now) continue;
+        perDay.set(d, n + 1);
+        add(document, start, secs, SEED_UTC_OFFSET);
+      }
+    }
+    lines.sort((a, b) => a.start - b.start);
+    c.header('Cache-Control', 'no-store');
+    c.header('Content-Disposition', 'attachment; filename="reading_sessions.jsonl"');
+    return c.body(lines.map((l) => `${l.line}\n`).join(''), 200, { 'Content-Type': 'application/x-ndjson; charset=utf-8' });
+  });
+
+  // The export as a link that works without headers for 10 minutes, relative to the server's base URL:
+  // a reader app can't attach the sync login to a download straight to its SD card.
+  app.get('/stats/sessions/export-link', (c) => c.json({
+    path: `/api/v1/stats/sessions/export?export_token=${signSession(c.get('user').id, 600, process.env, SESSIONS_EXPORT_PURPOSE)}`,
+  }));
 
   // New firmware uses distinct write URLs so older servers cannot silently discard IDs.
   app.on('PUT', ['/stats/global', '/stats/counters/global'], async (c) => {

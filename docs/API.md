@@ -595,6 +595,24 @@ BookOrbit's current client API records these exports as `web` reading sessions.
 Export errors appear with the connector's `queue_errors` and retry in the
 background (or on **Sync now**). Account switches use separate ownership mappings.
 
+#### GET /api/v1/stats/sessions/export
+
+The account's reading history as a CrossPoint reader's session log
+(`/.crosspoint/reading_sessions.jsonl`, JSON Lines), so a reader's on-device
+Reading Stats can start from it. Download it as `reading_sessions.jsonl` and copy it
+to that path on the SD card, or send it from the app (**Settings → Account migration →
+Reading history on your reader**), which merges it with the log already on the reader.
+
+Each line is `{"doc","start","secs","tz","from","to","title"}`, oldest first. Measured
+sessions keep their start, seconds and offset. Time known only as a daily total
+(KOReader imports, other readers' counters, BookOrbit) becomes one session per book
+and local day at noon with `tz` 1, sized so each book's days match the Stats page.
+`from`/`to` are 0 and `path` is omitted.
+
+When the seeded reader uploads the log, `PUT /stats/sessions` acknowledges these
+lines without storing them again: offset 1 marks a seed, and a measured session is
+known by its document, start and seconds.
+
 #### PUT /api/v1/stats/books
 
 Batch (max 20) of per-book `stats_v5` snapshots for one device:

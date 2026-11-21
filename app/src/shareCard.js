@@ -258,6 +258,15 @@ export async function saveFile(blob, name) {
   return { where: name, photos: false }
 }
 
+// Where saveFile put a document, for a status line.
+export function savedMessage({ where }) {
+  const filename = where.split('/').pop()
+  const ios = isApp && (/iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
+  return ios
+    ? `Saved ${filename} in the Files app: Browse → On My iPhone/iPad → CrossPoint Sync.`
+    : isApp ? `Saved ${filename} to ${where.startsWith('Download/CrossPoint Sync/') ? 'Downloads → CrossPoint Sync' : 'your Downloads folder'}.` : `Downloaded ${filename}. Check your browser’s downloads.`
+}
+
 // Compose pages that accept prefilled text. Images can't ride along in a URL, so
 // the card goes on the clipboard first and the user pastes it into the post.
 export const PLATFORMS = [

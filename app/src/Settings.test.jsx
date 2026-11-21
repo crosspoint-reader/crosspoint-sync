@@ -10,7 +10,7 @@ vi.mock('./api.js', () => ({
   cached: { readingGoals: () => null },
   api: { candidates: vi.fn(), searchConnector: vi.fn(), exportAccount: vi.fn(), importAccount: vi.fn(), oauthBegin: vi.fn(), oauthComplete: vi.fn(), connectors: vi.fn(), linkConnector: vi.fn(), setClientId: vi.fn(), removeClientId: vi.fn(), syncConnector: vi.fn(), unlinkConnector: vi.fn(), clearData: vi.fn(), deleteAccount: vi.fn(), autoPause: vi.fn(), setAutoPause: vi.fn(), profile: vi.fn(), setProfile: vi.fn(), setDisplayName: vi.fn(), recoveryToken: vi.fn(() => Promise.resolve({ token: null })), newRecoveryToken: vi.fn() },
 }))
-vi.mock('./shareCard.js', () => ({ saveFile: vi.fn() }))
+vi.mock('./shareCard.js', async (actual) => ({ ...(await actual()), saveFile: vi.fn() }))
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }))
 let deliver = null
 vi.mock('@tauri-apps/plugin-deep-link', () => ({ onOpenUrl: vi.fn(async (fn) => { deliver = fn; return () => (deliver = null) }) }))

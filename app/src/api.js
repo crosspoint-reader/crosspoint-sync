@@ -617,6 +617,16 @@ export const api = {
     const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? 'CrossPaper.epub'
     return new File([await res.blob()], name, { type: 'application/epub+zip' })
   },
+  // Reading history as the reader's own session log (JSON Lines), for seeding its on-device stats.
+  async readerSessions(s) {
+    const res = await http(`${s.server}/api/v1/stats/sessions/export`, {
+      credentials: 'omit',
+      cache: 'no-store',
+      headers: { 'x-auth-user': s.username, 'x-auth-key': s.key },
+    })
+    if (!res.ok) throw new Error((await res.json().catch(() => null))?.message || `Server error ${res.status}`)
+    return res.text()
+  },
   // Connected services (same endpoints as the web dashboard).
   connectors: (s) => call(s, '/api/v1/connectors'),
   linkConnector: (s, id, credential) => call(s, `/api/v1/connectors/${id}`, { method: 'PUT', body: JSON.stringify({ credential }) }),

@@ -92,7 +92,7 @@ describe('device session ingestion',()=>{
       expect((await f.submit([record,{...item,session_id:item.session_id==='session1'?'other':item.session_id}])).status).toBe(403);
     expect((f.db.prepare('SELECT COUNT(*) n FROM reading_sessions').get() as any).n).toBe(0);
     expect((await f.submit([record,record])).status).toBe(403);
-    await f.submit(); await f.submit([record],'reader2');
+    await f.submit(); await f.submit([{...record,started_at:record.started_at+1,ended_at:record.ended_at+1}],'reader2');
     const other=await registerUser(f.app);
     expect((await f.app.request('/api/v1/stats/sessions',{method:'PUT',headers:other.headers,body:JSON.stringify({device_id:'reader1',items:[record]})})).status).toBe(200);
     expect((f.db.prepare('SELECT COUNT(*) n FROM reading_sessions').get() as any).n).toBe(3);

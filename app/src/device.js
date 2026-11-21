@@ -112,6 +112,6 @@ export async function uploadTo(base, path, data) {
 
 export async function readText(base, path) {
   const res = await http(`${base}/download?path=${encodeURIComponent(path)}`, { signal: AbortSignal.timeout(8000) })
-  if (!res.ok) throw new Error(`Couldn't read ${path}`)
+  if (!res.ok) throw Object.assign(new Error(`Couldn't read ${path}`), { status: res.status })
   return res.text()
 }

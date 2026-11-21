@@ -58,20 +58,26 @@ function b64url(buf: Buffer): string {
   return buf.toString('base64url');
 }
 
+// Purpose of the tokens in a GET /stats/sessions/export link: they sign a sync user's id, and a
+// purpose-signed token never passes as a session cookie (or the reverse).
+export const SESSIONS_EXPORT_PURPOSE = 'sessions-export';
+
 export function signSession(
   userId: number,
   ttlSeconds = DEFAULT_TTL_SECONDS,
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  purpose = ''
 ): string {
   const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
   const payload = b64url(Buffer.from(JSON.stringify({ uid: userId, exp })));
-  const sig = b64url(crypto.createHmac('sha256', sessionSecret(env)).update(payload).digest());
+  const sig = b64url(crypto.createHmac('sha256', sessionSecret(env)).update(purpose ? `${purpose}.${payload}` : payload).digest());
   return `${payload}.${sig}`;
 }
 
 export function verifySession(
   token: string | undefined,
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  purpose = ''
 ): { uid: number } | null {
   if (!token) return null;
   const dot = token.indexOf('.');
@@ -79,7 +85,7 @@ export function verifySession(
   const payload = token.slice(0, dot);
   const sig = token.slice(dot + 1);
   const expected = b64url(
-    crypto.createHmac('sha256', sessionSecret(env)).update(payload).digest()
+    crypto.createHmac('sha256', sessionSecret(env)).update(purpose ? `${purpose}.${payload}` : payload).digest()
   );
   const a = Buffer.from(sig);
   const b = Buffer.from(expected);

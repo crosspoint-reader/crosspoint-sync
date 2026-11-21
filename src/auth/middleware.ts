@@ -2,7 +2,7 @@ import type { Context, MiddlewareHandler } from 'hono';
 import { getCookie } from 'hono/cookie';
 import type { DB } from '../db/db.js';
 import { md5Hex, verifyKey } from './password.js';
-import { SESSION_COOKIE, verifySession } from './session.js';
+import { SESSION_COOKIE, SESSIONS_EXPORT_PURPOSE, verifySession } from './session.js';
 
 export interface AuthedUser {
   id: number;
@@ -127,8 +127,19 @@ export function sessionOrKeyAuth(db: DB): MiddlewareHandler<AppEnv> {
   const getKosyncForAccount = db.prepare(
     'SELECT id, username FROM users WHERE account_id = ?'
   );
+  const getUser = db.prepare('SELECT id, username FROM users WHERE id = ?');
   return async (c, next) => {
     c.header('Cache-Control', 'no-store');
+    // A link from GET /stats/sessions/export-link: readers download it to the SD card with no headers.
+    const exportToken = c.req.query('export_token');
+    if (exportToken !== undefined) {
+      const token = c.req.method === 'GET' && c.req.path.endsWith('/stats/sessions/export')
+        ? verifySession(exportToken, process.env, SESSIONS_EXPORT_PURPOSE) : null;
+      const user = token && (getUser.get(token.uid) as { id: number; username: string } | undefined);
+      if (!user) return kosyncError(c, 401, 2001, 'Unauthorized');
+      c.set('user', user);
+      return next();
+    }
     // An app/device explicitly selects its sync account. A browser cookie left
     // by the web dashboard must not override that choice (or mask a bad key).
     if (c.req.header('x-auth-user') !== undefined || c.req.header('x-auth-key') !== undefined) {
