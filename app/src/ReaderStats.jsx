@@ -72,7 +72,7 @@ export default function ReaderStats({ session }) {
   return (
     <Card className="mt-3 space-y-3 p-4">
       <h3 className="font-semibold text-stone-900">Reading history on your reader</h3>
-      <p className="text-sm text-stone-500">Start your reader’s Reading Stats from the history on this account: sessions from your other readers, KOReader imports and linked services. Time known only as a daily total shows as one session at noon.</p>
+      <p className="text-sm text-stone-500">Start your reader’s Reading Stats from the history on this account: sessions from your other readers, KOReader imports and linked services. Time known only as a daily total shows as one session at noon, and days synced without any reading time get time estimated from their pages.</p>
       {isApp
         ? <p className="text-sm text-stone-500">To send it, open File Transfer on your reader and keep this phone on the same Wi-Fi. Sessions already on the reader are kept and not added twice.</p>
         : <p className="text-sm text-stone-500">Send it from the CrossPoint Sync app, or download the file and copy it to your reader’s SD card as <span className="font-mono">{LOG_PATH}</span>. The .crosspoint folder is hidden: show hidden files on your computer. If that file already exists, run Sync Progress on the reader first, then replace it.</p>}

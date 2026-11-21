@@ -619,7 +619,7 @@ export const api = {
   },
   // Reading history as the reader's own session log (JSON Lines), for seeding its on-device stats.
   async readerSessions(s) {
-    const res = await http(`${s.server}/api/v1/stats/sessions/export`, {
+    const res = await http(`${s.server}/api/v1/stats/sessions/export?tz=${new Date().getTimezoneOffset()}`, {
       credentials: 'omit',
       cache: 'no-store',
       headers: { 'x-auth-user': s.username, 'x-auth-key': s.key },

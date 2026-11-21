@@ -32,6 +32,9 @@ const MAX_ACTIVITY_BOOKS = 50;
 const DEFAULT_BOOK_PAGE = 50;
 const MAX_BOOK_PAGE = 200;
 const MAX_INFO_LOOKUPS = 25;
+// Estimated reading time per print page (about 300 words at 240 words a minute) for days known only
+// from progress syncs, in the session log export.
+const SECONDS_PER_PAGE = 75;
 
 const EPOCH_DAY = Date.UTC(2000, 0, 1) / 86400000;
 const DEFAULT_OVERVIEW_DAYS = 365;
@@ -193,49 +196,72 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
   // The account's reading as the firmware's session log (/.crosspoint/reading_sessions.jsonl), so a
   // reader's on-device stats start from this history. Measured sessions come as they are. Time known only
   // per day (KOReader imports, other readers' counters, BookOrbit) becomes one session per book and day at
-  // local noon, offset SEED_UTC_OFFSET; the days total what the Stats page shows for each book.
-  app.get('/stats/sessions/export', (c) => {
-    const userId = c.get('user').id;
+  // local noon, offset SEED_UTC_OFFSET; the days total what the Stats page shows for each book. Days known
+  // only from progress syncs get their real progress and time estimated from print pages.
+  function sessionLog(userId: number, tz: number) {
     const now = nowSeconds();
     const resolve = statsAliases(db, userId);
+    const canonical = (d: string) => resolve.get(d) ?? d;
     const titles = new Map((db.prepare('SELECT document, COALESCE(title, filename) AS title FROM documents WHERE user_id = ?')
       .all(userId) as { document: string; title: string | null }[]).map((r) => [r.document, r.title]));
-    const titleOf = (d: string) => clipTitle(titles.get(d) ?? titles.get(resolve.get(d) ?? d) ?? '');
+    const titleOf = (d: string) => clipTitle(titles.get(d) ?? titles.get(canonical(d)) ?? '');
     const lines: { start: number; line: string }[] = [];
-    const add = (doc: string, start: number, secs: number, tz: number) => lines.push({ start,
-      line: JSON.stringify({ doc, start, secs, tz, from: 0, to: 0, title: titleOf(doc) }) });
+    const add = (doc: string, start: number, secs: number, tz: number, from = 0, to = 0) => lines.push({ start,
+      line: JSON.stringify({ doc, start, secs, tz, from, to, title: titleOf(doc) }) });
 
-    const measured = new Map<string, Map<number, number>>(); // canonical book -> day -> seconds
+    const timed = new Map<string, Map<number, number>>(); // canonical book -> day -> seconds measured
     for (const s of db.prepare('SELECT document, started_at, seconds, utc_offset_minutes FROM reading_sessions WHERE user_id = ?')
       .all(userId) as { document: string; started_at: number; seconds: number; utc_offset_minutes: number }[]) {
       add(s.document, Number(s.started_at), Number(s.seconds), Number(s.utc_offset_minutes));
-      const key = resolve.get(s.document) ?? s.document;
-      const days = measured.get(key) ?? measured.set(key, new Map()).get(key)!;
+      const key = canonical(s.document);
+      const days = timed.get(key) ?? timed.set(key, new Map()).get(key)!;
       const d = Math.floor((Number(s.started_at) + Number(s.utc_offset_minutes) * 60) / 86400) - EPOCH_DAY;
       days.set(d, (days.get(d) ?? 0) + Number(s.seconds));
     }
     const perDay = new Map<number, number>(); // seeds already on each day, so their starts differ
-    for (const [document, t] of booksFor(userId).time) {
-      for (const [d, seconds] of t.perDay) {
-        const secs = Math.min(seconds - (measured.get(document)?.get(d) ?? 0), 86400);
-        const n = perDay.get(d) ?? 0;
-        const start = (d + EPOCH_DAY) * 86400 + 43200 - SEED_UTC_OFFSET * 60 + n;
-        if (d < 0 || secs < 10 || start + secs > now) continue;
-        perDay.set(d, n + 1);
-        add(document, start, secs, SEED_UTC_OFFSET);
+    const seed = (document: string, d: number, secs: number, from = 0, to = 0) => {
+      const n = perDay.get(d) ?? 0;
+      const start = (d + EPOCH_DAY) * 86400 + 43200 - SEED_UTC_OFFSET * 60 + n;
+      if (d < 0 || secs < 10 || start + secs > now) return false;
+      perDay.set(d, n + 1);
+      add(document, start, secs, SEED_UTC_OFFSET, from, to);
+      return true;
+    };
+    const books = booksFor(userId).time;
+    for (const [document, t] of books) {
+      for (const [d, seconds] of t.perDay) seed(document, d, Math.min(seconds - (timed.get(document)?.get(d) ?? 0), 86400), 0, 0);
+    }
+    let estimated = false;
+    const bp = (p: number) => Math.round(Math.min(Math.max(p, 0), 1) * 10000);
+    for (const day of readingActivity(db, userId, tz).days) {
+      const d = dayNumber(day.day);
+      for (const b of day.books) {
+        const document = canonical(b.document);
+        if (timed.get(document)?.has(d) || books.get(document)?.perDay.has(d)) continue;
+        const secs = Math.min(Math.round((b.pages ?? 0) * SECONDS_PER_PAGE), 86400);
+        if (seed(document, d, secs, bp(b.from ?? 0), bp(b.to ?? 0))) estimated = true;
       }
     }
     lines.sort((a, b) => a.start - b.start);
+    return { text: lines.map((l) => `${l.line}\n`).join(''), sessions: lines.length, estimated };
+  }
+
+  app.get('/stats/sessions/export', (c) => {
     c.header('Cache-Control', 'no-store');
     c.header('Content-Disposition', 'attachment; filename="reading_sessions.jsonl"');
-    return c.body(lines.map((l) => `${l.line}\n`).join(''), 200, { 'Content-Type': 'application/x-ndjson; charset=utf-8' });
+    return c.body(sessionLog(c.get('user').id, tzFrom(c.req.query('tz'))).text, 200,
+      { 'Content-Type': 'application/x-ndjson; charset=utf-8' });
   });
 
   // The export as a link that works without headers for 10 minutes, relative to the server's base URL:
-  // a reader app can't attach the sync login to a download straight to its SD card.
-  app.get('/stats/sessions/export-link', (c) => c.json({
-    path: `/api/v1/stats/sessions/export?export_token=${signSession(c.get('user').id, 600, process.env, SESSIONS_EXPORT_PURPOSE)}`,
-  }));
+  // a reader app can't attach the sync login to a download straight to its SD card. `sessions` 0 means
+  // there is nothing to import (readers refuse an empty download); `estimated` that some time is estimated.
+  app.get('/stats/sessions/export-link', (c) => {
+    const tz = tzFrom(c.req.query('tz'));
+    const { sessions, estimated } = sessionLog(c.get('user').id, tz);
+    const token = signSession(c.get('user').id, 600, process.env, SESSIONS_EXPORT_PURPOSE);
+    return c.json({ path: `/api/v1/stats/sessions/export?tz=${tz}&export_token=${token}`, sessions, estimated });
+  });
 
   // New firmware uses distinct write URLs so older servers cannot silently discard IDs.
   app.on('PUT', ['/stats/global', '/stats/counters/global'], async (c) => {

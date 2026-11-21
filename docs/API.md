@@ -607,7 +607,20 @@ Each line is `{"doc","start","secs","tz","from","to","title"}`, oldest first. Me
 sessions keep their start, seconds and offset. Time known only as a daily total
 (KOReader imports, other readers' counters, BookOrbit) becomes one session per book
 and local day at noon with `tz` 1, sized so each book's days match the Stats page.
-`from`/`to` are 0 and `path` is omitted.
+Days known only from progress syncs (no reading time from any source) also become
+one such session, with that day's real progress in `from`/`to` (basis points) and
+time estimated at 75 seconds per print page. Elsewhere `from`/`to` are 0, and `path`
+is omitted. `?tz=` (as JavaScript's `getTimezoneOffset()`) dates those days in the
+reader's zone.
+
+#### GET /api/v1/stats/sessions/export-link
+
+Returns `{"path":"/api/v1/stats/sessions/export?tz=300&export_token=…","sessions":412,"estimated":true}`
+for readers that download straight to the SD card and cannot send headers. Append
+`path` to the server's base URL; its token opens only that export and expires after
+10 minutes. `sessions` 0 means there is nothing to import, and `estimated` that some
+time was estimated from pages. Pass the same `?tz=`. Like any kosync request, the
+key may be the password itself.
 
 When the seeded reader uploads the log, `PUT /stats/sessions` acknowledges these
 lines without storing them again: offset 1 marks a seed, and a measured session is
