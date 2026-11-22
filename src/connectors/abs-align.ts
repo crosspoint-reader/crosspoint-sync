@@ -78,6 +78,18 @@ export function enqueueMissing(db: DB, now = Date.now()): void {
   }
 }
 
+/**
+ * Requeue jobs a restart interrupted. `claim` already committed the row as
+ * `running`, and `enqueueMissing` never revisits a book that has any job row, so
+ * without this an interrupted transcription is never attempted again.
+ */
+export function recoverRunning(db: DB, now = Date.now()): void {
+  const at = Math.floor(now / 1000);
+  db.prepare(
+    `UPDATE audio_align_jobs SET status = 'pending', next_try_at = ?, updated_at = ? WHERE status = 'running'`
+  ).run(at, at);
+}
+
 function claim(db: DB, now = Date.now()): JobRow | null {
   const job = db.prepare(
     `SELECT user_id, connector_id, external_id, document, attempts FROM audio_align_jobs
@@ -101,6 +113,15 @@ export async function runAlignmentJob(
 ): Promise<void> {
   const account = getAccount(db, job.user_id, job.connector_id);
   if (!account) throw new Error(`${job.connector_id} account is no longer linked`);
+  // A book takes hours to transcribe: re-check the link between files so an
+  // unlink or re-link stops the work instead of paying for the old account and
+  // storing a mapping for a credential that no longer exists.
+  const unchanged = (): void => {
+    const row = getAccount(db, job.user_id, job.connector_id);
+    if (!row || !row.enabled || row.cred_enc !== account.cred_enc) {
+      throw new ConnectorOperationError(`${job.connector_id} account changed during alignment`, false);
+    }
+  };
   const source = await absAlignmentSource(decryptCredential(account, db), job.external_id, http);
   const progress = db.prepare(
     `UPDATE audio_align_jobs SET files_total = ?, files_done = ?, updated_at = ?
@@ -111,6 +132,7 @@ export async function runAlignmentJob(
   const words: TranscriptWord[] = [];
   let startMs = 0;
   for (const [index, file] of source.files.entries()) {
+    unchanged();
     const spoken = await transcribe(config, file, fetchImpl);
     for (const word of spoken) {
       words.push({ word: word.word, startMs: startMs + word.startMs, endMs: startMs + word.endMs });
@@ -121,6 +143,7 @@ export async function runAlignmentJob(
   }
 
   const alignment = alignTranscript(source.spines.join(''), words);
+  unchanged();
   saveAlignment(db, job.user_id, job.connector_id, job.external_id, job.document, {
     ...alignment,
     spineLengths: source.spines.map(text => Array.from(text).length),
@@ -149,6 +172,28 @@ function finish(db: DB, job: JobRow, error?: unknown, retryable = true): void {
     attempts, now + backoff, message.slice(0, 500), now,
     job.user_id, job.connector_id, job.external_id
   );
+}
+
+/**
+ * Say so once at startup when nothing can transcribe, rather than letting each
+ * queued book fail its way through the backoff schedule.
+ */
+async function checkTranscriber(config: AsrConfig): Promise<void> {
+  const warn = (msg: string, extra: Record<string, unknown> = {}): void => {
+    console.warn(JSON.stringify({ msg, provider: config.provider, ...extra }));
+  };
+  if (config.provider === 'groq') {
+    if (!config.apiKey) warn('word-level alignment cannot run: GROQ_API_KEY is not set');
+    return;
+  }
+  try {
+    const res = await fetch(`${config.url}/healthz`, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+  } catch (error) {
+    warn('word-level alignment cannot run: no local transcriber answers; set GROQ_API_KEY or run the aligner sidecar', {
+      url: config.url, error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 /**
@@ -184,6 +229,8 @@ export function startAlignWorker(
       running = false;
     }
   };
+  void checkTranscriber(config);
+  recoverRunning(db);
   void enqueueMissing(db);
   void tick();
   setInterval(() => void tick(), intervalMs).unref();

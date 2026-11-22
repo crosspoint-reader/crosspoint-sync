@@ -307,13 +307,16 @@ export async function absAlignmentSource(
   const item = await absGet(http, c, `/api/items/${encodeURIComponent(externalId)}?expanded=1`);
   if (item.status === 401 || item.status === 403) throw new ConnectorOperationError('unauthorized', false, true);
   if (item.status < 200 || item.status >= 300) {
-    throw new ConnectorOperationError(`Audiobookshelf item request failed (${item.status})`, item.status >= 500);
+    throw new ConnectorOperationError(`Audiobookshelf item request failed (${item.status})`, item.status === 429 || item.status >= 500);
   }
   const audioFiles: any[] = (Array.isArray(item.body?.media?.audioFiles) ? item.body.media.audioFiles : [])
     .filter((f: any) => f && !f.exclude && (typeof f.ino === 'string' || typeof f.ino === 'number'));
   if (!audioFiles.length) throw new ConnectorOperationError('item has no audio files', false);
   const epub = await absEpub(http, c, externalId);
   const spines = await epubSpineTexts(epub);
+  if (!spines.some(text => text.trim())) {
+    throw new ConnectorOperationError('EPUB has no extractable text', false);
+  }
   const headers = { authorization: `Bearer ${c.token}` };
   const files = audioFiles.map((file: any) => ({
     url: `${baseUrl(c.server)}/api/items/${encodeURIComponent(externalId)}/file/${encodeURIComponent(String(file.ino))}`,
@@ -367,7 +370,12 @@ async function pullProgress(
   }
   // Word-level alignment: the listening time maps to an exact ebook position, so
   // the device can resume on the sentence being narrated, not on a percentage.
-  const alignment = ctx ? loadAlignment(ctx.db, ctx.userId, 'audiobookshelf', m.externalId) : null;
+  // An explicit calibration outranks a generated alignment, and a finished
+  // update must stay finished however early the saved position sits.
+  const anchor = ctx ? getMatchAnchor(ctx.db, ctx.userId, 'audiobookshelf', m.externalId) : null;
+  const alignment = ctx && !anchor && !p.isFinished
+    ? loadAlignment(ctx.db, ctx.userId, 'audiobookshelf', m.externalId)
+    : null;
   let progress: string | undefined;
   const aligned = hasAudio && alignment && typeof p.currentTime === 'number'
     ? offsetAtMs(alignment, p.currentTime * 1000)
@@ -381,7 +389,7 @@ async function pullProgress(
     progress = await withEpubMap(ctx!, 'audiobookshelf', m.externalId, () => absEpub(http, c, m.externalId), b => epubXPathAt(b, at.spine, at.offset)).catch(() => undefined);
   } else if (hasAudio && ctx) {
     // "Not the right spot?" calibration: listening % -> reading %.
-    pct = audioToText(pct, getMatchAnchor(ctx.db, ctx.userId, 'audiobookshelf', m.externalId));
+    pct = audioToText(pct, anchor);
   }
   // Ebook-only items are read in ABS's own reader, which records its position
   // as ebookProgress + an ebookLocation CFI rather than `progress`. Items with
@@ -424,7 +432,9 @@ async function push(
   // displayed progress if isFinished is absent or true. So we send isFinished
   // ONLY when finishing; otherwise we omit it and let progress/currentTime land.
   const duration = await resolveDuration(http, c, m);
-  const alignment = ctx ? loadAlignment(ctx.db, ctx.userId, 'audiobookshelf', m.externalId) : null;
+  const anchor = ctx ? getMatchAnchor(ctx.db, ctx.userId, 'audiobookshelf', m.externalId) : null;
+  // A user's "not the right spot?" correction outranks a generated alignment.
+  const alignment = ctx && !anchor ? loadAlignment(ctx.db, ctx.userId, 'audiobookshelf', m.externalId) : null;
   // Word-level alignment: the reader's exact position becomes an exact audio
   // time, so the audiobook resumes on the word just read instead of on a
   // percentage of the book.
@@ -437,7 +447,7 @@ async function push(
   const total = duration ?? (alignment ? alignment.durationMs / 1000 : 0);
   const audio = currentMs !== null && total > 0
     ? Math.max(0, Math.min(1, currentMs / 1000 / total))
-    : ctx ? textToAudio(pct, getMatchAnchor(ctx.db, ctx.userId, 'audiobookshelf', m.externalId)) : pct;
+    : ctx ? textToAudio(pct, anchor) : pct;
   const payload: Record<string, unknown> = { progress: finished ? 1 : audio };
   if (finished) payload.isFinished = true;
   if (duration || currentMs !== null) {

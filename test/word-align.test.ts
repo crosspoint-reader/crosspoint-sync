@@ -42,6 +42,18 @@ describe('alignTranscript', () => {
     expect(Math.abs(back! - offset)).toBeLessThan(60); // one word either side
   });
 
+  it('tokenizes contractions and punctuation the way the book does', () => {
+    // The book side splits on non-alphanumerics ("don't" is two tokens); ASR
+    // output arrives with the punctuation attached.
+    const book = "Don't stop, well-known author: it's fine now";
+    const words = ["Don't", 'stop,', 'well-known', 'author:', "it's", 'fine.', 'now']
+      .map((word, i) => ({ word, startMs: i * 500, endMs: i * 500 + 500 }));
+    const alignment = alignTranscript(book, words);
+    // 10 book tokens, so at most 7 anchors: no punctuation match would be 0.
+    expect(alignment.coverage).toBeGreaterThan(0.5);
+    expect(msAtOffset(alignment, book.indexOf('fine'))).toBeGreaterThanOrEqual(2_000);
+  });
+
   it('reports zero coverage and a linear fallback when nothing matches', () => {
     const alignment = alignTranscript(BOOK, [
       { word: 'completely', startMs: 0, endMs: 1000 },

@@ -259,7 +259,15 @@ word-level offset ↔ audio-time map. After that:
   EPUB xpath, so the reader opens on the sentence being narrated
 
 Books without an alignment keep the old percentage behaviour, so nothing breaks
-while a job is still running (a book takes minutes and jobs run one at a time).
+while a job is still running. Jobs run one at a time and take about as long as
+the audio: around a day on a small CPU box with the local aligner, or a few
+minutes on Groq.
+
+**Setting `GROQ_API_KEY` starts charging you:** it switches the default provider
+from `local` to `groq`, and every already-matched audiobook queues for
+transcription - a few dollars per book, across the whole library. To keep it
+local, set `ASR_PROVIDER=local` and run the aligner before adding the key; to
+keep it off, leave the key unset and don't run the aligner.
 
 Pick a transcriber:
 

@@ -44,8 +44,14 @@ export function asrConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AsrConfi
     url: (env.ASR_URL ?? 'http://aligner:8080').replace(/\/+$/, ''),
     apiKey,
     model: env.ASR_MODEL ?? 'whisper-large-v3',
-    maxBytes: Number(env.ASR_MAX_BYTES ?? GROQ_MAX_BYTES),
+    maxBytes: positiveNumber(env.ASR_MAX_BYTES, GROQ_MAX_BYTES),
   };
+}
+
+/** `Number('')` is 0 and `Number('abc')` is NaN: both would break chunking. */
+function positiveNumber(raw: string | undefined, fallback: number): number {
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 export type Fetch = typeof fetch;
@@ -74,7 +80,10 @@ async function transcribeLocal(
   if (!response.ok) {
     throw new Error(`aligner failed (${response.status}): ${(await response.text()).slice(0, 500)}`);
   }
-  const body = (await response.json()) as { words?: { word?: string; start_ms?: number; end_ms?: number }[] };
+  const body = (await response.json()) as { words?: { word?: string; start_ms?: number; end_ms?: number }[]; error?: string };
+  // The aligner streams its result so long jobs keep the connection alive, so a
+  // failure after the first byte arrives as a 200 with an `error` field.
+  if (body.error) throw new Error(`aligner failed: ${body.error}`);
   return (body.words ?? [])
     .map(w => ({ word: w.word ?? '', startMs: Number(w.start_ms) || 0, endMs: Number(w.end_ms) || 0 }))
     .filter(w => w.word && w.endMs > w.startMs);

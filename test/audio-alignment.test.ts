@@ -2,7 +2,7 @@ import { crc32 } from 'node:zlib';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { DOC, makeTestApp, registerUser } from './helpers.js';
 import { audiobookshelfConnector } from '../src/connectors/audiobookshelf.js';
-import { enqueueAlignment, enqueueMissing, runAlignmentJob } from '../src/connectors/abs-align.js';
+import { enqueueAlignment, enqueueMissing, recoverRunning, runAlignmentJob } from '../src/connectors/abs-align.js';
 import { saveMatch, upsertAccount } from '../src/connectors/store.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
 import { loadAlignment, msAtOffset, saveAlignment } from '../src/models/audio-alignment.js';
@@ -172,4 +172,53 @@ it('aligns transcribed audio with the EPUB and seeks the audiobook to the reader
   expect(patches.at(-1)!.currentTime).toBeGreaterThan(11.2);
   expect(patches.at(-1)!.currentTime).toBeLessThanOrEqual(12.8);
   expect(patches.at(-1)!.ebookLocation).toMatch(/^epubcfi\(/);
+});
+
+it('requeues a job the previous process left running', async () => {
+  const { app, db } = makeTestApp();
+  const { username } = await registerUser(app);
+  const { id } = db.prepare('SELECT id FROM users WHERE username=?').get(username) as { id: number };
+  saveMatch(db, id, 'audiobookshelf', DOC, { externalId: 'li_9', externalEdition: '20', confidence: 1 }, 'manual');
+  enqueueMissing(db);
+  // A crash or SIGTERM after claim() leaves the row `running` for good.
+  db.prepare("UPDATE audio_align_jobs SET status = 'running'").run();
+  recoverRunning(db);
+  expect(db.prepare('SELECT status FROM audio_align_jobs').get()).toEqual({ status: 'pending' });
+});
+
+it('stops when the account is unlinked mid-transcription', async () => {
+  const http: HttpTransport = async (url) => {
+    if (url.endsWith('/ebook')) return { status: 200, json: async () => null, text: async () => '', body: new Blob([epub()]).stream() } as any;
+    if (url.includes('/api/items/li_1')) return ok(ITEM);
+    throw new Error(`Unexpected request: ${url}`);
+  };
+  const { app, db } = makeTestApp();
+  const { username } = await registerUser(app);
+  const { id } = db.prepare('SELECT id FROM users WHERE username=?').get(username) as { id: number };
+  upsertAccount(db, id, 'audiobookshelf', { server: 'abs.test', token: 'k' }, null);
+  let calls = 0;
+  // The user unlinks while the first file is being transcribed.
+  const fetchImpl = (async () => {
+    calls++;
+    db.prepare("DELETE FROM connector_accounts WHERE user_id=? AND connector_id='audiobookshelf'").run(id);
+    return new Response(JSON.stringify({ words: [] }), { status: 200 });
+  }) as typeof fetch;
+  const job = { user_id: id, connector_id: 'audiobookshelf', external_id: 'li_1', document: DOC, attempts: 0 };
+  const error = await runAlignmentJob(db, { provider: 'local', url: 'http://aligner', apiKey: '', model: 'm', maxBytes: 1e9 }, job, http, fetchImpl)
+    .then(() => null, (e: unknown) => e);
+  expect(calls).toBe(1);
+  expect(error).toMatchObject({ name: 'ConnectorOperationError', retryable: false });
+  expect(loadAlignment(db, id, 'audiobookshelf', 'li_1')).toBeNull();
+});
+
+it('retries an item request the server rate limited', async () => {
+  const http: HttpTransport = async () => ({ status: 429, json: async () => null, text: async () => '' }) as any;
+  const { app, db } = makeTestApp();
+  const { username } = await registerUser(app);
+  const { id } = db.prepare('SELECT id FROM users WHERE username=?').get(username) as { id: number };
+  upsertAccount(db, id, 'audiobookshelf', { server: 'abs.test', token: 'k' }, null);
+  const job = { user_id: id, connector_id: 'audiobookshelf', external_id: 'li_1', document: DOC, attempts: 0 };
+  const error = await runAlignmentJob(db, { provider: 'local', url: 'http://aligner', apiKey: '', model: 'm', maxBytes: 1e9 }, job, http)
+    .then(() => null, (e: unknown) => e);
+  expect(error).toMatchObject({ name: 'ConnectorOperationError', retryable: true });
 });

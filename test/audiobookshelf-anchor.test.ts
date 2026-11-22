@@ -2,8 +2,9 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import { DOC, makeTestApp, registerUser } from './helpers.js';
 import { audiobookshelfConnector } from '../src/connectors/audiobookshelf.js';
 import { pollConnector } from '../src/connectors/fanin.js';
-import { latestPercentage, saveMatch, upsertAccount } from '../src/connectors/store.js';
+import { latestPercentage, saveMatch, setMatchAnchor, upsertAccount } from '../src/connectors/store.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
+import { saveAlignment } from '../src/models/audio-alignment.js';
 import { upsertProgress } from '../src/routes/kosync.js';
 import type { HttpTransport } from '../src/connectors/types.js';
 
@@ -63,4 +64,59 @@ it('calibrates an Audiobookshelf book: pulls and pushes map through the anchor',
 
   await app.request(`/api/v1/connectors/audiobookshelf/anchor/${DOC}`, { method: 'DELETE', headers });
   expect((await (await app.request(`/api/v1/connectors/audiobookshelf/tracks/${DOC}`, { headers })).json()).anchor).toBeNull();
+});
+
+it('lets an explicit calibration override a stored alignment', async () => {
+  const progress = { duration: 4000, currentTime: 3600, progress: 0.9, isFinished: false, lastUpdate: Date.now() };
+  const patches: any[] = [];
+  const http: HttpTransport = async (url, init) => {
+    const ok = (body: unknown) => ({ status: 200, json: async () => body, text: async () => JSON.stringify(body) });
+    if (url.includes('/api/items/li_1/ebook')) return { status: 404, json: async () => null, text: async () => '' };
+    if (url.includes('/api/items/li_1')) return ok(ITEM);
+    if (url.includes('/api/me/progress/li_1')) {
+      if (init.method === 'PATCH') patches.push(JSON.parse(init.body!));
+      return ok(init.method === 'GET' ? progress : {});
+    }
+    throw new Error(`Unexpected request: ${init.method} ${url}`);
+  };
+  const { app, db } = makeTestApp({}, { connectorTransport: http });
+  const { username } = await registerUser(app);
+  const { id } = db.prepare('SELECT id FROM users WHERE username=?').get(username) as { id: number };
+  upsertAccount(db, id, 'audiobookshelf', { server: 'abs.test', token: 'k' }, null);
+  saveMatch(db, id, 'audiobookshelf', DOC, { externalId: 'li_1', externalEdition: '4000', confidence: 1 }, 'manual');
+  // A linear 4000s alignment reads 3600s as 90%; the user's correction says 80%.
+  saveAlignment(db, id, 'audiobookshelf', 'li_1', DOC, {
+    durationMs: 4_000_000, spineLengths: [100], samples: [[0, 0], [100, 4_000_000]], words: 100, coverage: 1, source: 'test',
+  });
+  setMatchAnchor(db, id, 'audiobookshelf', DOC, { text: 0.75, audio: 0.875 });
+
+  await pollConnector(db, id, 'audiobookshelf', http, { document: DOC });
+  expect(latestPercentage(db, id, DOC)).toBeCloseTo(0.8, 6);
+
+  await audiobookshelfConnector.push({ server: 'abs.test', token: 'k' }, { externalId: 'li_1', externalEdition: '4000', confidence: 1 },
+    { kind: 'progress', percentage: 0.75, timestamp: 0 } as any, http, { db, userId: id, document: DOC });
+  expect(patches.at(-1)).toMatchObject({ progress: 0.875, currentTime: 3500 });
+});
+
+it('keeps a finished audiobook finished even when the saved position is early', async () => {
+  const progress = { duration: 4000, currentTime: 100, progress: 0.025, isFinished: true, lastUpdate: Date.now() };
+  const http: HttpTransport = async (url, init) => {
+    const ok = (body: unknown) => ({ status: 200, json: async () => body, text: async () => JSON.stringify(body) });
+    if (url.includes('/api/items/li_1/ebook')) return { status: 404, json: async () => null, text: async () => '' };
+    if (url.includes('/api/items/li_1')) return ok(ITEM);
+    if (url.includes('/api/me/progress/li_1')) return ok(init.method === 'GET' ? progress : {});
+    throw new Error(`Unexpected request: ${init.method} ${url}`);
+  };
+  const { app, db } = makeTestApp({}, { connectorTransport: http });
+  const { username } = await registerUser(app);
+  const { id } = db.prepare('SELECT id FROM users WHERE username=?').get(username) as { id: number };
+  upsertAccount(db, id, 'audiobookshelf', { server: 'abs.test', token: 'k' }, null);
+  saveMatch(db, id, 'audiobookshelf', DOC, { externalId: 'li_1', externalEdition: '4000', confidence: 1 }, 'manual');
+  saveAlignment(db, id, 'audiobookshelf', 'li_1', DOC, {
+    durationMs: 4_000_000, spineLengths: [100], samples: [[0, 0], [100, 4_000_000]], words: 100, coverage: 1, source: 'test',
+  });
+
+  // The alignment would say 2.5%; the finished flag has to win.
+  await pollConnector(db, id, 'audiobookshelf', http, { document: DOC });
+  expect(latestPercentage(db, id, DOC)).toBe(1);
 });

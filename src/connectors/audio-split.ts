@@ -31,7 +31,9 @@ export async function probeMs(path: string): Promise<number> {
  * start offset of each chunk so word times stay relative to the whole file.
  */
 export async function splitAudio(path: string, dir: string, maxBytes: number): Promise<AudioChunk[]> {
-  const chunkSeconds = Math.max(60, Math.floor((maxBytes * CHUNK_FILL * 8) / CHUNK_BITRATE));
+  // ponytail: a 1s floor keeps any cap workable; a cap under ~6 KB still fails,
+  // but the error says so instead of emitting a chunk the provider refuses.
+  const chunkSeconds = Math.max(1, Math.floor((maxBytes * CHUNK_FILL * 8) / CHUNK_BITRATE));
   await ffmpeg([
     '-nostdin', '-loglevel', 'error', '-i', path,
     '-vn', '-ac', '1', '-ar', '16000',

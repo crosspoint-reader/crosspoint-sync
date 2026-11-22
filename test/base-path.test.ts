@@ -53,7 +53,7 @@ describe.each(['', '/reading', '/services/reading'])('deployment at %j', (basePa
     }
     const html = await (await app.request(`${basePath}/`)).text();
     expect(html).toContain(`href="${basePath}/app/"`);
-    expect(html).toContain(`srcset="${basePath}/landing/`);
+    expect(html).toContain(`src="${basePath}/landing/`);
     expect(html).toContain(`url(${basePath}/fonts/`);
     for (const [path, target] of [
       ['/app', '/app/'], ['/account', '/app/#/settings'],

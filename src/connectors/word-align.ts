@@ -72,7 +72,17 @@ function longestChain(pairs: Pair[]): Pair[] {
  */
 export function alignTranscript(bookText: string, words: TranscriptWord[]): AudioAlignment {
   const tokens = bookTokens(bookText);
-  const spoken = words.map(w => normalize(w.word)).filter(Boolean);
+  // Same tokenizer as the book: ASR output carries punctuation and contractions
+  // ("don't", " Hello,"), and each spoken token keeps its word so timestamps
+  // stay on the right word when one ASR word yields none.
+  const spoken: string[] = [];
+  const spokenWord: number[] = [];
+  for (const [index, word] of words.entries()) {
+    for (const match of word.word.matchAll(WORD)) {
+      const token = normalize(match[0]);
+      if (token) { spoken.push(token); spokenWord.push(index); }
+    }
+  }
   const samples: [number, number][] = [];
   let anchors = 0;
 
@@ -92,7 +102,7 @@ export function alignTranscript(bookText: string, words: TranscriptWord[]): Audi
     const chain = longestChain(pairs);
     anchors = chain.length;
     for (const pair of chain) {
-      const start = words[pair.transcript].startMs;
+      const start = words[spokenWord[pair.transcript]].startMs;
       const last = samples[samples.length - 1];
       const offset = tokens[pair.book].offset;
       if (last && (start <= last[1] || offset <= last[0])) continue;

@@ -15,7 +15,10 @@ services:
       # `openssl rand -hex 32` and never change it, or saved logins become unreadable.
       # TOKEN_ENC_KEY: ""
       # Word-level Audiobookshelf sync needs speech-to-text: a hosted key (used
-      # automatically once set) or the local aligner service below.
+      # automatically once set, and it charges per audiobook) or the local
+      # aligner service below. To transcribe locally, uncomment this service's
+      # ASR_PROVIDER/ASR_URL, the aligner service, and the aligner-models volume
+      # at the bottom of this file.
       # GROQ_API_KEY: ""
       # ASR_PROVIDER: "local"
       # ASR_URL: "http://aligner:8080"
@@ -24,8 +27,10 @@ services:
       # TRUST_PROXY: "true"
     restart: unless-stopped
 
-  # Optional local speech-to-text for word-level Audiobookshelf sync. Uncomment
-  # this service and ASR_URL above to keep transcription on your own hardware:
+  # Optional local speech-to-text for word-level Audiobookshelf sync. To use it,
+  # uncomment this service, ASR_PROVIDER/ASR_URL above, and the aligner-models
+  # volume at the bottom: leaving ASR_PROVIDER unset lets a GROQ_API_KEY in the
+  # environment win, and the audio goes to Groq instead of your machine.
   # CPU only, one book at a time, models cached in the aligner-models volume.
   # aligner:
   #   image: ghcr.io/crosspoint-reader/crosspoint-sync-aligner:main

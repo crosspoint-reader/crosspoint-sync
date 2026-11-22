@@ -256,6 +256,7 @@ interface Package {
   spineItems: Element[];
   read: (path: string) => Buffer;
   chapterPath: (index: number) => string;
+  chapterMediaType: (index: number) => string;
 }
 
 async function withPackage<T>(epub: Epub, resolve: (pkg: Package) => T | Promise<T>): Promise<T> {
@@ -273,14 +274,16 @@ async function withPackage<T>(epub: Epub, resolve: (pkg: Package) => T | Promise
   const opf = xml(read(opfPath));
   const spine = child(opf, 'spine');
   const spineItems = elements(spine).filter(e => e.localName === 'itemref');
+  const manifestItem = (index: number): Element => elements(child(opf, 'manifest')).find(
+    e => e.localName === 'item' && e.getAttribute('id') === spineItems[index].getAttribute('idref')
+  ) ?? invalid('spine item missing from manifest');
   const chapterPath = (index: number): string => {
-    const item = elements(child(opf, 'manifest')).find(
-      e => e.localName === 'item' && e.getAttribute('id') === spineItems[index].getAttribute('idref')
-    ) ?? invalid('spine item missing from manifest');
-    const href = item.getAttribute('href') ?? invalid('chapter path missing');
+    const href = manifestItem(index).getAttribute('href') ?? invalid('chapter path missing');
     return posix.join(posix.dirname(opfPath), decodeURIComponent(href.split('#')[0]));
   };
-  return resolve({ opfPath, opf, spine, spineItems, read, chapterPath });
+  const chapterMediaType = (index: number): string =>
+    (manifestItem(index).getAttribute('media-type') ?? '').toLowerCase();
+  return resolve({ opfPath, opf, spine, spineItems, read, chapterPath, chapterMediaType });
 }
 
 async function withChapter<T>(
@@ -687,6 +690,9 @@ function codepoints(value: string): number {
 function spineText(body: Element): { text: string; segments: Segment[] } {
   const segments: Segment[] = [];
   let out = '';
+  // Tracked as we append: recounting `out` per text node is quadratic, and a
+  // spine item may hold up to 50k nodes.
+  let length = 0;
   const visit = (parent: Node): void => {
     for (const child of children(parent)) {
       if (child.nodeType === 1) {
@@ -696,10 +702,10 @@ function spineText(body: Element): { text: string; segments: Segment[] } {
       if (!text(child)) continue;
       const value = child.nodeValue ?? '';
       if (!value) continue;
-      if (out && !/\s$/.test(out) && !/^\s/.test(value)) out += ' ';
-      const start = codepoints(out);
-      segments.push({ start, end: start + codepoints(value), node: child });
+      if (out && !/\s$/.test(out) && !/^\s/.test(value)) { out += ' '; length += 1; }
+      segments.push({ start: length, end: length + codepoints(value), node: child });
       out += value;
+      length += codepoints(value);
     }
   };
   visit(body);
@@ -708,15 +714,19 @@ function spineText(body: Element): { text: string; segments: Segment[] } {
 
 /** Visible text of every spine item, in reading order. */
 export async function epubSpineTexts(bytes: Epub): Promise<string[]> {
-  return withPackage(bytes, ({ read, spineItems, chapterPath }) => {
+  return withPackage(bytes, ({ read, spineItems, chapterPath, chapterMediaType }) => {
     const texts: string[] = [];
     for (let index = 0; index < spineItems.length; index++) {
-      try {
-        const html = xml(read(chapterPath(index)), true);
-        texts.push(spineText(child(html, 'body')).text);
-      } catch {
-        texts.push(''); // Non-XHTML spine items carry no readable text.
+      // Only non-XHTML spine items (images, PDFs) carry no readable text; a
+      // chapter that fails to parse or exceeds the parser limits must not be
+      // silently treated as empty, or alignment quietly drops that chapter.
+      const type = chapterMediaType(index);
+      if (type && !type.includes('xhtml')) {
+        texts.push('');
+        continue;
       }
+      const html = xml(read(chapterPath(index)), true);
+      texts.push(spineText(child(html, 'body')).text);
     }
     return texts;
   });
@@ -729,8 +739,12 @@ export async function epubTextOffset(bytes: Epub, xpath: string): Promise<{ spin
   return withChapter(bytes, () => spine, ({ html, body }) => {
     const { target, utf16 } = locate(html, body, match[2] ? match[2].split('/') : []);
     const { segments } = spineText(body);
+    // An element XPath (or a node with no text of its own) still needs a spot:
+    // the first text after it in reading order, else the chapter's last text.
     const segment = segments.find(s => s.node === target)
-      ?? segments.find(s => target.nodeType === 1 && target.contains(s.node));
+      ?? segments.find(s => target.nodeType === 1 && target.contains(s.node))
+      ?? segments.find(s => (target.compareDocumentPosition(s.node) & 4) !== 0)
+      ?? segments[segments.length - 1];
     if (!segment) return { spine, offset: 0 };
     return { spine, offset: segment.start + codepoints((target.nodeValue ?? '').slice(0, utf16)) };
   });

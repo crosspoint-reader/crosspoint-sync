@@ -8,7 +8,9 @@ Split with ffmpeg first: whisper's memory and time scale with file length, and
 an audiobook chapter is cheap to stream while a 20-hour m4b is not.
 """
 
+import json
 import os
+import queue
 import subprocess
 import tempfile
 import threading
@@ -16,6 +18,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from faster_whisper import WhisperModel
 from pydantic import BaseModel, Field
 
@@ -26,6 +29,11 @@ MODEL_DIR = os.environ.get("WHISPER_MODEL_DIR", "/models")
 # 30 minutes per chunk keeps CPU memory flat and bounds retry cost.
 CHUNK_SECONDS = int(os.environ.get("WHISPER_CHUNK_SECONDS", "1800"))
 MAX_BYTES = int(os.environ.get("ALIGNER_MAX_BYTES", str(4 * 1024**3)))
+# Whisper takes minutes to hours, and the sync service's HTTP client drops a
+# request whose body is silent for 300s, so the response trickles whitespace
+# until the result is ready. JSON parsers skip leading whitespace, so the
+# eventual `{"words": ...}` body still parses.
+KEEPALIVE_SECONDS = 15
 
 app = FastAPI()
 # faster-whisper models are not safe to run concurrently; the sync service also
@@ -108,19 +116,42 @@ def transcribe_file(path: Path) -> list[dict]:
 
 
 @app.post("/transcribe")
-def transcribe(source: Source) -> dict:
-    with _lock, tempfile.TemporaryDirectory() as tmp:
-        workdir = Path(tmp)
-        audio = download(source.url, source.headers, workdir / "audio.bin")
-        words = []
-        try:
-            for part, offset in chunks(audio, workdir):
-                for word in transcribe_file(part):
-                    words.append({
-                        "word": word["word"],
-                        "start_ms": word["start_ms"] + offset,
-                        "end_ms": word["end_ms"] + offset,
-                    })
-        except subprocess.CalledProcessError as err:
-            raise HTTPException(500, f"ffmpeg split failed: {err}") from err
-        return {"words": words}
+def transcribe(source: Source) -> StreamingResponse:
+    results: queue.Queue[dict] = queue.Queue()
+    threading.Thread(target=_run, args=(source, results), daemon=True).start()
+
+    def stream():
+        while True:
+            try:
+                yield json.dumps(results.get(timeout=KEEPALIVE_SECONDS))
+                return
+            except queue.Empty:
+                yield " "
+
+    return StreamingResponse(stream(), media_type="application/json")
+
+
+def _run(source: Source, results: "queue.Queue[dict]") -> None:
+    try:
+        with _lock, tempfile.TemporaryDirectory() as tmp:
+            results.put({"words": _transcribe(source, Path(tmp))})
+    except HTTPException as err:
+        results.put({"error": str(err.detail)})
+    except Exception as err:  # noqa: BLE001 - the reason has to reach the client
+        results.put({"error": f"transcription failed: {err}"})
+
+
+def _transcribe(source: Source, workdir: Path) -> list[dict]:
+    audio = download(source.url, source.headers, workdir / "audio.bin")
+    words = []
+    try:
+        for part, offset in chunks(audio, workdir):
+            for word in transcribe_file(part):
+                words.append({
+                    "word": word["word"],
+                    "start_ms": word["start_ms"] + offset,
+                    "end_ms": word["end_ms"] + offset,
+                })
+    except subprocess.CalledProcessError as err:
+        raise HTTPException(500, f"ffmpeg split failed: {err}") from err
+    return words

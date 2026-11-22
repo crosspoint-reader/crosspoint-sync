@@ -34,6 +34,18 @@ function epub(): Buffer {
   });
 }
 
+describe('epubTextOffset', () => {
+  it('maps an element with no text of its own to the next text in the chapter', async () => {
+    const book = archive({
+      'META-INF/container.xml': '<container><rootfiles><rootfile full-path="EPUB/package.opf" media-type="application/oebps-package+xml"/></rootfiles></container>',
+      'EPUB/package.opf': '<package><metadata/><manifest><item id="a" href="../Text/ch1.xhtml"/></manifest><guide/><spine><itemref idref="a"/></spine></package>',
+      'Text/ch1.xhtml': '<html><head/><body><p>First</p><div class="sep"/><p>Second</p></body></html>',
+    });
+    // "First Second": the separator sits at offset 5, the text after it at 6.
+    expect(await epubTextOffset(book, '/body/DocFragment[1]/body/div')).toEqual({ spine: 0, offset: 6 });
+  });
+});
+
 describe('epubSpineTexts', () => {
   it('concatenates visible text per spine item, skipping head content', async () => {
     expect(await epubSpineTexts(epub())).toEqual(['First', 'Title Pre😀 bold tail&end']);
