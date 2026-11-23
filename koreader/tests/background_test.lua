@@ -65,9 +65,10 @@ local directory = ffi.new("char[?]", #template + 1, template)
 assert(C.mkdtemp(directory) ~= nil)
 local settings_dir = ffi.string(directory)
 local missing_dir = settings_dir .. "/missing"
-local current_settings_dir = missing_dir
+local current_settings_dir, current_data_dir = missing_dir, missing_dir
 package.preload["datastorage"] = function() return {
     getSettingsDir = function() return current_settings_dir end,
+    getDataDir = function() return current_data_dir end,
 } end
 os.tmpname = function()
     error("System temporary directory unavailable on Android")
@@ -89,7 +90,14 @@ local function pump(until_done)
 end
 local created, message = Background.start(function() end, function() end)
 assert(not created and message:find("Could not create a sync result file", 1, true))
+assert(message:find("errno", 1, true), "Failure reason missing from message")
 assert(#processes == 0 and not Background.running())
+-- An unusable settings directory falls back to the data directory (issue #125).
+current_data_dir = settings_dir
+local fallback
+assert(Background.start(function() return { ok = true } end, function(value) fallback = value end))
+pump(function() return fallback ~= nil end)
+assert(fallback.ok and not Background.running())
 current_settings_dir = settings_dir
 
 local result

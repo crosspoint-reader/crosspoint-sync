@@ -21,15 +21,32 @@ end
 function Background.start(work, complete)
     if active then return false, "A CrossPoint sync is already running." end
     -- LuaJIT's os.tmpname() uses /tmp, which Android applications cannot write.
-    -- Reserve a private result file in KOReader's writable settings directory.
-    local template = DataStorage:getSettingsDir() .. "/crosspoint-result-XXXXXX"
-    local name = ffi.new("char[?]", #template + 1, template)
-    local reserved, fd = pcall(function() return ffi.C.mkstemps(name, 0) end)
-    if not reserved or not fd or fd < 0 then
-        return false, "Could not create a sync result file in KOReader's settings directory."
+    -- Reserve a private result file in a KOReader directory instead. mkstemps
+    -- fails in the settings directory on some Android devices (issue #125), so
+    -- fall back to a plain create, then to the data directory.
+    local path, reasons = nil, {}
+    for _, dir in ipairs({ DataStorage:getSettingsDir(), DataStorage:getDataDir() }) do
+        local template = dir .. "/crosspoint-result-XXXXXX"
+        local name = ffi.new("char[?]", #template + 1, template)
+        local reserved, fd = pcall(function() return ffi.C.mkstemps(name, 0) end)
+        if reserved and fd and fd >= 0 then
+            ffi.C.close(fd)
+            path = ffi.string(name)
+            break
+        end
+        reasons[#reasons + 1] = dir .. ": " .. (reserved and ("errno " .. ffi.errno()) or tostring(fd))
+        local candidate = string.format("%s/crosspoint-result-%d-%d", dir, os.time(), math.random(100000, 999999))
+        local file, open_error = io.open(candidate, "w")
+        if file then
+            file:close()
+            path = candidate
+            break
+        end
+        reasons[#reasons + 1] = tostring(open_error)
     end
-    ffi.C.close(fd)
-    local path = ffi.string(name)
+    if not path then
+        return false, "Could not create a sync result file. " .. table.concat(reasons, " | ")
+    end
     local spawned, pid, err = pcall(ffiUtil.runInSubProcess, function()
         local function checkpoint(result)
             local encoded = JSON.encode(result)
