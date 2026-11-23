@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DOC, makeTestApp, md5, registerUser } from './helpers.js';
 import { hashKey } from '../src/auth/password.js';
+import { computeActivity } from '../src/models/activity.js';
 
 /**
  * Byte-precise replay of what the CrossPoint/CrossInk firmware's
@@ -206,6 +207,55 @@ describe('kosync protocol compatibility', () => {
     db.prepare('UPDATE progress SET updated_at = updated_at - 100').run();
     await put(0.01, 'aaaa');
     expect((await (await app.request(`/syncs/progress/${DOC}`, { headers })).json()).percentage).toBe(1);
+  });
+
+  it('the device that finished a book can start it again (a re-read)', async () => {
+    const { app, db } = makeTestApp();
+    const { headers } = await registerUser(app);
+    const put = (percentage: number, device_id: string) =>
+      app.request('/syncs/progress', {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ document: DOC, progress: `at-${percentage}`, percentage, device: device_id, device_id }),
+      });
+    const current = async () => (await (await app.request(`/syncs/progress/${DOC}`, { headers })).json()).percentage;
+    const backdate = () => db.prepare('UPDATE progress SET updated_at = updated_at - 100').run();
+    await put(0.5, 'aaaa');
+    backdate();
+    await put(1, 'aaaa');
+    backdate();
+    await put(0.05, 'aaaa');
+    expect(await current()).toBe(0.05);
+    backdate();
+    await put(0.2, 'aaaa');
+    expect(await current()).toBe(0.2);
+    // The re-read is in the history, and the first finish is still there.
+    const log = db.prepare('SELECT document, percentage, at FROM progress_log ORDER BY rowid').all() as
+      { document: string; percentage: number; at: number }[];
+    expect(log.map((r) => r.percentage)).toEqual([0.5, 1, 0.05, 0.2]);
+    expect(computeActivity(log, new Map(), 0).books[0].finished_at).not.toBeNull();
+    // An unfinished book still only moves forward, even on its own device.
+    backdate();
+    await put(0.1, 'aaaa');
+    expect(await current()).toBe(0.2);
+  });
+
+  it('a per-reader CrossInk id can re-read a book the shared CrossInk id finished', async () => {
+    const { app, db } = makeTestApp();
+    const { headers } = await registerUser(app);
+    const put = (percentage: number, device_id: string) =>
+      app.request('/syncs/progress', {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ document: DOC, progress: `at-${percentage}`, percentage, device: device_id, device_id }),
+      });
+    const current = async () => (await (await app.request(`/syncs/progress/${DOC}`, { headers })).json()).percentage;
+    await put(1, 'crossink-device');
+    db.prepare('UPDATE progress SET updated_at = updated_at - 100').run();
+    await put(0.03, 'koreader-phone');
+    expect(await current()).toBe(1);
+    await put(0.03, 'crossink-1a2b3c');
+    expect(await current()).toBe(0.03);
   });
 
   it('PUT without device_id falls back to device name (KOReader configs vary)', async () => {

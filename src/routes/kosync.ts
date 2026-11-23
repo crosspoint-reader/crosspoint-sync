@@ -16,6 +16,7 @@ import { parsePosition } from '../models/position.js';
 import { adoptFilenameTwin, resolveDocument } from '../models/merge.js';
 import { nowSeconds } from '../models/sync.js';
 import { nextChangeSeq } from '../models/changes.js';
+import { FINISHED_AT } from '../models/activity.js';
 import { fanOutProgress } from '../connectors/fanout.js';
 import { seedSidecarMatches } from '../connectors/store.js';
 import { getConnector } from '../connectors/registry.js';
@@ -372,20 +373,23 @@ function clientTime(value: unknown): number {
  *
  * Devices only move a book forward: a position behind the book's current one
  * (a reader opening the file at its cover, say) is dropped, `stored` is false,
- * and the device finds the further position on its next pull. That holds for
- * a finished book too. Moving a book back on purpose (a re-read) goes through
- * PUT /api/v1/progress or a progress reset.
+ * and the device finds the further position on its next pull. The exception
+ * is a re-read: the device that finished a book may move it back. Another
+ * device still can't, and an unfinished book still only moves forward. Moving
+ * a book back from any device goes through PUT /api/v1/progress or a reset.
  */
 export function writeDeviceProgress(db: DB, record: ProgressUpsert): { document: string; stored: boolean } {
   const clientDocument = record.document;
   record.document = adoptFilenameTwin(db, record.userId, clientDocument, record.metadata?.filename ?? null, record.updatedAt);
   const current = db
     .prepare(
-      `SELECT percentage FROM progress WHERE user_id = ? AND document = ?
+      `SELECT percentage, device_id FROM progress WHERE user_id = ? AND document = ?
        ORDER BY updated_at DESC, device_id LIMIT 1`
     )
-    .get(record.userId, record.document) as { percentage: number } | undefined;
-  if (current && record.percentage < current.percentage) return { document: clientDocument, stored: false };
+    .get(record.userId, record.document) as { percentage: number; device_id: string } | undefined;
+  if (current && record.percentage < current.percentage && !isReread(current, record.deviceId)) {
+    return { document: clientDocument, stored: false };
+  }
   upsertProgress(db, record);
   // Harvest this real device position as a (percentage -> position) sample so
   // fan-in can later replay a real position for a percentage-only update.
@@ -399,6 +403,14 @@ export function writeDeviceProgress(db: DB, record: ProgressUpsert): { document:
     record.updatedAt
   );
   return { document: clientDocument, stored: true };
+}
+
+/** The device that finished a book starting it again. A per-reader CrossInk id
+ *  counts as the shared legacy id it replaced, as in previousPercentage. */
+function isReread(current: { percentage: number; device_id: string }, deviceId: string): boolean {
+  if (current.percentage < FINISHED_AT) return false;
+  if (current.device_id === deviceId) return true;
+  return current.device_id === LEGACY_CROSSINK_DEVICE_ID && deviceId.startsWith('crossink-');
 }
 
 export function fanOutDeviceProgress(db: DB, record: ProgressUpsert): void {
