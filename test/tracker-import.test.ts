@@ -7,6 +7,13 @@ import { mergeDocuments } from '../src/models/merge.js';
 import { makeTestApp, registerUser, DOC } from './helpers.js';
 
 const fixtureFile = (name: string) => readFileSync(new URL(`./fixtures/imports/${name}.csv`, import.meta.url));
+// Rows from issue 121 (reviews shortened), plus DNF and unsupported periods.
+const storyGraphSingleDates = Buffer.from('Title,Authors,Contributors,ISBN/UID,Format,Read Status,Date Added,Last Date Read,Dates Read,Read Count,Moods,Pace,Character- or Plot-Driven?,Strong Character Development?,Loveable Characters?,Diverse Characters?,Flawed Characters?,Star Rating,Review,Content Warnings,Content Warning Description,Tags,Owned?\n' +
+  '"Right Ho, Jeeves",P.G. Wodehouse,"",9780393339789,paperback,read,2025/01/01,"","",1,"",,,,,,,,,"",,"",No\n' +
+  'Escape from Camp 14: One Man\'s Remarkable Odyssey from North Korea to Freedom in the West,Blaine Harden,"",9781101561263,digital,read,2015/12/13,2015/12/13,2015/12/13,1,"",,,,,,,5.0,"Astonishing book.","",,"",No\n' +
+  'The Secret Life of Bletchley Park: In the Words of the Men and Women Who Worked There,Sinclair McKay,"","",hardcover,read,2012/02/02,2012/01/25,2012/01/25,1,"",,,,,,,4.0,"It\'s nicely researched.<br><br>Sometimes ""blonde and blue-eyed"".","",,"",No\n' +
+  'Abandoned,Author,"",dnf-single,paperback,did-not-finish,2024/04/01,2024/05/01,2024/05/01,0,"",,,,,,,,,"",,"",No\n' +
+  'Odd Period,Author,"",odd-period,paperback,read,2024/04/01,"",sometime in 2024,1,"",,,,,,,,,"",,"",No\n');
 async function setup() {
   const s = makeTestApp({}, { connectorTransport: async () => new Response('{}', { status: 404 }) });
   const user = await registerUser(s.app);
@@ -61,6 +68,17 @@ describe('tracker CSV formats', () => {
     expect(tracker.skipped).toBe(0);
   });
 
+  it('imports StoryGraph single dates, empty dates and did-not-finish books without a range', () => {
+    const t = readTrackerCsv(storyGraphSingleDates);
+    expect(t.books).toHaveLength(5);
+    expect(t.books[0]).toMatchObject({ title: 'Right Ho, Jeeves', status: 'finished', start_date: null, finished_date: null });
+    expect(t.books[1]).toMatchObject({ status: 'finished', start_date: null, finished_date: '2015-12-13', user_rating: 5 });
+    expect(t.books[2]).toMatchObject({ status: 'finished', start_date: null, finished_date: '2012-01-25', user_rating: 4 });
+    expect(t.books[3]).toMatchObject({ status: 'dnf', start_date: null, finished_date: null });
+    expect(t.books[4]).toMatchObject({ status: 'finished', start_date: null, finished_date: null });
+    expect(t.warnings).toEqual([expect.stringContaining('CSV row 6: skipped reading period sometime in 2024')]);
+  });
+
   it.each(['"unterminated', 'a"b,c', '"a"x,b'])('rejects malformed CSV %s', text => {
     expect(() => parseCsv(text)).toThrow();
   });
@@ -112,6 +130,17 @@ describe('tracker import API', () => {
       start_date: Date.parse('2024-07-13T00:00:00Z') / 1000,
       finished_date: Date.parse('2024-07-13T00:00:00Z') / 1000,
     });
+  });
+
+  it('imports StoryGraph rows with single and empty Dates Read', async () => {
+    const s = await setup();
+    const preview = await (await s.upload(storyGraphSingleDates)).json();
+    expect((await s.upload(storyGraphSingleDates, selections(preview))).status).toBe(200);
+    expect(s.db.prepare('SELECT title, status, start_date, finished_date FROM documents WHERE isbn = ?').get('9781101561263')).toEqual({
+      title: expect.stringContaining('Escape from Camp 14'), status: 'finished', start_date: null,
+      finished_date: Date.parse('2015-12-13T00:00:00Z') / 1000,
+    });
+    expect(s.db.prepare('SELECT COUNT(*) AS n FROM documents').get()).toEqual({ n: 5 });
   });
 
   it('requires title-match review, keeps real progress and personal ratings separate, and remembers the source match', async () => {

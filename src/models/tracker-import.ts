@@ -91,9 +91,14 @@ export function readTrackerCsv(bytes: Buffer): Tracker {
     if (source === 'Goodreads') finished_date = calendar(r['Date Read'] || '', 'Date Read');
     else {
       const periods = (r['Dates Read'] || '').split(',').map(s => s.trim()).filter(Boolean).flatMap(period => {
-        const match = /^(\d{4}\/\d{2}\/\d{2})?\s*-\s*(\d{4}\/\d{2}\/\d{2})?$/.exec(period);
-        if (!match) fail(`Unsupported Dates Read on CSV row ${index + 2}.`);
-        const start = calendar(match![1] || '', 'start date'), finish = calendar(match![2] || '', 'finish date');
+        // A lone date is a finish date logged without a start date.
+        const match = /^\d{4}\/\d{2}\/\d{2}$/.test(period) ? ['', '', period]
+          : /^(\d{4}\/\d{2}\/\d{2})?\s*-\s*(\d{4}\/\d{2}\/\d{2})?$/.exec(period);
+        if (!match) {
+          warnings.add(`CSV row ${index + 2}: skipped reading period ${period} because its date format is not supported.`);
+          return [];
+        }
+        const start = calendar(match[1] || '', 'start date'), finish = calendar(match[2] || '', 'finish date');
         if (start && finish && start > finish) {
           warnings.add(`CSV row ${index + 2}: skipped reading period ${period} because its start date follows its finish date.`);
           return [];
