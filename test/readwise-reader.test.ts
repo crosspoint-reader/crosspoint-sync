@@ -113,7 +113,7 @@ describe('readwise-reader connector', () => {
     const call = fake.calls[0];
     expect(call.url).toMatch(/\/api\/v3\/save\/$/);
     expect(call.method).toBe('POST');
-    expect(JSON.parse(call.body!)).toEqual({ parent_id: '01bbb', content: 'So we beat on', notes: 'last line' });
+    expect(JSON.parse(call.body!)).toEqual({ parent_id: '01bbb', content: 'So we beat on', saved_using: 'crosspoint', notes: 'last line' });
   });
 
   it('omits notes for a clipping without one', async () => {
@@ -122,7 +122,7 @@ describe('readwise-reader connector', () => {
     const r = await readwiseReaderConnector.push(CRED, { externalId: '01bbb', confidence: 1 },
       { kind: 'highlight', document: 'hash', timestamp: 1, highlight: { text: 'Whenever you feel', note: null } }, fake.transport);
     expect(r.ok).toBe(true);
-    expect(JSON.parse(fake.calls[0].body!)).toEqual({ parent_id: '01bbb', content: 'Whenever you feel' });
+    expect(JSON.parse(fake.calls[0].body!)).toEqual({ parent_id: '01bbb', content: 'Whenever you feel', saved_using: 'crosspoint' });
   });
 
   it.each([

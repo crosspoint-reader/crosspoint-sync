@@ -158,7 +158,12 @@ async function pushHighlight(token: string, m: Match, ev: OutboundEvent, http: H
   const res = await http(`${BASE}/save/`, {
     method: 'POST',
     headers: authHeaders(token),
-    body: JSON.stringify({ parent_id: m.externalId, content: h.text, ...(h.note ? { notes: h.note } : {}) }),
+    body: JSON.stringify({
+      parent_id: m.externalId,
+      content: h.text,
+      saved_using: 'crosspoint',
+      ...(h.note ? { notes: h.note } : {}),
+    }),
   });
   noteRateLimit(token, res.status);
   if (res.status === 401 || res.status === 403) return { ok: false, retryable: false, needsReauth: true, error: 'unauthorized' };
