@@ -620,7 +620,7 @@ const HINTS = {
   hardcover: 'Syncs your reading progress and shelf status to Hardcover.',
   microblog: 'Connect an app token to keep your Currently reading and Finished reading bookshelves in sync. Optional clipping sync publishes one post per book and updates its generated content on later syncs, replacing edits made on Micro.blog.',
   readwise: 'Paste your Readwise access token from readwise.io/access_token. Syncs your highlights.',
-  'readwise-reader': 'Paste your Readwise access token from readwise.io/access_token. Syncs reading progress both ways for matched books and archives finished books. Sync a book from your device, then check Matches. Does not import your Reader library or highlights.',
+  'readwise-reader': 'Paste your Readwise access token from readwise.io/access_token. Syncs reading progress both ways for matched books, adds your clippings as highlights on the matched document, and archives finished books. Sync a book from your device, then check Matches. Does not import your Reader library or highlights.',
   kosync: 'Mirror your reading progress to another KOReader-compatible (KOSync) server, so your other devices see it too.',
   bookfusion: 'Connect your BookFusion account to sync reading progress. You will approve the request on bookfusion.com.',
   audiobookshelf: 'Sync your reading position to the matching audiobook on your Audiobookshelf server. Create an API key in Audiobookshelf under Settings, Users, API Keys.',
