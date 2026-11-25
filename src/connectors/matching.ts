@@ -18,9 +18,16 @@ export function normalizeText(s: string): string {
     .trim();
 }
 
-/** Strip subtitle after a colon and trailing "(Series, Book 2)" style suffixes. */
+/**
+ * A leading series number, as libraries title numbered series so they sort ("241 - Title").
+ * Up to three digits, so a year-like title such as "1984 - A Novel" keeps its number.
+ */
+const SERIES_NUMBER = /^\s*\d{1,3}\s+[-–—]\s+(?=\S)/;
+
+/** Strip a leading series number, the subtitle after a colon or dash, and trailing "(Series, Book 2)" style suffixes. */
 export function coreTitle(title: string): string {
-  let t = title.replace(/\s*[:—-]\s.*$/, ''); // subtitle
+  let t = title.replace(SERIES_NUMBER, '');
+  t = t.replace(/\s*[:—-]\s.*$/, ''); // subtitle
   t = t.replace(/\s*\((?:[^)]*\b(?:book|vol|volume|part|no)\b[^)]*)\)\s*$/i, '');
   return t.trim();
 }

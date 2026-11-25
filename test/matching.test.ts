@@ -14,6 +14,30 @@ describe('matching helpers', () => {
     expect(coreTitle('Plain Title')).toBe('Plain Title');
   });
 
+  it('drops a leading series number before cutting the subtitle', () => {
+    expect(coreTitle('241 - Die drei Fragezeichen und das weiße Auge')).toBe('Die drei Fragezeichen und das weiße Auge');
+    expect(coreTitle('007 - Die drei Fragezeichen und der Fluch des Rubins')).toBe('Die drei Fragezeichen und der Fluch des Rubins');
+    expect(coreTitle('12 – Title With En Dash')).toBe('Title With En Dash');
+    expect(coreTitle('3 — Title With Em Dash')).toBe('Title With Em Dash');
+    expect(coreTitle('241 - Die drei Fragezeichen - Das weiße Auge')).toBe('Die drei Fragezeichen');
+    // A number that is the title stays: four digits, a colon subtitle, no spaced dash.
+    expect(coreTitle('1984 - A Novel')).toBe('1984');
+    expect(coreTitle('1984: A Novel')).toBe('1984');
+    expect(coreTitle('2001 - A Space Odyssey')).toBe('2001');
+    expect(coreTitle('11/22/63')).toBe('11/22/63');
+    expect(coreTitle('Catch-22')).toBe('Catch-22');
+    expect(coreTitle('42 - ')).toBe('42');
+  });
+
+  it('matches a series-numbered title on its words, not the number', () => {
+    const cand = { externalId: '1', title: 'Die drei Fragezeichen und das weiße Auge', author: 'Marco Sonnleitner' };
+    expect(scoreCandidate('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner', cand)).toBeGreaterThan(0.9);
+    const other = { externalId: '2', title: 'Die drei Fragezeichen und der Fluch des Rubins', author: 'Marco Sonnleitner' };
+    expect(
+      decideMatch('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner', [other, cand]).best?.externalId
+    ).toBe('1');
+  });
+
   it('normalizes "Last, First" author form', () => {
     expect(normalizeAuthor('Bennett, Robert Jackson')).toBe('robert jackson bennett');
     expect(normalizeAuthor('Robert Jackson Bennett')).toBe('robert jackson bennett');
