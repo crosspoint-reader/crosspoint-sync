@@ -44,7 +44,8 @@ Library.each(nil, digest, function(snapshot, keep_missing)
     assert(keep_missing)
     uploads[#uploads + 1] = snapshot
 end, skipped)
-assert(#uploads == 1 and #skipped == 5)
+assert(#uploads == 1 and #skipped == 4)
+for _, line in ipairs(skipped) do assert(not line:find("missing.epub", 1, true), "Deleted books are not errors") end
 local snapshot = uploads[1]
 local _, bookmark = next(snapshot.bookmarks)
 assert(bookmark.percentage == .25 and bookmark.xpath == "/b")

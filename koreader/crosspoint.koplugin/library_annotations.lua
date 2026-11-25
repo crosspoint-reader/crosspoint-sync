@@ -31,7 +31,8 @@ function Library.each(current, hash, upload, skipped)
         if type(path) == "string" and not paths[path] then
             paths[path] = true
             local ok, snapshot = pcall(function()
-                assert(lfs.attributes(path, "mode") == "file", "Book file is missing")
+                -- History keeps deleted books; that is normal, not a skip worth reporting.
+                if lfs.attributes(path, "mode") ~= "file" then return end
                 local sidecar = DocSettings:findSidecarFile(path)
                 assert(sidecar, "Saved metadata is missing")
                 local data = readTable(sidecar)
