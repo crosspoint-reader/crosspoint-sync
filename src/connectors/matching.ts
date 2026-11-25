@@ -35,7 +35,7 @@ export function titleParts(title: string): { full: string; before: string; after
   if (!m) return { full, before: full, after: '', separator: '' };
   return {
     full,
-    before: full.slice(0, m.index).trim(),
+    before: full.slice(0, m.index).replace(SERIES_SUFFIX, '').trim(),
     after: full.slice(m.index + m[0].length).replace(SERIES_SUFFIX, '').trim(),
     separator: m[0].trim(),
   };

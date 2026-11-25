@@ -13,6 +13,7 @@ describe('matching helpers', () => {
   it('strips subtitles and series suffixes from titles', () => {
     expect(coreTitle('Foundryside: A Novel')).toBe('Foundryside');
     expect(coreTitle('Foundryside (The Founders Trilogy, Book 1)')).toBe('Foundryside');
+    expect(coreTitle('Foundryside (The Founders Trilogy, Book 1): A Novel')).toBe('Foundryside');
     expect(coreTitle('Plain Title')).toBe('Plain Title');
   });
 
@@ -47,6 +48,7 @@ describe('matching helpers', () => {
     expect(score('1984 - A Novel', '1984')).toBeGreaterThan(0.9);
     expect(score('Foundryside: A Novel', 'Foundryside')).toBeGreaterThan(0.9);
     expect(score('Foundryside', 'Foundryside: A Novel')).toBeGreaterThan(0.9);
+    expect(score('Foundryside (The Founders Trilogy, Book 1): A Novel', 'Foundryside')).toBeGreaterThan(0.9);
     // A shared subtitle alone isn't a match.
     expect(score('Beach Read: A Novel', 'Book Lovers: A Novel')).toBeLessThan(0.6);
   });
