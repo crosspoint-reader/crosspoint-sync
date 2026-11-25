@@ -5,6 +5,7 @@ import {
   extractTitleAuthor,
   normalizeAuthor,
   scoreCandidate,
+  titleParts,
 } from '../src/connectors/matching.js';
 
 describe('matching helpers', () => {
@@ -14,28 +15,41 @@ describe('matching helpers', () => {
     expect(coreTitle('Plain Title')).toBe('Plain Title');
   });
 
-  it('drops a leading series number before cutting the subtitle', () => {
-    expect(coreTitle('241 - Die drei Fragezeichen und das weiße Auge')).toBe('Die drei Fragezeichen und das weiße Auge');
-    expect(coreTitle('007 - Die drei Fragezeichen und der Fluch des Rubins')).toBe('Die drei Fragezeichen und der Fluch des Rubins');
-    expect(coreTitle('12 – Title With En Dash')).toBe('Title With En Dash');
-    expect(coreTitle('3 — Title With Em Dash')).toBe('Title With Em Dash');
-    expect(coreTitle('241 - Die drei Fragezeichen - Das weiße Auge')).toBe('Die drei Fragezeichen');
-    // A number that is the title stays: four digits, a colon subtitle, no spaced dash.
-    expect(coreTitle('1984 - A Novel')).toBe('1984');
-    expect(coreTitle('1984: A Novel')).toBe('1984');
-    expect(coreTitle('2001 - A Space Odyssey')).toBe('2001');
-    expect(coreTitle('11/22/63')).toBe('11/22/63');
-    expect(coreTitle('Catch-22')).toBe('Catch-22');
-    expect(coreTitle('42 - ')).toBe('42');
+  it('keeps both sides of a title separator', () => {
+    expect(titleParts('241 - Die drei Fragezeichen und das weiße Auge')).toEqual({
+      full: '241 - Die drei Fragezeichen und das weiße Auge',
+      before: '241',
+      after: 'Die drei Fragezeichen und das weiße Auge',
+    });
+    expect(titleParts('Book One – The Fellowship of the Ring')).toMatchObject({ before: 'Book One', after: 'The Fellowship of the Ring' });
+    expect(titleParts('1984: A Novel')).toMatchObject({ before: '1984', after: 'A Novel' });
+    expect(titleParts('Catch-22')).toEqual({ full: 'Catch-22', before: 'Catch-22', after: '' });
+    expect(titleParts('Foundryside (The Founders Trilogy, Book 1)')).toEqual({ full: 'Foundryside', before: 'Foundryside', after: '' });
   });
 
-  it('matches a series-numbered title on its words, not the number', () => {
-    const cand = { externalId: '1', title: 'Die drei Fragezeichen und das weiße Auge', author: 'Marco Sonnleitner' };
-    expect(scoreCandidate('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner', cand)).toBeGreaterThan(0.9);
-    const other = { externalId: '2', title: 'Die drei Fragezeichen und der Fluch des Rubins', author: 'Marco Sonnleitner' };
-    expect(
-      decideMatch('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner', [other, cand]).best?.externalId
-    ).toBe('1');
+  it('matches a title on whichever side of the separator is the real title', () => {
+    const score = (want: string, cand: string, author = 'A') => scoreCandidate(want, author, { externalId: '1', title: cand, author });
+    // Series number or prefix first.
+    expect(score('241 - Die drei Fragezeichen und das weiße Auge', 'Die drei Fragezeichen und das weiße Auge')).toBeGreaterThan(0.9);
+    expect(score('Book One - The Fellowship of the Ring', 'The Fellowship of the Ring')).toBeGreaterThan(0.9);
+    expect(score('Game Changers 6: The Long Game', 'The Long Game')).toBeGreaterThan(0.9);
+    // Subtitle second.
+    expect(score('1984: A Novel', '1984')).toBeGreaterThan(0.9);
+    expect(score('1984 - A Novel', '1984')).toBeGreaterThan(0.9);
+    expect(score('Foundryside: A Novel', 'Foundryside')).toBeGreaterThan(0.9);
+    expect(score('Foundryside', 'Foundryside: A Novel')).toBeGreaterThan(0.9);
+    // A shared subtitle alone isn't a match.
+    expect(score('Beach Read: A Novel', 'Book Lovers: A Novel')).toBeLessThan(0.6);
+  });
+
+  it('picks the right book of a numbered series, not another by the same author', () => {
+    const want = '241 - Die drei Fragezeichen und das weiße Auge';
+    const decision = decideMatch(want, 'Marco Sonnleitner', [
+      { externalId: 'other', title: 'Die drei Fragezeichen und der Fluch des Rubins', author: 'Marco Sonnleitner' },
+      { externalId: 'right', title: 'Die drei Fragezeichen und das weiße Auge', author: 'Marco Sonnleitner' },
+    ]);
+    expect(decision.accepted).toBe(true);
+    expect(decision.best?.externalId).toBe('right');
   });
 
   it('normalizes "Last, First" author form', () => {

@@ -18,18 +18,31 @@ export function normalizeText(s: string): string {
     .trim();
 }
 
-/**
- * A leading series number, as libraries title numbered series so they sort ("241 - Title").
- * Up to three digits, so a year-like title such as "1984 - A Novel" keeps its number.
- */
-const SERIES_NUMBER = /^\s*\d{1,3}\s+[-–—]\s+(?=\S)/;
+/** A trailing "(Series, Book 2)" style suffix. */
+const SERIES_SUFFIX = /\s*\((?:[^)]*\b(?:book|vol|volume|part|no)\b[^)]*)\)\s*$/i;
+/** The first separator in a title: a colon, or a spaced hyphen, en or em dash. */
+const SEPARATOR = /\s*:\s|\s+[-–—]\s+|\s*—\s/;
 
-/** Strip a leading series number, the subtitle after a colon or dash, and trailing "(Series, Book 2)" style suffixes. */
+/**
+ * The ways to read a title. "Foundryside: A Novel" is a title and a subtitle, but
+ * "241 - Die drei Fragezeichen", "Book One - The Fellowship" and "Game Changers 6: The Long Game"
+ * put the real title after the separator. Nothing here guesses which: `before` and `after`
+ * are both kept, and matching scores each reading. `full` is the whole title.
+ */
+export function titleParts(title: string): { full: string; before: string; after: string } {
+  const full = title.replace(SERIES_SUFFIX, '').trim();
+  const m = SEPARATOR.exec(full);
+  if (!m) return { full, before: full, after: '' };
+  return {
+    full,
+    before: full.slice(0, m.index).trim(),
+    after: full.slice(m.index + m[0].length).replace(SERIES_SUFFIX, '').trim(),
+  };
+}
+
+/** The title before its first separator, without a "(Series, Book 2)" suffix. */
 export function coreTitle(title: string): string {
-  let t = title.replace(SERIES_NUMBER, '');
-  t = t.replace(/\s*[:—-]\s.*$/, ''); // subtitle
-  t = t.replace(/\s*\((?:[^)]*\b(?:book|vol|volume|part|no)\b[^)]*)\)\s*$/i, '');
-  return t.trim();
+  return titleParts(title).before;
 }
 
 /** "Last, First" -> "First Last"; also normalizes. */
@@ -77,6 +90,32 @@ function tokenOverlap(a: string, b: string): number {
   return inter / (sa.size + sb.size - inter);
 }
 
+/**
+ * How alike two titles are, taking the best of their readings: the parts before the separator
+ * ("Foundryside: A Novel" vs "Foundryside"), one title's part after the separator against the
+ * other's part before it ("241 - Die drei Fragezeichen" vs "Die drei Fragezeichen"), and the
+ * whole titles. Parts after a separator are never compared with each other, and whole titles
+ * only when one has no separator, so two books that share only a subtitle ("...: A Novel")
+ * don't look alike.
+ */
+function titleSimilarity(a: string, b: string): number {
+  const pa = titleParts(a);
+  const pb = titleParts(b);
+  const pairs: [string, string][] = [
+    [pa.before, pb.before],
+    [pa.after, pb.before],
+    [pa.before, pb.after],
+  ];
+  if (!pa.after || !pb.after) pairs.push([pa.full, pb.full]);
+  let best = 0;
+  for (const [x, y] of pairs) {
+    const nx = normalizeText(x);
+    const ny = normalizeText(y);
+    if (nx && ny) best = Math.max(best, tokenOverlap(nx, ny));
+  }
+  return best;
+}
+
 export interface Candidate {
   externalId: string;
   title: string;
@@ -98,9 +137,7 @@ export function scoreCandidate(
   wantAuthor: string,
   cand: Candidate
 ): number {
-  const wt = normalizeText(coreTitle(wantTitle));
-  const ct = normalizeText(coreTitle(cand.title));
-  const titleScore = wt && ct ? tokenOverlap(wt, ct) : 0;
+  const titleScore = titleSimilarity(wantTitle, cand.title);
 
   const wa = wantAuthor ? normalizeAuthor(wantAuthor) : '';
   const ca = cand.author ? normalizeAuthor(cand.author) : '';
