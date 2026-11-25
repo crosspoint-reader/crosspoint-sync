@@ -358,11 +358,11 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     }
     if (title !== undefined || author !== undefined) {
       // New title/author: everything found with the old one is looked up again
-      // (blank cover and page count, Hardcover details, automatic service matches).
+      // (blank cover and page count, Hardcover details, the user's library, automatic service matches).
       // A cover or page count the user set stays; so do matches they picked.
       db.prepare(
         `UPDATE documents SET title = COALESCE(?, title), author = CASE WHEN ? THEN NULLIF(?, '') ELSE author END,
-           meta_manual = 1, cover_checked_at = NULL, hc_checked_at = NULL
+           meta_manual = 1, cover_checked_at = NULL, hc_checked_at = NULL, library_checked_at = NULL, library_match = 0
          WHERE user_id = ? AND document = ?`
       ).run((title as string | undefined) ?? null, author !== undefined ? 1 : 0, (author as string | undefined) ?? '', user.id, document);
       db.prepare("DELETE FROM connector_matches WHERE user_id = ? AND document = ? AND source IN ('auto', 'none')").run(user.id, document);

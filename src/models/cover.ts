@@ -5,7 +5,7 @@ import { documentMeta } from '../connectors/store.js';
 import { extractTitleAuthor, scoreCandidate, type Candidate } from '../connectors/matching.js';
 import { nowSeconds } from './sync.js';
 import { cacheKey, cachedHardcoverBook, hardcoverBook, metadataApiUrl, tidy, type HardcoverBook } from './hardcover-catalog.js';
-import { LIBRARY_HIT_TTL, libraryBook, libraryConfig, sameAuthor, storeLibraryCover, type LibraryBook } from './library.js';
+import { LIBRARY_HIT_TTL, libraryBook, libraryConfig, sameAuthor, sameTitle, storeLibraryCover, type LibraryBook } from './library.js';
 import { keepManual } from './manual-details.js';
 
 /**
@@ -207,11 +207,9 @@ async function sharedBookInfo(
  */
 export function withLibrary(lib: LibraryBook | null, other: HardcoverBook | null): HardcoverBook | null {
   if (!lib) return other;
-  // The same author, not just a close title: an equal title alone scores past the threshold.
-  const agrees =
-    other !== null &&
-    sameAuthor(lib.author, other.author) &&
-    scoreCandidate(lib.title, lib.author ?? '', { externalId: other.id, title: other.title, author: other.author }) >= THRESHOLD;
+  // The library's rule for the same book: the same author, and the same title apart from a subtitle
+  // on one side only (a fuzzy score would take "Saga: Book Two" for "Saga: Book One").
+  const agrees = other !== null && sameAuthor(lib.author, other.author) && sameTitle(lib.title, other.title);
   const base: HardcoverBook = agrees
     ? other
     : {

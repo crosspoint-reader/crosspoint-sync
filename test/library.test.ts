@@ -96,6 +96,17 @@ describe('the user\'s library as the first source', () => {
     expect(row.hc_checked_at).not.toBeNull();
   });
 
+  it('drops another source\'s other volume of a series by the same author', async () => {
+    const db = book('Saga: Book One', 'Jane Doe');
+    const base = library(entry(6, 'Saga: Book One', 'Jane Doe'));
+    const http: HttpTransport = async (url, init) =>
+      url.startsWith('https://meta.test/')
+        ? Response.json({ books: [{ id: 't-5', title: 'Saga: Book Two', author: 'Jane Doe', moods: ['dark'], rating: 4.5 }] })
+        : base(url, init);
+    await documentInfo(db, 1, DOC, http, { ...LIB, METADATA_API_URL: 'https://meta.test' }, { hardcover: true });
+    expect(db.prepare('SELECT hc_id, moods, rating FROM documents').get()).toEqual({ hc_id: null, moods: null, rating: null });
+  });
+
   it('drops another source\'s book with the same title by another author', async () => {
     const db = book('Foundryside', 'Robert Jackson Bennett');
     const base = library(entry(5, 'Foundryside', 'Robert Jackson Bennett'));
@@ -223,6 +234,22 @@ describe('keeping covers in line with the library', () => {
     await app.request(`/api/v1/documents/${DOC}/info`, { method: 'PUT', headers, body: JSON.stringify({ cover_url: null }) });
     const { url } = await (await app.request(`/api/v1/documents/${DOC}/cover`, { headers })).json();
     expect(url).toMatch(/^\/api\/v1\/library\/covers\//);
+  });
+
+  it('asks the library again after the title or author is edited', async () => {
+    for (const [k, v] of Object.entries(LIB)) vi.stubEnv(k, v);
+    const { app, db } = makeTestApp({}, { connectorTransport: library(AUGE + MEDUSA) });
+    const { headers } = await registerUser(app);
+    await app.request('/syncs/progress', {
+      method: 'PUT', headers, body: JSON.stringify({ document: DOC, progress: 'x', percentage: 0.1, device: 'X4', device_id: 'x4',
+        metadata: { title: '241 - Die drei Fragezeichen und das weisse Auge', authors: 'Marco Sonnleitner' } }), // a typo: no match
+    });
+    await documentInfo(db, 1, DOC, library(AUGE + MEDUSA), LIB, { hardcover: true });
+    expect(db.prepare('SELECT library_match FROM documents').get()).toEqual({ library_match: 0 });
+    await app.request(`/api/v1/documents/${DOC}/info`, { method: 'PUT', headers, body: JSON.stringify({ title: '241 - Die drei Fragezeichen und das weiße Auge' }) });
+    await documentInfo(db, 1, DOC, library(AUGE + MEDUSA), LIB, { hardcover: true });
+    expect(db.prepare('SELECT library_match FROM documents').get()).toEqual({ library_match: 1 });
+    expect((db.prepare('SELECT cover_url FROM documents').get() as { cover_url: string }).cover_url).toMatch(/^\/api\/v1\/library\/covers\//);
   });
 
   it('shows library covers on a public profile, under the base path', async () => {

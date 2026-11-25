@@ -170,11 +170,15 @@ export function sameAuthor(a: string | null | undefined, b: string | null | unde
  * or entry without an author never matches: a title alone is too often shared.
  */
 export function sameBook(title: string, author: string, book: LibraryBook): boolean {
-  if (!sameAuthor(author, book.author)) return false;
-  const want = normalizeText(title);
-  const theirs = normalizeText(book.title);
-  if (!want || !theirs) return false;
-  return want === theirs || want === normalizeText(coreTitle(book.title)) || normalizeText(coreTitle(title)) === theirs;
+  return sameAuthor(author, book.author) && sameTitle(title, book.title);
+}
+
+/** The same title, or the same apart from a subtitle (or series suffix) on one side only. */
+export function sameTitle(a: string, b: string): boolean {
+  const x = normalizeText(a);
+  const y = normalizeText(b);
+  if (!x || !y) return false;
+  return x === y || x === normalizeText(coreTitle(b)) || normalizeText(coreTitle(a)) === y;
 }
 
 async function search(http: HttpTransport, cfg: LibraryConfig, query: string): Promise<LibraryBook[]> {
