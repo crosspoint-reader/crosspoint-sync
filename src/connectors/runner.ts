@@ -170,7 +170,10 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
     if (!stillCurrent()) return;
     if (result.ok) {
       // Persist (or clear) the per-book condition so the review UI can show it.
-      setMatchNote(db, row.user_id, row.connector_id, row.document, result.note ?? null);
+      // A highlight push says nothing about progress, so it keeps the current note unless it sets one.
+      if (ev.kind !== 'highlight' || result.note !== undefined) {
+        setMatchNote(db, row.user_id, row.connector_id, row.document, result.note ?? null);
+      }
       markDone(db, row.id);
       // A progress push may have established the first match, or a clipping
       // may have arrived while publication was in flight.

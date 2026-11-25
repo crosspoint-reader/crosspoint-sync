@@ -146,9 +146,30 @@ async function validate(cred: Credential, http: HttpTransport): Promise<Validate
   }
 }
 
-/** Highlight export belongs to the separate classic Readwise connector. */
 function shouldPush(ev: OutboundEvent): boolean {
-  return ev.kind === 'progress' || ev.kind === 'finished';
+  return ev.kind === 'progress' || ev.kind === 'finished' || ev.kind === 'highlight';
+}
+
+// attach the clipping to the matched Reader document, so Readwise files it under that book
+async function pushHighlight(token: string, m: Match, ev: OutboundEvent, http: HttpTransport): Promise<PushResult> {
+  const h = ev.highlight;
+  if (!h?.text) return { ok: true };
+  if (rateLimited(token)) return { ok: false, retryable: true, error: 'rate limited' };
+  const res = await http(`${BASE}/save/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({
+      parent_id: m.externalId,
+      content: h.text,
+      saved_using: 'crosspoint',
+      ...(h.note ? { notes: h.note } : {}),
+    }),
+  });
+  noteRateLimit(token, res.status);
+  if (res.status === 401 || res.status === 403) return { ok: false, retryable: false, needsReauth: true, error: 'unauthorized' };
+  if (res.status === 429 || res.status >= 500) return { ok: false, retryable: true, error: `server ${res.status}` };
+  if (res.status === 200 || res.status === 201) return { ok: true };
+  return { ok: false, retryable: false, error: `highlight rejected (${res.status}): ${(await res.text()).slice(0, 200)}` };
 }
 
 async function match(cred: Credential, doc: DocumentMeta, http: HttpTransport): Promise<Match | null> {
@@ -215,6 +236,7 @@ async function push(
   http: HttpTransport
 ): Promise<PushResult> {
   if (!shouldPush(ev)) return { ok: true };
+  if (ev.kind === 'highlight') return pushHighlight(tokenOf(cred), m, ev, http);
   if (typeof ev.percentage !== 'number' || !Number.isFinite(ev.percentage) || ev.percentage < 0 || ev.percentage > 1) {
     return { ok: false, retryable: false, error: 'invalid reading percentage' };
   }
@@ -265,7 +287,7 @@ export const readwiseReaderConnector: Connector = {
   displayName: 'Readwise Reader',
   tier: 1,
   capabilities: { read: true, write: true },
-  carries: ['progress', 'finished'],
+  carries: ['progress', 'finished', 'highlight'],
   credentialKind: 'token',
   beta: false,
   matchBy: 'metadata',

@@ -99,6 +99,47 @@ describe('readwise-reader connector', () => {
     });
   });
 
+  it('adds a clipping as a highlight on the matched document via POST /save/', async () => {
+    const fake = fakeTransport();
+    fake.on('/save/', 201, { id: '01hhh' });
+    const r = await readwiseReaderConnector.push(
+      CRED,
+      { externalId: '01bbb', confidence: 1 },
+      { kind: 'highlight', document: 'hash', timestamp: 1, highlight: { text: 'So we beat on', note: 'last line' } },
+      fake.transport
+    );
+    expect(r.ok).toBe(true);
+    expect(fake.calls).toHaveLength(1);
+    const call = fake.calls[0];
+    expect(call.url).toMatch(/\/api\/v3\/save\/$/);
+    expect(call.method).toBe('POST');
+    expect(JSON.parse(call.body!)).toEqual({ parent_id: '01bbb', content: 'So we beat on', saved_using: 'crosspoint', notes: 'last line' });
+  });
+
+  it('omits notes for a clipping without one', async () => {
+    const fake = fakeTransport();
+    fake.on('/save/', 200, { id: '01hhh' });
+    const r = await readwiseReaderConnector.push(CRED, { externalId: '01bbb', confidence: 1 },
+      { kind: 'highlight', document: 'hash', timestamp: 1, highlight: { text: 'Whenever you feel', note: null } }, fake.transport);
+    expect(r.ok).toBe(true);
+    expect(JSON.parse(fake.calls[0].body!)).toEqual({ parent_id: '01bbb', content: 'Whenever you feel', saved_using: 'crosspoint' });
+  });
+
+  it.each([
+    [400, false, false],
+    [401, false, true],
+    [429, true, false],
+    [503, true, false],
+  ])('maps a %s highlight response', async (status, retryable, needsReauth) => {
+    const fake = fakeTransport();
+    fake.on('/save/', status, { content: ['not found in the document'] });
+    const r = await readwiseReaderConnector.push(CRED, { externalId: '01bbb', confidence: 1 },
+      { kind: 'highlight', document: 'hash', timestamp: 1, highlight: { text: 'missing passage' } }, fake.transport);
+    expect(r.ok).toBe(false);
+    expect(r.retryable).toBe(retryable);
+    expect(!!r.needsReauth).toBe(needsReauth);
+  });
+
   it.each(['progress', 'finished'] as const)('preserves newer Reader progress for queued %s events', async kind => {
     const fake = fakeTransport();
     fake.on('id=', 200, { results: [{ reading_progress: 0.7, updated_at: '2026-01-01T00:00:00Z' }] });
