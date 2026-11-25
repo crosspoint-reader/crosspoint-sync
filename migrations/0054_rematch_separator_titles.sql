@@ -16,4 +16,9 @@ DELETE FROM connector_matches
   WHERE source IN ('auto', 'none')
     AND (user_id, document) IN (SELECT user_id, document FROM separator_title_docs);
 
+-- A colon title keeps its lookup key (the part before the colon), so its cached miss would
+-- answer the new lookup without a search. Drop cached misses: they are only asked for again
+-- when a book is looked up, and these are the books being looked up.
+DELETE FROM catalog_cache WHERE data IS NULL;
+
 DROP TABLE separator_title_docs;

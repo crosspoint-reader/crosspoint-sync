@@ -38,7 +38,14 @@ describe('titles with a series number or prefix', () => {
     match.run('d'.repeat(32), 'y', 'auto');
     match.run('e'.repeat(32), null, 'none');
 
+    const cache = db.prepare('INSERT INTO catalog_cache (key, data, checked_at) VALUES (?, ?, ?)');
+    cache.run(cacheKey('Game Changers 6: The Long Game', 'A'), null, Math.floor(Date.now() / 1000)); // a recent miss
+    cache.run(cacheKey('Foundryside: A Novel', 'A'), '{"id":7}', 100);
+
     db.exec(readFileSync(new URL('../migrations/0054_rematch_separator_titles.sql', import.meta.url), 'utf8'));
+
+    // The miss is gone, so the new lookup searches; a found book stays cached.
+    expect(db.prepare('SELECT key FROM catalog_cache ORDER BY key').all()).toEqual([{ key: cacheKey('Foundryside: A Novel', 'A') }]);
 
     const checked = (d: string) =>
       db.prepare('SELECT cover_url, cover_checked_at, hc_checked_at FROM documents WHERE document = ?').get(d.repeat(32));
