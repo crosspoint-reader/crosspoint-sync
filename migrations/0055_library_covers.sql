@@ -2,10 +2,12 @@
 -- usually need its login, so each cover is fetched once and served from here.
 CREATE TABLE library_covers (
   id TEXT PRIMARY KEY,          -- random: the cover's public address
-  source TEXT NOT NULL UNIQUE,  -- the library's cover link
+  source TEXT NOT NULL,         -- the catalog (a hash of its URL and login) and the cover link
+  digest TEXT NOT NULL,         -- SHA-256 of the image: a changed picture is a new row and address
   content_type TEXT NOT NULL,
   data BLOB NOT NULL,
-  fetched_at INTEGER NOT NULL
+  fetched_at INTEGER NOT NULL,
+  UNIQUE (source, digest)
 );
 
 -- A cover picked by hand is kept; the library replaces only automatic ones. Covers stored

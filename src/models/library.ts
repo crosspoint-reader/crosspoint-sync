@@ -264,34 +264,42 @@ export async function readCapped(res: Awaited<ReturnType<HttpTransport>>, max: n
 }
 
 /**
- * The library's cover, fetched with the library's login once and kept here; returns the
- * server-relative path to show it at, or null when it can't be had.
+ * The library's cover, fetched with the library's login and kept here; returns the server-relative
+ * path to show it at, or null when it can't be had. Covers are kept per catalog (URL and login) and
+ * link. `refresh` fetches the link again: a changed picture gets a new address, since covers are
+ * served as immutable.
  */
 export async function storeLibraryCover(
   db: DB,
   http: HttpTransport,
-  source: string,
-  env: NodeJS.ProcessEnv = process.env
+  url: string,
+  env: NodeJS.ProcessEnv = process.env,
+  { refresh = false }: { refresh?: boolean } = {}
 ): Promise<string | null> {
-  const known = db.prepare('SELECT id FROM library_covers WHERE source = ?').get(source) as { id: string } | undefined;
-  if (known) return libraryCoverPath(known.id);
   const cfg = libraryConfig(env);
   if (!cfg) return null;
+  const source = `${catalogId(cfg)} ${url}`;
+  const newest = () =>
+    db.prepare('SELECT id FROM library_covers WHERE source = ? ORDER BY fetched_at DESC, rowid DESC LIMIT 1').get(source) as
+      | { id: string }
+      | undefined;
+  const known = newest();
+  if (known && !refresh) return libraryCoverPath(known.id);
   try {
-    const res = await http(source, { method: 'GET', headers: headers(cfg, source, 'image/*'), signal: AbortSignal.timeout(15000) });
+    const res = await http(url, { method: 'GET', headers: headers(cfg, url, 'image/*'), signal: AbortSignal.timeout(15000) });
     const type = res.headers?.get('content-type')?.split(';')[0].trim().toLowerCase() ?? '';
-    if (res.status !== 200 || !/^image\/(jpeg|png|gif|webp)$/.test(type)) return null;
+    if (res.status !== 200 || !/^image\/(jpeg|png|gif|webp)$/.test(type)) return known ? libraryCoverPath(known.id) : null;
     const data = await readCapped(res, MAX_COVER_BYTES);
-    if (!data?.length) return null;
-    const id = crypto.randomBytes(16).toString('hex');
+    if (!data?.length) return known ? libraryCoverPath(known.id) : null;
+    const digest = crypto.createHash('sha256').update(data).digest('hex');
     db.prepare(
-      `INSERT INTO library_covers (id, source, content_type, data, fetched_at) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(source) DO NOTHING`
-    ).run(id, source, type, data, nowSeconds());
-    const row = db.prepare('SELECT id FROM library_covers WHERE source = ?').get(source) as { id: string };
+      `INSERT INTO library_covers (id, source, digest, content_type, data, fetched_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(source, digest) DO UPDATE SET fetched_at = excluded.fetched_at`
+    ).run(crypto.randomBytes(16).toString('hex'), source, digest, type, data, nowSeconds());
+    const row = db.prepare('SELECT id FROM library_covers WHERE source = ? AND digest = ?').get(source, digest) as { id: string };
     return libraryCoverPath(row.id);
   } catch {
-    return null;
+    return known ? libraryCoverPath(known.id) : null;
   }
 }
 

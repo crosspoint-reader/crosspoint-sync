@@ -293,7 +293,8 @@ export async function documentInfo(
     let coverFailed = false;
     if (lib?.cover && !row.cover_manual) {
       // The library's cover replaces an automatic one (found earlier, or while the library was down).
-      const path = await storeLibraryCover(db, http, lib.cover, env);
+      // A matched book's weekly refresh fetches the cover again: it may have changed in the library.
+      const path = await storeLibraryCover(db, http, lib.cover, env, { refresh: !!row.library_match });
       coverFailed = !path;
       if (path && path !== row.cover_url) {
         row.cover_url = path;

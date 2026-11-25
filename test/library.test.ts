@@ -268,6 +268,33 @@ describe('library lookups over time', () => {
     expect(db.prepare('SELECT description FROM documents').get()).toEqual({ description: 'Aus dem zweiten Katalog.' });
   });
 
+  it('gives a cover changed in the library a new address, and keeps covers per catalog', async () => {
+    const db = book('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
+    let picture = JPEG;
+    let fetched = 0;
+    const base = library(AUGE);
+    const http: HttpTransport = async (url, init) => {
+      if (url !== 'https://lib.test/opds/cover/170') return base(url, init);
+      fetched++;
+      return new Response(picture, { headers: { 'content-type': 'image/jpeg' } });
+    };
+    const cover = () => (db.prepare('SELECT cover_url FROM documents').get() as { cover_url: string }).cover_url;
+    await documentInfo(db, 1, DOC, http, LIB, { hardcover: true });
+    const first = cover();
+    // A week later the library has a new picture at the same link.
+    picture = new Uint8Array([0xff, 0xd8, 9, 9, 9, 0xff, 0xd9]);
+    db.prepare('UPDATE documents SET library_checked_at = library_checked_at - 7 * 86400').run();
+    await documentInfo(db, 1, DOC, http, LIB, { hardcover: true });
+    expect(cover()).not.toBe(first);
+    const { storeLibraryCover } = await import('../src/models/library.js');
+    // The same link under another login is fetched again, not taken from the first catalog.
+    const before = fetched;
+    await storeLibraryCover(db, http, 'https://lib.test/opds/cover/170', { ...LIB, LIBRARY_OPDS_USERNAME: 'other' });
+    expect(fetched).toBe(before + 1);
+    // An unchanged picture keeps its address.
+    expect(await storeLibraryCover(db, http, 'https://lib.test/opds/cover/170', LIB, { refresh: true })).toBe(cover());
+  });
+
   it('leaves a library that failed alone for a while, and keeps using its last answer', async () => {
     const db = book('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
     await documentInfo(db, 1, DOC, library(AUGE), LIB, { hardcover: true });
