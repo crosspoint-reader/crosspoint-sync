@@ -83,8 +83,15 @@ async function push(
   if (ev.kind !== 'highlight' || !ev.highlight) {
     return { ok: true };
   }
-  const token = tokenOf(cred);
-  const h = ev.highlight;
+  return (await postHighlight(tokenOf(cred), ev.highlight, http)).result;
+}
+
+/** POST one clipping to /api/v2/highlights/, which files it under a "crosspoint" book by title and author. */
+export async function postHighlight(
+  token: string,
+  h: NonNullable<OutboundEvent['highlight']>,
+  http: HttpTransport
+): Promise<{ status: number; result: PushResult }> {
   const highlight: Record<string, unknown> = {
     text: h.text,
     title: h.title ?? undefined,
@@ -101,13 +108,15 @@ async function push(
     headers: authHeaders(token),
     body: JSON.stringify({ highlights: [highlight] }),
   });
-  if (res.status === 401) {
-    return { ok: false, retryable: false, needsReauth: true, error: 'unauthorized' };
-  }
-  if (res.status === 429) return { ok: false, retryable: true, error: 'rate limited' };
-  if (res.status >= 500) return { ok: false, retryable: true, error: `server ${res.status}` };
-  if (res.status === 200 || res.status === 201) return { ok: true };
-  return { ok: false, retryable: false, error: `unexpected status ${res.status}` };
+  return { status: res.status, result: highlightResult(res.status) };
+}
+
+function highlightResult(status: number): PushResult {
+  if (status === 401) return { ok: false, retryable: false, needsReauth: true, error: 'unauthorized' };
+  if (status === 429) return { ok: false, retryable: true, error: 'rate limited' };
+  if (status >= 500) return { ok: false, retryable: true, error: `server ${status}` };
+  if (status === 200 || status === 201) return { ok: true };
+  return { ok: false, retryable: false, error: `unexpected status ${status}` };
 }
 
 /**

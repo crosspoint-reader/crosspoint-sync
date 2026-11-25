@@ -262,6 +262,9 @@ export interface Connector {
     http: HttpTransport
   ): Promise<Match | null>;
 
+  /** Push an event for a document with no match. Null, or no hook, drops the event. */
+  pushUnmatched?(cred: Credential, doc: DocumentMeta, ev: OutboundEvent, http: HttpTransport): Promise<PushResult | null>;
+
   /** Push one outbound event. Only called for write-capable connectors. */
   push(cred: Credential, match: Match, ev: OutboundEvent, http: HttpTransport, ctx?: ConnectorContext): Promise<PushResult>;
 

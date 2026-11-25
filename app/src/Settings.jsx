@@ -46,7 +46,7 @@ const HINTS = {
   hardcover: 'Syncs your reading progress and shelf status to Hardcover, and your highlights if you turn them on.',
   microblog: 'Keeps your Currently reading and Finished reading bookshelves in sync. Optional clipping sync publishes one post per book and updates its generated content on later syncs, replacing edits made on Micro.blog.',
   readwise: 'Syncs your highlights to Readwise.',
-  'readwise-reader': 'Syncs reading progress both ways for matched books, adds your clippings as highlights, and archives finished books. Does not import your Reader library or highlights.',
+  'readwise-reader': 'Syncs reading progress both ways for matched books, adds your clippings as highlights, and archives finished books. Clippings on a book that is not in Reader go to their own Readwise book. Does not import your Reader library or highlights.',
   kosync: 'Syncs your reading progress both ways with another KOReader-compatible (KOSync) server. For Calibre-Web, use your library URL ending in /kosync.',
   bookfusion: 'Syncs reading progress with BookFusion. You approve the request on bookfusion.com.',
   audiobookshelf: 'Keeps your place between the ebook and the audiobook. Create an API key in Audiobookshelf under Settings, Users, API Keys.',

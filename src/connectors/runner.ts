@@ -157,17 +157,20 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
     failOperation(db, row, err, 'match failed');
     return;
   }
-  if (!match) {
-    // Unmatched documents can't be pushed; drop this event (a later manual
-    // match + fresh sync will re-enqueue). Not an error state.
-    markFailed(db, row, 'no book match', false);
-    return;
-  }
-
   const cred = decryptCredential(account, db);
   try {
-    const result = await connector.push(cred, match, ev, http, { db, userId: row.user_id, document: row.document });
+    const result = match
+      ? await connector.push(cred, match, ev, http, { db, userId: row.user_id, document: row.document })
+      : unmatchedNow(db, row, account.cred_enc)
+        ? await connector.pushUnmatched?.(cred, documentMeta(db, row.user_id, row.document), ev, http)
+        : null;
     if (!stillCurrent()) return;
+    if (!result) {
+      // Unmatched documents can't be pushed; drop this event (a later manual
+      // match + fresh sync will re-enqueue). Not an error state.
+      markFailed(db, row, 'no book match', false);
+      return;
+    }
     if (result.ok) {
       // Persist (or clear) the per-book condition so the review UI can show it.
       // A highlight push says nothing about progress, so it keeps the current note unless it sets one.
@@ -196,6 +199,13 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
     if (!stillCurrent()) return;
     failOperation(db, row, err, 'push failed');
   }
+}
+
+/** True only when matching ran and found nothing: not an opt-out, an unlink, or a discarded stale lookup. */
+function unmatchedNow(db: DB, row: QueueRow, credEnc: string): boolean {
+  const account = getAccount(db, row.user_id, row.connector_id);
+  const current = getMatch(db, row.user_id, row.connector_id, row.document);
+  return !!account?.enabled && account.cred_enc === credEnc && current?.source === 'none' && !current.external_id;
 }
 
 function failOperation(db: DB, row: QueueRow, err: unknown, prefix: string): void {
