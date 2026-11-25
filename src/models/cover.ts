@@ -289,9 +289,11 @@ export async function documentInfo(
   const asked = due || (libraryOn && row.library_match) ? await libraryBook(db, http, want!.title, want!.author, env) : null;
   const lib = asked === 'later' ? null : asked;
   if (due && asked !== 'later') {
+    let coverFailed = false;
     if (lib?.cover && !row.cover_manual) {
       // The library's cover replaces an automatic one (found earlier, or while the library was down).
       const path = await storeLibraryCover(db, http, lib.cover, env);
+      coverFailed = !path;
       if (path && path !== row.cover_url) {
         row.cover_url = path;
         db.prepare('UPDATE documents SET cover_url = ?, cover_checked_at = ? WHERE user_id = ? AND document = ?').run(path, now, userId, document);
@@ -301,7 +303,8 @@ export async function documentInfo(
     if (lib && row.hc_checked_at != null) {
       saveHardcover(db, userId, document, withLibrary(lib, row.hc_id ? cachedHardcoverBook(db, want!.title, want!.author) : null));
     }
-    db.prepare('UPDATE documents SET library_checked_at = ?, library_match = ? WHERE user_id = ? AND document = ?').run(now, lib ? 1 : 0, userId, document);
+    // A cover that couldn't be fetched counts as a miss for now, so it is tried again after a day.
+    db.prepare('UPDATE documents SET library_checked_at = ?, library_match = ? WHERE user_id = ? AND document = ?').run(now, lib && !coverFailed ? 1 : 0, userId, document);
   }
   const external = metadataApiUrl(env) || env.HARDCOVER_API_KEY || env.ISBNDB_API_KEY;
   let hc: HardcoverBook | null = null;

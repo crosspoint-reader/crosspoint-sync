@@ -158,15 +158,16 @@ export function sameAuthor(a: string | null | undefined, b: string | null | unde
 }
 
 /**
- * The same book: equal titles (whole, or without a subtitle) and a shared author. A book sent without
- * an author matches only an entry without one and the very same title.
+ * The same book: the same title, or the same apart from a subtitle on one side only ("Foundryside" and
+ * "Foundryside: A Novel", but not "Series: Book One" and "Series: Book Two"), and a shared author. A book
+ * or entry without an author never matches: a title alone is too often shared.
  */
 export function sameBook(title: string, author: string, book: LibraryBook): boolean {
-  const titles = (t: string) => new Set([normalizeText(t), normalizeText(coreTitle(t))].filter(Boolean));
-  const want = titles(title);
-  if (![...titles(book.title)].some((t) => want.has(t))) return false;
-  if (!author.trim()) return !book.author && normalizeText(title) === normalizeText(book.title);
-  return sameAuthor(author, book.author);
+  if (!sameAuthor(author, book.author)) return false;
+  const want = normalizeText(title);
+  const theirs = normalizeText(book.title);
+  if (!want || !theirs) return false;
+  return want === theirs || want === normalizeText(coreTitle(book.title)) || normalizeText(coreTitle(title)) === theirs;
 }
 
 async function search(http: HttpTransport, cfg: LibraryConfig, query: string): Promise<LibraryBook[]> {
@@ -175,7 +176,10 @@ async function search(http: HttpTransport, cfg: LibraryConfig, query: string): P
   return children(feed, 'entry').map((e) => parseEntry(e, url)).filter((b): b is LibraryBook => b !== null);
 }
 
-const cacheKey = (title: string, author: string) => `library:${normalizeText(title)}|${normalizeAuthor(author)}`;
+// Keyed on the catalog too: another LIBRARY_OPDS_URL or login must not reuse this one's answers.
+const catalogId = (cfg: LibraryConfig) => crypto.createHash('sha256').update(`${cfg.url}\n${cfg.username}`).digest('hex').slice(0, 12);
+const cacheKey = (cfg: LibraryConfig, title: string, author: string) =>
+  `library:${catalogId(cfg)}:${normalizeText(title)}|${normalizeAuthor(author)}`;
 
 /**
  * The library's entry for a book, or null when the library doesn't have it, or 'later'
@@ -191,7 +195,7 @@ export async function libraryBook(
 ): Promise<LibraryBook | null | 'later'> {
   const cfg = libraryConfig(env);
   if (!cfg || !title.trim()) return null;
-  const key = cacheKey(title, author);
+  const key = cacheKey(cfg, title, author);
   const hit = db.prepare('SELECT data, checked_at FROM catalog_cache WHERE key = ?').get(key) as
     | { data: string | null; checked_at: number }
     | undefined;

@@ -240,6 +240,30 @@ describe('keeping covers in line with the library', () => {
   });
 });
 
+describe('library lookups over time', () => {
+  it('tries a cover again after a failed download', async () => {
+    const db = book('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
+    const base = library(AUGE);
+    const broken: HttpTransport = async (url, init) => (url.endsWith('/opds/cover/170') ? new Response('busy', { status: 503 }) : base(url, init));
+    await documentInfo(db, 1, DOC, broken, LIB, { hardcover: true });
+    expect(db.prepare('SELECT cover_url, library_match FROM documents').get()).toEqual({ cover_url: null, library_match: 0 });
+    db.prepare('UPDATE documents SET library_checked_at = library_checked_at - 86400').run(); // a day later
+    await documentInfo(db, 1, DOC, base, LIB, { hardcover: true });
+    expect((db.prepare('SELECT cover_url FROM documents').get() as { cover_url: string }).cover_url).toMatch(/^\/api\/v1\/library\/covers\//);
+  });
+
+  it('doesn\'t reuse another catalog\'s answers', async () => {
+    const db = book('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
+    const calls: { url: string }[] = [];
+    await documentInfo(db, 1, DOC, library('', calls), LIB, { hardcover: true }); // a miss in the first catalog
+    db.prepare('UPDATE documents SET library_checked_at = NULL').run();
+    const other = { ...LIB, LIBRARY_OPDS_USERNAME: 'someone-else' };
+    await documentInfo(db, 1, DOC, library(AUGE, calls), other, { hardcover: true });
+    expect(calls.filter((c) => c.url.includes('/opds/search/')).length).toBeGreaterThan(1);
+    expect((db.prepare('SELECT library_match FROM documents').get() as { library_match: number }).library_match).toBe(1);
+  });
+});
+
 describe('cover downloads', () => {
   const big = new Uint8Array(1024);
   it('stops at the size limit, whether the server says so or not', async () => {
@@ -280,8 +304,12 @@ describe('library matching', () => {
     expect(sameBook('Leviathan Wakes', 'Someone Else', lib)).toBe(false);
     expect(sameBook('Caliban\'s War', 'James S. A. Corey', lib)).toBe(false);
     expect(sameBook('Leviathan Wakes', 'Daniel Abraham & Ty Franck', { ...lib, author: 'Daniel Abraham & Ty Franck' })).toBe(true);
-    // An entry without an author matches only a book sent without one.
+    // Without an author on either side, a title alone isn't enough.
     expect(sameBook('Leviathan Wakes', 'James S. A. Corey', { ...lib, author: null })).toBe(false);
-    expect(sameBook('Leviathan Wakes', '', { ...lib, author: null })).toBe(true);
+    expect(sameBook('Leviathan Wakes', '', { ...lib, author: null })).toBe(false);
+    // A subtitle may differ on one side only: two books of one series aren't the same book.
+    const series = { ...lib, title: 'The Expanse: Caliban\'s War' };
+    expect(sameBook('The Expanse: Leviathan Wakes', 'James S. A. Corey', series)).toBe(false);
+    expect(sameBook('The Expanse', 'James S. A. Corey', series)).toBe(true);
   });
 });
