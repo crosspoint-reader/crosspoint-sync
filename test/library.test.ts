@@ -96,6 +96,17 @@ describe('the user\'s library as the first source', () => {
     expect(row.hc_checked_at).not.toBeNull();
   });
 
+  it('checks another source\'s answer against the reader\'s title too', async () => {
+    const db = book('Saga: Book One', 'Jane Doe');
+    const base = library(entry(6, 'Saga', 'Jane Doe')); // the library holds it without the subtitle
+    const http: HttpTransport = async (url, init) =>
+      url.startsWith('https://meta.test/')
+        ? Response.json({ books: [{ id: 't-6', title: 'Saga: Book Two', author: 'Jane Doe', moods: ['dark'], rating: 4.5 }] })
+        : base(url, init);
+    await documentInfo(db, 1, DOC, http, { ...LIB, METADATA_API_URL: 'https://meta.test' }, { hardcover: true });
+    expect(db.prepare('SELECT hc_id, moods, rating FROM documents').get()).toEqual({ hc_id: null, moods: null, rating: null });
+  });
+
   it('drops another source\'s other volume of a series by the same author', async () => {
     const db = book('Saga: Book One', 'Jane Doe');
     const base = library(entry(6, 'Saga: Book One', 'Jane Doe'));
@@ -250,6 +261,33 @@ describe('keeping covers in line with the library', () => {
     await documentInfo(db, 1, DOC, library(AUGE + MEDUSA), LIB, { hardcover: true });
     expect(db.prepare('SELECT library_match FROM documents').get()).toEqual({ library_match: 1 });
     expect((db.prepare('SELECT cover_url FROM documents').get() as { cover_url: string }).cover_url).toMatch(/^\/api\/v1\/library\/covers\//);
+    // Corrected to a book the library doesn't have: its cover goes with the old identity.
+    await app.request(`/api/v1/documents/${DOC}/info`, { method: 'PUT', headers, body: JSON.stringify({ author: 'Somebody Else' }) });
+    expect(db.prepare('SELECT cover_url FROM documents').get()).toEqual({ cover_url: null });
+  });
+
+  it('doesn\'t overwrite a cover picked while the library was being asked', async () => {
+    const db = book('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
+    const base = library(AUGE);
+    const http: HttpTransport = async (url, init) => {
+      if (url.endsWith('/opds/cover/170')) {
+        // The user picks a cover in the app meanwhile.
+        db.prepare("UPDATE documents SET cover_url = 'https://mine.test/cover.jpg', cover_manual = 1").run();
+      }
+      return base(url, init);
+    };
+    await documentInfo(db, 1, DOC, http, LIB, { hardcover: true });
+    expect(db.prepare('SELECT cover_url, cover_manual FROM documents').get()).toEqual({ cover_url: 'https://mine.test/cover.jpg', cover_manual: 1 });
+  });
+
+  it('keeps a cover picked by hand when two copies of a book are merged', async () => {
+    const { mergeDocuments } = await import('../src/models/merge.js');
+    const db = book('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
+    const alias = 'f'.repeat(32);
+    db.prepare("UPDATE documents SET cover_url = '/api/v1/library/covers/0123456789abcdef0123456789abcdef', cover_manual = 0").run();
+    db.prepare("INSERT INTO documents (user_id, document, title, cover_url, cover_manual, updated_at) VALUES (1, ?, 'x', 'https://mine.test/cover.jpg', 1, 0)").run(alias);
+    mergeDocuments(db, 1, alias, DOC, Math.floor(Date.now() / 1000));
+    expect(db.prepare('SELECT cover_url, cover_manual FROM documents WHERE document = ?').get(DOC)).toEqual({ cover_url: 'https://mine.test/cover.jpg', cover_manual: 1 });
   });
 
   it('shows library covers on a public profile, under the base path', async () => {
@@ -322,7 +360,7 @@ describe('library lookups over time', () => {
     expect(await storeLibraryCover(db, http, 'https://lib.test/opds/cover/170', LIB, { refresh: true })).toBe(cover());
   });
 
-  it('leaves a library that failed alone for a while, and keeps using its last answer', async () => {
+  it('leaves a library that failed alone for a while, and keeps the book due until it answers', async () => {
     const db = book('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
     await documentInfo(db, 1, DOC, library(AUGE), LIB, { hardcover: true });
     db.prepare("UPDATE catalog_cache SET checked_at = checked_at - 8 * 86400 WHERE key LIKE 'library:%'").run(); // the answer expired
@@ -335,14 +373,72 @@ describe('library lookups over time', () => {
       return library('')(url, init);
     };
     const { libraryBook } = await import('../src/models/library.js');
-    const first = await libraryBook(db, down, '241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner', LIB);
-    const again = await libraryBook(db, down, '241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner', LIB);
-    expect(first).toMatchObject({ title: '241 - Die drei Fragezeichen und das weiße Auge' });
-    expect(again).toEqual(first);
+    expect(await libraryBook(db, down, '241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner', LIB)).toBe('later');
+    expect(await libraryBook(db, down, '241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner', LIB)).toBe('later');
     expect(asked).toBe(1);
     // Another book without a stored answer isn't waited on either.
     expect(await libraryBook(db, down, 'Something else', 'Someone', LIB)).toBe('later');
     expect(asked).toBe(1);
+    // A week-old match whose refresh failed stays due: it is applied once the library answers.
+    db.prepare('UPDATE documents SET library_checked_at = library_checked_at - 7 * 86400').run();
+    const due = (db.prepare('SELECT library_checked_at FROM documents').get() as { library_checked_at: number }).library_checked_at;
+    await documentInfo(db, 1, DOC, down, LIB, { hardcover: true });
+    expect(db.prepare('SELECT library_checked_at FROM documents').get()).toEqual({ library_checked_at: due });
+    resetLibraryState(); // five minutes later
+    await documentInfo(db, 1, DOC, library(AUGE), LIB, { hardcover: true });
+    expect((db.prepare('SELECT library_checked_at FROM documents').get() as { library_checked_at: number }).library_checked_at).toBeGreaterThan(due);
+  });
+
+  it('retries a cover whose weekly download failed, showing the old one meanwhile', async () => {
+    const db = book('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
+    await documentInfo(db, 1, DOC, library(AUGE), LIB, { hardcover: true });
+    const shown = (db.prepare('SELECT cover_url FROM documents').get() as { cover_url: string }).cover_url;
+    const base = library(AUGE);
+    const busy: HttpTransport = async (url, init) => (url.endsWith('/opds/cover/170') ? new Response('busy', { status: 503 }) : base(url, init));
+    db.prepare('UPDATE documents SET library_checked_at = library_checked_at - 7 * 86400').run();
+    await documentInfo(db, 1, DOC, busy, LIB, { hardcover: true });
+    // Still the old cover, and marked to be tried again after a day rather than a week.
+    expect(db.prepare('SELECT cover_url, library_match FROM documents').get()).toEqual({ cover_url: shown, library_match: 0 });
+  });
+
+  it('stores the library\'s details while the other sources are busy', async () => {
+    const db = book('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
+    const base = library(AUGE);
+    const busy: HttpTransport = async (url, init) => (url.startsWith('https://meta.test/') ? new Response('', { status: 503 }) : base(url, init));
+    await documentInfo(db, 1, DOC, busy, { ...LIB, METADATA_API_URL: 'https://meta.test' }, { hardcover: true });
+    expect(db.prepare('SELECT description, genres, release_year, hc_checked_at FROM documents').get()).toEqual({
+      description: 'Während eines Camping-Wochenendes …', genres: '["Krimi"]', release_year: 2024, hc_checked_at: null,
+    });
+  });
+
+  it('keeps "Saga: A Novel" and "Saga A Novel" apart in the cache', async () => {
+    const { libraryBook } = await import('../src/models/library.js');
+    const db = book('x', 'y');
+    const saga = library(entry(8, 'Saga', 'Jane Doe'));
+    expect(await libraryBook(db, saga, 'Saga A Novel', 'Jane Doe', LIB)).toBeNull();
+    expect(await libraryBook(db, saga, 'Saga: A Novel', 'Jane Doe', LIB)).toMatchObject({ title: 'Saga' });
+  });
+
+  it('finds the catalog\'s search again after it moved', async () => {
+    const { libraryBook } = await import('../src/models/library.js');
+    const db = book('x', 'y');
+    let moved = false;
+    const http: HttpTransport = async (url) => {
+      if (url === 'https://lib.test/opds') return atom(`<link type="application/atom+xml" rel="search" href="/${moved ? 'new' : 'old'}/{searchTerms}"/>`);
+      if (url.startsWith('https://lib.test/new/')) return atom(entry(9, 'Foundryside', 'Robert Jackson Bennett'));
+      if (url.startsWith('https://lib.test/old/') && !moved) return atom('');
+      return new Response('gone', { status: 404 });
+    };
+    expect(await libraryBook(db, http, 'Dune', 'Frank Herbert', LIB)).toBeNull();
+    moved = true;
+    expect(await libraryBook(db, http, 'Foundryside', 'Robert Jackson Bennett', LIB)).toBe('later');
+    // The failure itself forgets the old search address; only the pause after it has to pass.
+    vi.useFakeTimers({ now: Date.now() + 10 * 60 * 1000 });
+    try {
+      expect(await libraryBook(db, http, 'Foundryside', 'Robert Jackson Bennett', LIB)).toMatchObject({ title: 'Foundryside' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('doesn\'t reuse another catalog\'s answers', async () => {
@@ -394,11 +490,14 @@ describe('library matching', () => {
     const db = book('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
     const calls: { url: string; auth?: string }[] = [];
     const base = library(AUGE, calls);
-    const redirecting: HttpTransport = async (url, init) =>
-      url === 'https://lib.test/opds/cover/170'
-        ? (expect(init.redirect).toBe('manual'), new Response(null, { status: 302, headers: { location: 'http://10.0.0.1/admin' } }))
-        : base(url, init);
+    let redirect: string | undefined;
+    const redirecting: HttpTransport = async (url, init) => {
+      if (url !== 'https://lib.test/opds/cover/170') return base(url, init);
+      redirect = init.redirect;
+      return new Response(null, { status: 302, headers: { location: 'http://10.0.0.1/admin' } });
+    };
     await documentInfo(db, 1, DOC, redirecting, LIB);
+    expect(redirect).toBe('manual');
     expect(calls.some((c) => c.url.startsWith('http://10.'))).toBe(false);
     expect((db.prepare('SELECT cover_url FROM documents').get() as { cover_url: string | null }).cover_url).toBeNull();
 

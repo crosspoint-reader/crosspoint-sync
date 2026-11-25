@@ -205,11 +205,16 @@ async function sharedBookInfo(
  * sources' answer is kept only when it is the same book (their match is fuzzy and can be another book by
  * the same author), and then fills what the library lacks.
  */
-export function withLibrary(lib: LibraryBook | null, other: HardcoverBook | null): HardcoverBook | null {
+export function withLibrary(lib: LibraryBook | null, other: HardcoverBook | null, title?: string): HardcoverBook | null {
   if (!lib) return other;
   // The library's rule for the same book: the same author, and the same title apart from a subtitle
-  // on one side only (a fuzzy score would take "Saga: Book Two" for "Saga: Book One").
-  const agrees = other !== null && sameAuthor(lib.author, other.author) && sameTitle(lib.title, other.title);
+  // on one side only (a fuzzy score would take "Saga: Book Two" for "Saga: Book One"). Checked against
+  // the reader's own title too: the library may hold "Saga" for the reader's "Saga: Book One".
+  const agrees =
+    other !== null &&
+    sameAuthor(lib.author, other.author) &&
+    sameTitle(lib.title, other.title) &&
+    (!title || sameTitle(title, other.title));
   const base: HardcoverBook = agrees
     ? other
     : {
@@ -226,6 +231,22 @@ export function withLibrary(lib: LibraryBook | null, other: HardcoverBook | null
     series_position: lib.series ? lib.series_position : base.series_position,
     release_year: lib.release_year ?? base.release_year,
   };
+}
+
+/**
+ * The library's own details, stored while the other sources can't answer yet: hc_checked_at stays as it
+ * is, so they are asked again. Only what the library has is written; details set by hand stay.
+ */
+function saveLibraryDetails(db: DB, userId: number, document: string, lib: LibraryBook): void {
+  const genres = tidy(lib.genres, 6);
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  if (lib.description) sets.push(keepManual('description')), values.push(lib.description);
+  if (genres.length) sets.push(keepManual('genres')), values.push(JSON.stringify(genres));
+  if (lib.series) sets.push(keepManual('series'), keepManual('series_position')), values.push(lib.series, lib.series_position);
+  if (lib.release_year) sets.push(keepManual('release_year')), values.push(lib.release_year);
+  if (!sets.length) return;
+  db.prepare(`UPDATE documents SET ${sets.join(', ')} WHERE user_id = ? AND document = ?`).run(...(values as (string | number | null)[]), userId, document);
 }
 
 /** Store Hardcover's details on a document (a miss just records the check). Details set by hand stay. */
@@ -276,8 +297,9 @@ export async function documentInfo(
   const want = extractTitleAuthor(documentMeta(db, userId, document));
 
   // The user's own library goes first. A book is due when the library never answered for it, didn't
-  // have it a day ago, or had it a week ago (the library, or LIBRARY_OPDS_URL, may have changed since). Normal reads ask only for books without a cover; the background
-  // enricher also brings books with older covers and details in line.
+  // have it a day ago, or had it a week ago (the library, or LIBRARY_OPDS_URL, may have changed since).
+  // Normal reads ask only for books without a cover; the background enricher also brings books with
+  // older covers and details in line.
   const now = nowSeconds();
   const libraryOn = !!want && libraryConfig(env) !== null;
   const due =
@@ -292,16 +314,20 @@ export async function documentInfo(
     if (lib?.cover && !row.cover_manual) {
       // The library's cover replaces an automatic one (found earlier, or while the library was down).
       // A matched book's weekly refresh fetches the cover again: it may have changed in the library.
+      // A failed fetch keeps the cover shown now and is tried again after a day.
       const path = await storeLibraryCover(db, http, lib.cover, env, { refresh: !!row.library_match });
       coverFailed = !path;
       if (path && path !== row.cover_url) {
-        row.cover_url = path;
-        db.prepare('UPDATE documents SET cover_url = ?, cover_checked_at = ? WHERE user_id = ? AND document = ?').run(path, now, userId, document);
+        // Not over a cover the user picked while this was running.
+        const set = db
+          .prepare('UPDATE documents SET cover_url = ?, cover_checked_at = ? WHERE user_id = ? AND document = ? AND cover_manual = 0')
+          .run(path, now, userId, document);
+        if (set.changes) row.cover_url = path;
       }
     }
     // Details stored before the library had the book: its own go over them now (those set by hand stay).
     if (lib && row.hc_checked_at != null) {
-      saveHardcover(db, userId, document, withLibrary(lib, row.hc_id ? cachedHardcoverBook(db, want!.title, want!.author) : null));
+      saveHardcover(db, userId, document, withLibrary(lib, row.hc_id ? cachedHardcoverBook(db, want!.title, want!.author) : null, want!.title));
     }
     // A cover that couldn't be fetched counts as a miss for now, so it is tried again after a day.
     db.prepare('UPDATE documents SET library_checked_at = ?, library_match = ? WHERE user_id = ? AND document = ?').run(now, lib && !coverFailed ? 1 : 0, userId, document);
@@ -314,12 +340,14 @@ export async function documentInfo(
       ? await hardcoverBook(db, http, want.title, want.author, env.HARDCOVER_API_KEY ?? '', metadataApiUrl(env), env.ISBNDB_API_KEY, env.METADATA_API_KEY)
       : null;
     if (found !== 'later') {
-      hc = withLibrary(lib, found);
+      hc = withLibrary(lib, found, want.title);
       saveHardcover(db, userId, document, hc);
+    } else if (lib) {
+      saveLibraryDetails(db, userId, document, lib);
     }
   }
   // A book matched earlier: its Hardcover details are in the cache, no lookup needed.
-  if (!hc && want && row.hc_id) hc = withLibrary(lib, cachedHardcoverBook(db, want.title, want.author));
+  if (!hc && want && row.hc_id) hc = withLibrary(lib, cachedHardcoverBook(db, want.title, want.author), want.title);
   // Hardcover's print page count is the stats source of truth, and its cover fills
   // a gap the free sources left, even when the cover lookup below is still cached
   // (it often ran before the throttled Hardcover lookup did).
@@ -329,7 +357,7 @@ export async function documentInfo(
   }
   if (!row.cover_url && hc?.cover) {
     row.cover_url = hc.cover;
-    db.prepare('UPDATE documents SET cover_url = ? WHERE user_id = ? AND document = ?').run(hc.cover, userId, document);
+    db.prepare('UPDATE documents SET cover_url = ? WHERE user_id = ? AND document = ? AND cover_manual = 0').run(hc.cover, userId, document);
   }
   let info: BookInfo = { cover: row.cover_url, pages: row.page_count };
   const fresh = (row.cover_url && row.page_count) || (row.cover_checked_at && nowSeconds() - row.cover_checked_at < RETRY_AFTER);
@@ -339,7 +367,9 @@ export async function documentInfo(
       : { cover: null, pages: null };
     info = { cover: row.cover_url ?? found.cover, pages: row.page_count ?? found.pages };
     db.prepare(
-      'UPDATE documents SET cover_url = ?, page_count = ?, cover_checked_at = ? WHERE user_id = ? AND document = ?'
+      // A cover the user picked meanwhile stays.
+      `UPDATE documents SET cover_url = CASE WHEN cover_manual THEN cover_url ELSE ? END, page_count = ?, cover_checked_at = ?
+       WHERE user_id = ? AND document = ?`
     ).run(info.cover, info.pages, nowSeconds(), userId, document);
   }
   return info;

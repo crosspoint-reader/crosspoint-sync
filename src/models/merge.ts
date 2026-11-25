@@ -163,8 +163,11 @@ export function mergeDocuments(
          pause_reason = CASE WHEN documents.status IS NULL THEN excluded.pause_reason ELSE documents.pause_reason END,
          start_date = COALESCE(documents.start_date, excluded.start_date),
          finished_date = COALESCE(documents.finished_date, excluded.finished_date),
-         cover_manual = CASE WHEN documents.cover_url IS NULL THEN excluded.cover_manual ELSE documents.cover_manual END,
-         cover_url = COALESCE(documents.cover_url, excluded.cover_url),
+         -- A cover picked by hand beats an automatic one, whichever copy has it.
+         cover_manual = CASE WHEN documents.cover_url IS NULL OR (excluded.cover_manual AND NOT documents.cover_manual)
+           THEN excluded.cover_manual ELSE documents.cover_manual END,
+         cover_url = CASE WHEN excluded.cover_manual AND NOT documents.cover_manual THEN excluded.cover_url
+           ELSE COALESCE(documents.cover_url, excluded.cover_url) END,
          page_count = COALESCE(documents.page_count, excluded.page_count),
          language = COALESCE(documents.language, excluded.language),
          isbn = COALESCE(documents.isbn, excluded.isbn),

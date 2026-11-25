@@ -41,7 +41,7 @@ export interface LibraryBook {
 export const LIBRARY_HIT_TTL = 7 * 86400;
 const HIT_TTL = LIBRARY_HIT_TTL;
 const MISS_TTL = 86400;
-/** After the library failed to answer, it isn't asked again for this long (the last answer stays in use). */
+/** After the library failed to answer, it isn't asked again for this long. */
 const DOWN_COOLDOWN = 300;
 const MAX_COVER_BYTES = 5 * 1024 * 1024;
 const OPDS_IMAGE = 'http://opds-spec.org/image';
@@ -200,8 +200,9 @@ async function search(http: HttpTransport, cfg: LibraryConfig, query: string): P
 
 // Keyed on the catalog too: another LIBRARY_OPDS_URL or login must not reuse this one's answers.
 const catalogId = (cfg: LibraryConfig) => crypto.createHash('sha256').update(`${cfg.url}\n${cfg.username}`).digest('hex').slice(0, 12);
+// The title without its subtitle is in the key too: "Saga: A Novel" and "Saga A Novel" match differently.
 const cacheKey = (cfg: LibraryConfig, title: string, author: string) =>
-  `library:${catalogId(cfg)}:${normalizeText(title)}|${normalizeAuthor(author)}`;
+  `library:${catalogId(cfg)}:${normalizeText(coreTitle(title))}|${normalizeText(title)}|${normalizeAuthor(author)}`;
 
 /**
  * The library's entry for a book, or null when the library doesn't have it, or 'later'
@@ -224,9 +225,9 @@ export async function libraryBook(
   if (hit && nowSeconds() - hit.checked_at < (hit.data ? HIT_TTL : MISS_TTL)) {
     return hit.data ? (JSON.parse(hit.data) as LibraryBook) : null;
   }
-  const stale = hit?.data ? (JSON.parse(hit.data) as LibraryBook) : null;
-  // A library that just failed isn't waited on again for every book and every request.
-  if ((downUntil.get(cfg.url) ?? 0) > nowSeconds()) return stale ?? 'later';
+  // A library that just failed isn't waited on again for every book and every request. An expired
+  // answer isn't passed off as a fresh one either: the book stays due until the library answers.
+  if ((downUntil.get(cfg.url) ?? 0) > nowSeconds()) return 'later';
   let found: LibraryBook | null = null;
   try {
     const queries = [...new Set([title.trim(), coreTitle(title)].filter(Boolean))];
@@ -236,7 +237,8 @@ export async function libraryBook(
     }
   } catch {
     downUntil.set(cfg.url, nowSeconds() + DOWN_COOLDOWN);
-    return stale ?? 'later';
+    templates.delete(cfg.url); // the catalog may have moved its search: found again next time
+    return 'later';
   }
   downUntil.delete(cfg.url);
   db.prepare(
@@ -282,7 +284,7 @@ export async function readCapped(res: Awaited<ReturnType<HttpTransport>>, max: n
  * The library's cover, fetched with the library's login and kept here; returns the server-relative
  * path to show it at, or null when it can't be had. Covers are kept per catalog (URL and login) and
  * link. `refresh` fetches the link again: a changed picture gets a new address, since covers are
- * served as immutable.
+ * served as immutable. A failed fetch returns null, also when an earlier copy is kept.
  *
  * Only covers on the catalog's own address are fetched, without following redirects: this server
  * never requests a host a catalog entry names. A cover on another host needs no login and is
@@ -308,9 +310,9 @@ export async function storeLibraryCover(
   try {
     const res = await http(url, { method: 'GET', headers: headers(cfg, url, 'image/*'), redirect: 'manual', signal: AbortSignal.timeout(15000) });
     const type = res.headers?.get('content-type')?.split(';')[0].trim().toLowerCase() ?? '';
-    if (res.status !== 200 || !/^image\/(jpeg|png|gif|webp)$/.test(type)) return known ? libraryCoverPath(known.id) : null;
+    if (res.status !== 200 || !/^image\/(jpeg|png|gif|webp)$/.test(type)) return null;
     const data = await readCapped(res, MAX_COVER_BYTES);
-    if (!data?.length) return known ? libraryCoverPath(known.id) : null;
+    if (!data?.length) return null;
     const digest = crypto.createHash('sha256').update(data).digest('hex');
     db.prepare(
       `INSERT INTO library_covers (id, source, digest, content_type, data, fetched_at) VALUES (?, ?, ?, ?, ?, ?)
@@ -319,7 +321,7 @@ export async function storeLibraryCover(
     const row = db.prepare('SELECT id FROM library_covers WHERE source = ? AND digest = ?').get(source, digest) as { id: string };
     return libraryCoverPath(row.id);
   } catch {
-    return known ? libraryCoverPath(known.id) : null;
+    return null;
   }
 }
 
