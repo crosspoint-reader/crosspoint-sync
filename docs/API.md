@@ -771,11 +771,19 @@ finish date also marks the book `finished` and fans out a finished event dated t
 #### GET /api/v1/documents/{document}/cover
 
 `{"url": "https://..." | null, "pages": 433 | null}`: cover URL and print-edition page count,
-resolved from the document's title/author and cached (a miss is retried after 7 days). Covers come
+resolved from the document's title/author and cached (a miss is retried after 7 days). When the server
+has `LIBRARY_OPDS_URL`, the user's own library is asked first: a book there with the same title and
+author gets the library's cover, served by this server, so `url` (and `cover_url` everywhere else) is then
+a path on this server, `/api/v1/library/covers/{id}`: resolve it against the server's address. Otherwise covers come
 from iTunes Search (ebooks), then Open Library; page counts from Open Library, then Google Books when
 the server has `GOOGLE_BOOKS_API_KEY`. A book-metadata API (`METADATA_API_URL`) and Hardcover fill
 both in the background when the server has them. `GET /api/v1/progress` items also carry
 `page_count`.
+
+#### GET /api/v1/library/covers/{id}
+
+A cover from the user's library (see `GET /api/v1/documents/{document}/cover`), as the image itself. No
+login: the id is random and only handed out in cover URLs. Unknown ids answer 404.
 
 #### PUT /api/v1/documents/{document}/info
 

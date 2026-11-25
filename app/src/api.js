@@ -111,6 +111,23 @@ function clearOffline(session) {
   }
 }
 
+// Covers from the server's own library (LIBRARY_OPDS_URL) come as a path on the server
+// ("/api/v1/library/covers/..."): made absolute here so every <img>, share card and widget can load them.
+const LIBRARY_COVERS = '/api/v1/library/covers/'
+export function withServerCovers(session, data) {
+  const walk = (v) => {
+    if (Array.isArray(v)) v.forEach(walk)
+    else if (v && typeof v === 'object') {
+      for (const [k, x] of Object.entries(v)) {
+        if ((k === 'cover_url' || k === 'url') && typeof x === 'string' && x.startsWith(LIBRARY_COVERS)) v[k] = session.server + x
+        else if (x && typeof x === 'object') walk(x)
+      }
+    }
+  }
+  walk(data)
+  return data
+}
+
 // store: false keeps the offline fallback but leaves saving to the caller.
 async function call(session, path, init = {}, keepOffline = true, { offlineFallback = true, timestampSaved = false, store = true, cachePath = path } = {}) {
   const version = sessionVersion
@@ -145,7 +162,7 @@ async function call(session, path, init = {}, keepOffline = true, { offlineFallb
     const body = await res.json().catch(() => null)
     throw Object.assign(new Error(body?.message || `Server error ${res.status}`), { status: res.status })
   }
-  const data = await res.json()
+  const data = withServerCovers(session, await res.json())
   if (readingGet) assertReadingVersion(version, reading)
   if (isGet && version === sessionVersion) {
     offline.dispatchEvent(new Event('online'))

@@ -4,7 +4,8 @@ import { fetchTransport } from '../connectors/registry.js';
 import { documentMeta } from '../connectors/store.js';
 import { extractTitleAuthor, scoreCandidate, type Candidate } from '../connectors/matching.js';
 import { nowSeconds } from './sync.js';
-import { cacheKey, cachedHardcoverBook, hardcoverBook, metadataApiUrl, type HardcoverBook } from './hardcover-catalog.js';
+import { cacheKey, cachedHardcoverBook, hardcoverBook, metadataApiUrl, tidy, type HardcoverBook } from './hardcover-catalog.js';
+import { libraryBook, libraryConfig, storeLibraryCover, type LibraryBook } from './library.js';
 import { keepManual } from './manual-details.js';
 
 /**
@@ -197,6 +198,34 @@ async function sharedBookInfo(
   return info;
 }
 
+/**
+ * The user's library (LIBRARY_OPDS_URL) is the truth for a book it holds: its details win. The other
+ * sources' answer is kept only when it is the same book (their match is fuzzy and can be another book by
+ * the same author), and then fills what the library lacks.
+ */
+export function withLibrary(lib: LibraryBook | null, other: HardcoverBook | null): HardcoverBook | null {
+  if (!lib) return other;
+  const agrees =
+    other !== null &&
+    scoreCandidate(lib.title, lib.author ?? '', { externalId: other.id, title: other.title, author: other.author }) >= THRESHOLD;
+  const base: HardcoverBook = agrees
+    ? other
+    : {
+        id: '', slug: null, title: lib.title, author: lib.author, moods: [], genres: [], content_warnings: [], rating: null,
+        series: null, series_id: null, series_position: null, release_year: null, pages: null, cover: null, description: null,
+      };
+  const genres = tidy(lib.genres, 6);
+  return {
+    ...base,
+    description: lib.description ?? base.description,
+    genres: genres.length ? genres : base.genres,
+    series: lib.series ?? base.series,
+    series_id: lib.series ? null : base.series_id,
+    series_position: lib.series ? lib.series_position : base.series_position,
+    release_year: lib.release_year ?? base.release_year,
+  };
+}
+
 /** Store Hardcover's details on a document (a miss just records the check). Details set by hand stay. */
 function saveHardcover(db: DB, userId: number, document: string, hc: HardcoverBook | null): void {
   const json = (v: string[] | undefined) => (v?.length ? JSON.stringify(v) : null);
@@ -206,14 +235,15 @@ function saveHardcover(db: DB, userId: number, document: string, hc: HardcoverBo
        ${keepManual('series_position')}, ${keepManual('release_year')}, ${keepManual('description')}, hc_checked_at = ?
      WHERE user_id = ? AND document = ?`
   ).run(
-    hc?.id ?? null, hc?.slug ?? null, json(hc?.moods), json(hc?.genres), json(hc?.content_warnings), hc?.rating ?? null,
+    hc?.id || null, hc?.slug ?? null, json(hc?.moods), json(hc?.genres), json(hc?.content_warnings), hc?.rating ?? null,
     hc?.series ?? null, hc?.series_id ?? null, hc?.series_position ?? null, hc?.release_year ?? null,
     hc?.description ?? null, nowSeconds(), userId, document
   );
 }
 
-/** Cached cover URL + print page count for a document, resolving on first ask.
- *  With METADATA_API_URL or HARDCOVER_API_KEY set, also fills the document's book details once. */
+/** Cached cover URL + print page count for a document, resolving on first ask. The user's library
+ *  (LIBRARY_OPDS_URL) is asked first. With it, METADATA_API_URL or HARDCOVER_API_KEY set, also fills the
+ *  document's book details once. */
 export async function documentInfo(
   db: DB,
   userId: number,
@@ -236,16 +266,33 @@ export async function documentInfo(
     | undefined;
   if (!row) return { cover: null, pages: null }; // no metadata, nothing to search on
   const want = extractTitleAuthor(documentMeta(db, userId, document));
+  // The user's own library goes first. Its answer is cached, so this asks it once per book a week.
+  const asked =
+    want && libraryConfig(env) && (!row.cover_url || (hardcover && row.hc_checked_at == null))
+      ? await libraryBook(db, http, want.title, want.author, env)
+      : null;
+  const lib = asked === 'later' ? null : asked;
+  if (lib?.cover && !row.cover_url) {
+    const path = await storeLibraryCover(db, http, lib.cover, env);
+    if (path) {
+      row.cover_url = path;
+      db.prepare('UPDATE documents SET cover_url = ?, cover_checked_at = ? WHERE user_id = ? AND document = ?').run(path, nowSeconds(), userId, document);
+    }
+  }
+  const external = metadataApiUrl(env) || env.HARDCOVER_API_KEY || env.ISBNDB_API_KEY;
   let hc: HardcoverBook | null = null;
-  if (hardcover && want && (metadataApiUrl(env) || env.HARDCOVER_API_KEY || env.ISBNDB_API_KEY) && row.hc_checked_at == null) {
-    const found = await hardcoverBook(db, http, want.title, want.author, env.HARDCOVER_API_KEY ?? '', metadataApiUrl(env), env.ISBNDB_API_KEY, env.METADATA_API_KEY);
+  // A library that can't be asked right now leaves the book for the next round, so its details aren't missed.
+  if (hardcover && want && (external || libraryConfig(env)) && row.hc_checked_at == null && asked !== 'later') {
+    const found = external
+      ? await hardcoverBook(db, http, want.title, want.author, env.HARDCOVER_API_KEY ?? '', metadataApiUrl(env), env.ISBNDB_API_KEY, env.METADATA_API_KEY)
+      : null;
     if (found !== 'later') {
-      saveHardcover(db, userId, document, found);
-      hc = found;
+      hc = withLibrary(lib, found);
+      saveHardcover(db, userId, document, hc);
     }
   }
   // A book matched earlier: its Hardcover details are in the cache, no lookup needed.
-  if (!hc && want && row.hc_id) hc = cachedHardcoverBook(db, want.title, want.author);
+  if (!hc && want && row.hc_id) hc = withLibrary(lib, cachedHardcoverBook(db, want.title, want.author));
   // Hardcover's print page count is the stats source of truth, and its cover fills
   // a gap the free sources left, even when the cover lookup below is still cached
   // (it often ran before the throttled Hardcover lookup did).
@@ -275,7 +322,7 @@ export async function documentInfo(
 // time (lookups are throttled, so this never holds up a request).
 const enriching = new Set<number>();
 export function enrichSoon(db: DB, userId: number, http: HttpTransport = fetchTransport, env: NodeJS.ProcessEnv = process.env, limit = 10): void {
-  if (!(metadataApiUrl(env) || env.HARDCOVER_API_KEY || env.ISBNDB_API_KEY) || enriching.has(userId)) return;
+  if (!(metadataApiUrl(env) || env.HARDCOVER_API_KEY || env.ISBNDB_API_KEY || libraryConfig(env)) || enriching.has(userId)) return;
   const docs = db
     .prepare(
       `SELECT document FROM documents WHERE user_id = ? AND hc_checked_at IS NULL

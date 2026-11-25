@@ -25,6 +25,7 @@ import { catalogRoutes } from './routes/catalog.js';
 import { safeFetch } from './safe-fetch.js';
 import { createProgressRefresh } from './connectors/refresh.js';
 import type { HttpTransport } from './connectors/types.js';
+import { libraryCover } from './models/library.js';
 
 // Injected at build time via package.json; read lazily to keep this file dependency-free.
 // package.json sits beside src/ and dist/ (and in the image); npm only sets npm_package_version under `npm run`.
@@ -89,6 +90,17 @@ export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<A
 
   // Extended CrossPoint API; accepts either the web session cookie or the
   // device x-auth headers.
+  // Covers from the user's library (LIBRARY_OPDS_URL), kept here because the library's own
+  // links need its login. No login: an <img> can't send one; the address is random and unlisted.
+  app.get('/api/v1/library/covers/:id', (c) => {
+    const cover = libraryCover(db, c.req.param('id'));
+    if (!cover) return c.notFound();
+    return c.body(new Uint8Array(cover.data), 200, {
+      'Content-Type': cover.content_type,
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    });
+  });
+
   const v1 = new Hono<AppEnv>();
   v1.use('*', sessionOrKeyAuth(db));
   v1.route('/', progressRoutes(db, refreshProgress));
