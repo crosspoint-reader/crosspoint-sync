@@ -4,15 +4,16 @@ import { migrate, openDatabase } from '../src/db/db.js';
 import { cacheKey } from '../src/models/hardcover-catalog.js';
 
 describe('titles with a series number or prefix', () => {
-  it('keys cached lookups on the whole title', () => {
+  it('keys cached lookups on the whole title when it has a dash', () => {
     expect(cacheKey('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner')).toBe(
       '241 die drei fragezeichen und das weiße auge|marco sonnleitner'
     );
     expect(cacheKey('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner')).not.toBe(
       cacheKey('241 - Die drei Fragezeichen und der Fluch des Rubins', 'Marco Sonnleitner')
     );
-    // Titles without a separator keep the key they had.
+    // Titles without a dash keep the key they had.
     expect(cacheKey('Foundryside (The Founders Trilogy, Book 1)', 'Bennett, Robert Jackson')).toBe('foundryside|robert jackson bennett');
+    expect(cacheKey('Foundryside: A Novel', 'Bennett, Robert Jackson')).toBe('foundryside|robert jackson bennett');
   });
 
   it('a migration looks up books that were matched on the part before a separator again', () => {

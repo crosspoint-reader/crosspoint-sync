@@ -5,6 +5,7 @@ import {
   extractTitleAuthor,
   normalizeAuthor,
   scoreCandidate,
+  searchTitle,
   titleParts,
 } from '../src/connectors/matching.js';
 
@@ -20,11 +21,19 @@ describe('matching helpers', () => {
       full: '241 - Die drei Fragezeichen und das weiße Auge',
       before: '241',
       after: 'Die drei Fragezeichen und das weiße Auge',
+      separator: '-',
     });
     expect(titleParts('Book One – The Fellowship of the Ring')).toMatchObject({ before: 'Book One', after: 'The Fellowship of the Ring' });
     expect(titleParts('1984: A Novel')).toMatchObject({ before: '1984', after: 'A Novel' });
-    expect(titleParts('Catch-22')).toEqual({ full: 'Catch-22', before: 'Catch-22', after: '' });
-    expect(titleParts('Foundryside (The Founders Trilogy, Book 1)')).toEqual({ full: 'Foundryside', before: 'Foundryside', after: '' });
+    expect(titleParts('Catch-22')).toEqual({ full: 'Catch-22', before: 'Catch-22', after: '', separator: '' });
+    expect(titleParts('Foundryside (The Founders Trilogy, Book 1)')).toEqual({ full: 'Foundryside', before: 'Foundryside', after: '', separator: '' });
+  });
+
+  it('searches colon titles by their main title and dashed titles whole', () => {
+    expect(searchTitle('Foundryside: A Novel')).toBe('Foundryside');
+    expect(searchTitle('241 - Die drei Fragezeichen und das weiße Auge')).toBe('241 - Die drei Fragezeichen und das weiße Auge');
+    expect(searchTitle('Book One – The Fellowship of the Ring')).toBe('Book One – The Fellowship of the Ring');
+    expect(searchTitle('Dune')).toBe('Dune');
   });
 
   it('matches a title on whichever side of the separator is the real title', () => {

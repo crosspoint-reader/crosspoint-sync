@@ -1,6 +1,6 @@
 import type { DB } from '../db/db.js';
 import type { HttpTransport } from '../connectors/types.js';
-import { normalizeAuthor, normalizeText, scoreCandidate, titleParts } from '../connectors/matching.js';
+import { normalizeAuthor, normalizeText, scoreCandidate, searchTitle } from '../connectors/matching.js';
 import { nowSeconds } from './sync.js';
 
 /**
@@ -131,8 +131,7 @@ export async function searchHardcover(
       },
       body: JSON.stringify({
         query: 'query ($q: String!) { search(query: $q, query_type: "Book", per_page: 5, page: 1) { results } }',
-        // The whole title: which side of a separator is the real title is left to scoring.
-        variables: { q: `${titleParts(title).full} ${author}`.trim() },
+        variables: { q: `${searchTitle(title)} ${author}`.trim() },
       }),
     });
   } catch {
@@ -228,7 +227,7 @@ export async function searchIsbndb(
   author: string,
   key: string
 ): Promise<HardcoverBook | null | 'later'> {
-  const q = titleParts(title).full.slice(0, 150); // ISBNdb's query limit
+  const q = searchTitle(title).slice(0, 150); // ISBNdb's query limit
   if (!q) return null;
   if (Date.now() < isbndbPausedUntil) return 'later';
   let body: any;
@@ -302,8 +301,8 @@ export const DEFAULT_METADATA_API_URL = 'https://api.metadata.dev';
 export const metadataApiUrl = (env: NodeJS.ProcessEnv): string =>
   /^(0|false|no|off)$/i.test(env.METADATA_API?.trim() ?? '') ? '' : env.METADATA_API_URL?.trim() || DEFAULT_METADATA_API_URL;
 
-/** Keyed on the whole title, so "241 - Title" and "240 - Other Title" don't share an entry. */
-export const cacheKey = (title: string, author: string) => `${normalizeText(titleParts(title).full)}|${normalizeAuthor(author)}`;
+/** Keyed on searchTitle(), so "241 - Title" and "241 - Other Title" don't share an entry but "Dune: A Novel" and "Dune" do. */
+export const cacheKey = (title: string, author: string) => `${normalizeText(searchTitle(title))}|${normalizeAuthor(author)}`;
 
 /** Shared, cached lookup: one Hardcover request per distinct book across all users. */
 /** Hardcover's cached match for a title, without a lookup (null when none is cached). */

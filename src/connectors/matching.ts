@@ -29,15 +29,27 @@ const SEPARATOR = /\s*:\s|\s+[-–—]\s+|\s*—\s/;
  * put the real title after the separator. Nothing here guesses which: `before` and `after`
  * are both kept, and matching scores each reading. `full` is the whole title.
  */
-export function titleParts(title: string): { full: string; before: string; after: string } {
+export function titleParts(title: string): { full: string; before: string; after: string; separator: string } {
   const full = title.replace(SERIES_SUFFIX, '').trim();
   const m = SEPARATOR.exec(full);
-  if (!m) return { full, before: full, after: '' };
+  if (!m) return { full, before: full, after: '', separator: '' };
   return {
     full,
     before: full.slice(0, m.index).trim(),
     after: full.slice(m.index + m[0].length).replace(SERIES_SUFFIX, '').trim(),
+    separator: m[0].trim(),
   };
+}
+
+/**
+ * The title to search for and to key shared lookups on. A colon conventionally starts a
+ * subtitle, so "Foundryside: A Novel" searches as "Foundryside" and shares its lookup with
+ * "Foundryside". A spaced dash is as often a series prefix ("241 - Title", "Book One - Title")
+ * as a subtitle, so those titles search whole and scoring sorts out which side matched.
+ */
+export function searchTitle(title: string): string {
+  const parts = titleParts(title);
+  return parts.separator === ':' && parts.before ? parts.before : parts.full;
 }
 
 /** The title before its first separator, without a "(Series, Book 2)" suffix. */
