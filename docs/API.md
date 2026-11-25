@@ -773,8 +773,8 @@ finish date also marks the book `finished` and fans out a finished event dated t
 `{"url": "https://..." | null, "pages": 433 | null}`: cover URL and print-edition page count,
 resolved from the document's title/author and cached (a miss is retried after 7 days). When the server
 has `LIBRARY_OPDS_URL`, the user's own library is asked first: a book there with the same title and
-author gets the library's cover, served by this server, so `url` (and `cover_url` everywhere else) is then
-a path on this server, `/api/v1/library/covers/{id}`: resolve it against the server's address. The library's cover
+author gets the library's cover. A cover on the library's own address is served by this server, so `url` (and
+`cover_url` everywhere else) is then a path on this server, `/api/v1/library/covers/{id}`: resolve it against the server's address. The library's cover
 also replaces one another source found earlier, but never one set with `PUT /info`. Otherwise covers come
 from iTunes Search (ebooks), then Open Library; page counts from Open Library, then Google Books when
 the server has `GOOGLE_BOOKS_API_KEY`. A book-metadata API (`METADATA_API_URL`) and Hardcover fill

@@ -53,10 +53,18 @@ export function libraryConfig(env: NodeJS.ProcessEnv = process.env): LibraryConf
   return { url, username: env.LIBRARY_OPDS_USERNAME ?? '', password: env.LIBRARY_OPDS_PASSWORD ?? '' };
 }
 
+const sameOrigin = (url: string, cfg: LibraryConfig) => {
+  try {
+    return new URL(url).origin === new URL(cfg.url).origin;
+  } catch {
+    return false;
+  }
+};
+
 /** The login goes only to the library's own address, never to a host its catalog links to. */
 function headers(cfg: LibraryConfig, url: string, accept: string): Record<string, string> {
   const h: Record<string, string> = { accept };
-  if (cfg.username && new URL(url).origin === new URL(cfg.url).origin) {
+  if (cfg.username && sameOrigin(url, cfg)) {
     h.authorization = `Basic ${Buffer.from(`${cfg.username}:${cfg.password}`).toString('base64')}`;
   }
   return h;
@@ -65,7 +73,7 @@ function headers(cfg: LibraryConfig, url: string, accept: string): Record<string
 const ATOM = 'application/atom+xml, application/xml;q=0.9, */*;q=0.5';
 
 async function getXml(http: HttpTransport, cfg: LibraryConfig, url: string): Promise<Element> {
-  const res = await http(url, { method: 'GET', headers: headers(cfg, url, ATOM), signal: AbortSignal.timeout(15000) });
+  const res = await http(url, { method: 'GET', headers: headers(cfg, url, ATOM), redirect: 'manual', signal: AbortSignal.timeout(15000) });
   if (res.status !== 200) throw new Error(`library answered ${res.status}`);
   const doc = new DOMParser({ onError: () => {} }).parseFromString(await res.text(), 'text/xml');
   if (!doc.documentElement) throw new Error('library sent no XML');
@@ -93,11 +101,14 @@ async function searchTemplate(http: HttpTransport, cfg: LibraryConfig): Promise<
   const osd = links.find((l) => /opensearchdescription/i.test(l.getAttribute('type') ?? ''));
   if (!template && osd) {
     const osdUrl = new URL(osd.getAttribute('href')!, cfg.url).href;
+    if (!sameOrigin(osdUrl, cfg)) throw new Error('library search is on another host');
     const desc = await getXml(http, cfg, osdUrl);
     const url = byName(desc, 'Url').find((u) => /atom\+xml/i.test(u.getAttribute('type') ?? '')) ?? byName(desc, 'Url')[0];
     if (url?.getAttribute('template')) template = new URL(url.getAttribute('template')!, osdUrl).href;
   }
   if (!template) throw new Error('library catalog has no search');
+  // The server only talks to the configured catalog's own address.
+  if (!sameOrigin(template.replace('{searchTerms}', 'x'), cfg)) throw new Error('library search is on another host');
   // Braces are escaped by URL(); put the placeholder back.
   template = template.replace(/%7BsearchTerms%7D/gi, '{searchTerms}');
   templates.set(cfg.url, template);
@@ -272,6 +283,10 @@ export async function readCapped(res: Awaited<ReturnType<HttpTransport>>, max: n
  * path to show it at, or null when it can't be had. Covers are kept per catalog (URL and login) and
  * link. `refresh` fetches the link again: a changed picture gets a new address, since covers are
  * served as immutable.
+ *
+ * Only covers on the catalog's own address are fetched, without following redirects: this server
+ * never requests a host a catalog entry names. A cover on another host needs no login and is
+ * handed to the reader's app as it is, like the other sources' covers.
  */
 export async function storeLibraryCover(
   db: DB,
@@ -282,6 +297,7 @@ export async function storeLibraryCover(
 ): Promise<string | null> {
   const cfg = libraryConfig(env);
   if (!cfg) return null;
+  if (!sameOrigin(url, cfg)) return /^https?:\/\//i.test(url) ? url : null;
   const source = `${catalogId(cfg)} ${url}`;
   const newest = () =>
     db.prepare('SELECT id FROM library_covers WHERE source = ? ORDER BY fetched_at DESC, rowid DESC LIMIT 1').get(source) as
@@ -290,7 +306,7 @@ export async function storeLibraryCover(
   const known = newest();
   if (known && !refresh) return libraryCoverPath(known.id);
   try {
-    const res = await http(url, { method: 'GET', headers: headers(cfg, url, 'image/*'), signal: AbortSignal.timeout(15000) });
+    const res = await http(url, { method: 'GET', headers: headers(cfg, url, 'image/*'), redirect: 'manual', signal: AbortSignal.timeout(15000) });
     const type = res.headers?.get('content-type')?.split(';')[0].trim().toLowerCase() ?? '';
     if (res.status !== 200 || !/^image\/(jpeg|png|gif|webp)$/.test(type)) return known ? libraryCoverPath(known.id) : null;
     const data = await readCapped(res, MAX_COVER_BYTES);

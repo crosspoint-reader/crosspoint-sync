@@ -378,15 +378,39 @@ describe('library matching', () => {
       release_year: 2024, cover: 'https://lib.test/opds/cover/170' });
   });
 
-  it('sends the library\'s login to the library only', async () => {
+  it('requests only the library\'s own address', async () => {
     const db = book('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
     const calls: { url: string; auth?: string }[] = [];
     const base = library(AUGE.replace('href="/opds/cover/170"', 'href="https://cdn.test/170.jpg"'), calls);
     const http: HttpTransport = async (url, init) =>
       url === 'https://cdn.test/170.jpg' ? (calls.push({ url, auth: init.headers?.authorization }), new Response(JPEG, { headers: { 'content-type': 'image/jpeg' } })) : base(url, init);
     await documentInfo(db, 1, DOC, http, LIB);
-    expect(calls.find((c) => c.url === 'https://cdn.test/170.jpg')).toEqual({ url: 'https://cdn.test/170.jpg', auth: undefined });
-    expect((db.prepare('SELECT cover_url FROM documents').get() as { cover_url: string }).cover_url).toMatch(/^\/api\/v1\/library\/covers\//);
+    // A cover on another host isn't requested by the server at all: the app loads it, like any other source's.
+    expect(calls.find((c) => c.url === 'https://cdn.test/170.jpg')).toBeUndefined();
+    expect((db.prepare('SELECT cover_url FROM documents').get() as { cover_url: string }).cover_url).toBe('https://cdn.test/170.jpg');
+  });
+
+  it('follows no redirect and no search on another host', async () => {
+    const db = book('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
+    const calls: { url: string; auth?: string }[] = [];
+    const base = library(AUGE, calls);
+    const redirecting: HttpTransport = async (url, init) =>
+      url === 'https://lib.test/opds/cover/170'
+        ? (expect(init.redirect).toBe('manual'), new Response(null, { status: 302, headers: { location: 'http://10.0.0.1/admin' } }))
+        : base(url, init);
+    await documentInfo(db, 1, DOC, redirecting, LIB);
+    expect(calls.some((c) => c.url.startsWith('http://10.'))).toBe(false);
+    expect((db.prepare('SELECT cover_url FROM documents').get() as { cover_url: string | null }).cover_url).toBeNull();
+
+    resetLibraryState();
+    const elsewhere: HttpTransport = async (url, init) => {
+      calls.push({ url });
+      if (url === 'https://lib.test/opds') return atom('<link type="application/atom+xml" rel="search" href="http://10.0.0.1/search/{searchTerms}"/>');
+      return Response.json({ results: [], docs: [] });
+    };
+    const { libraryBook } = await import('../src/models/library.js');
+    expect(await libraryBook(book('Foundryside', 'Robert Jackson Bennett'), elsewhere, 'Foundryside', 'Robert Jackson Bennett', LIB)).toBe('later');
+    expect(calls.some((c) => c.url.startsWith('http://10.'))).toBe(false);
   });
 
   it('matches the same title and author only', () => {
