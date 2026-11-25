@@ -14,6 +14,19 @@ describe('matching helpers', () => {
     expect(coreTitle('Plain Title')).toBe('Plain Title');
   });
 
+  it('drops a leading series number before the subtitle cut', () => {
+    expect(coreTitle('241 - Die drei Fragezeichen und das weiße Auge')).toBe('Die drei Fragezeichen und das weiße Auge');
+    expect(coreTitle('03 – The Way of Kings: Part One')).toBe('The Way of Kings');
+    expect(coreTitle('1984')).toBe('1984');
+    expect(coreTitle('1984: A Novel')).toBe('1984');
+    expect(coreTitle('2001 - ')).toBe('2001'); // nothing after the dash: the number is the title
+  });
+
+  it('matches a numbered title against the same book without the number', () => {
+    const cand = { externalId: 'x', title: 'Die drei ??? und das weiße Auge (drei Fragezeichen)', author: 'Marco Sonnleitner' };
+    expect(scoreCandidate('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner', cand)).toBeGreaterThanOrEqual(0.6);
+  });
+
   it('normalizes "Last, First" author form', () => {
     expect(normalizeAuthor('Bennett, Robert Jackson')).toBe('robert jackson bennett');
     expect(normalizeAuthor('Robert Jackson Bennett')).toBe('robert jackson bennett');
