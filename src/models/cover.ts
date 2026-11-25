@@ -5,7 +5,7 @@ import { documentMeta } from '../connectors/store.js';
 import { extractTitleAuthor, scoreCandidate, type Candidate } from '../connectors/matching.js';
 import { nowSeconds } from './sync.js';
 import { cacheKey, cachedHardcoverBook, hardcoverBook, metadataApiUrl, tidy, type HardcoverBook } from './hardcover-catalog.js';
-import { libraryBook, libraryConfig, storeLibraryCover, type LibraryBook } from './library.js';
+import { libraryBook, libraryConfig, sameAuthor, storeLibraryCover, type LibraryBook } from './library.js';
 import { keepManual } from './manual-details.js';
 
 /**
@@ -19,6 +19,8 @@ import { keepManual } from './manual-details.js';
  * don't hammer any of them.
  */
 const RETRY_AFTER = 7 * 86400;
+/** A book the user's library didn't have is asked again after a day: it may have been added since. */
+const LIBRARY_MISS_RETRY = 86400;
 const THRESHOLD = 0.6;
 // Open Library asks API clients to identify themselves.
 const OL_HEADERS = { 'user-agent': 'crosspoint-sync (https://github.com/crosspoint-reader/crosspoint-sync)' };
@@ -205,8 +207,10 @@ async function sharedBookInfo(
  */
 export function withLibrary(lib: LibraryBook | null, other: HardcoverBook | null): HardcoverBook | null {
   if (!lib) return other;
+  // The same author, not just a close title: an equal title alone scores past the threshold.
   const agrees =
     other !== null &&
+    sameAuthor(lib.author, other.author) &&
     scoreCandidate(lib.title, lib.author ?? '', { externalId: other.id, title: other.title, author: other.author }) >= THRESHOLD;
   const base: HardcoverBook = agrees
     ? other
@@ -254,30 +258,50 @@ export async function documentInfo(
   { hardcover = false }: { hardcover?: boolean } = {}
 ): Promise<BookInfo> {
   const row = db
-    .prepare('SELECT cover_url, page_count, cover_checked_at, hc_checked_at, hc_id FROM documents WHERE user_id = ? AND document = ?')
+    .prepare(
+      `SELECT cover_url, cover_manual, page_count, cover_checked_at, hc_checked_at, hc_id, library_checked_at, library_match
+       FROM documents WHERE user_id = ? AND document = ?`
+    )
     .get(userId, document) as
     | {
         cover_url: string | null;
+        cover_manual: number;
         page_count: number | null;
         cover_checked_at: number | null;
         hc_checked_at: number | null;
         hc_id: string | null;
+        library_checked_at: number | null;
+        library_match: number;
       }
     | undefined;
   if (!row) return { cover: null, pages: null }; // no metadata, nothing to search on
   const want = extractTitleAuthor(documentMeta(db, userId, document));
-  // The user's own library goes first. Its answer is cached, so this asks it once per book a week.
-  const asked =
-    want && libraryConfig(env) && (!row.cover_url || (hardcover && row.hc_checked_at == null))
-      ? await libraryBook(db, http, want.title, want.author, env)
-      : null;
+
+  // The user's own library goes first. A book is due when the library never answered for it, or
+  // didn't have it a day ago. Normal reads ask only for books without a cover; the background
+  // enricher also brings books with older covers and details in line.
+  const now = nowSeconds();
+  const libraryOn = !!want && libraryConfig(env) !== null;
+  const due =
+    libraryOn &&
+    (hardcover || !row.cover_url) &&
+    (row.library_checked_at == null || (!row.library_match && now - row.library_checked_at >= LIBRARY_MISS_RETRY));
+  const asked = due || (libraryOn && row.library_match) ? await libraryBook(db, http, want!.title, want!.author, env) : null;
   const lib = asked === 'later' ? null : asked;
-  if (lib?.cover && !row.cover_url) {
-    const path = await storeLibraryCover(db, http, lib.cover, env);
-    if (path) {
-      row.cover_url = path;
-      db.prepare('UPDATE documents SET cover_url = ?, cover_checked_at = ? WHERE user_id = ? AND document = ?').run(path, nowSeconds(), userId, document);
+  if (due && asked !== 'later') {
+    if (lib?.cover && !row.cover_manual) {
+      // The library's cover replaces an automatic one (found earlier, or while the library was down).
+      const path = await storeLibraryCover(db, http, lib.cover, env);
+      if (path && path !== row.cover_url) {
+        row.cover_url = path;
+        db.prepare('UPDATE documents SET cover_url = ?, cover_checked_at = ? WHERE user_id = ? AND document = ?').run(path, now, userId, document);
+      }
     }
+    // Details stored before the library had the book: its own go over them now (those set by hand stay).
+    if (lib && row.hc_checked_at != null) {
+      saveHardcover(db, userId, document, withLibrary(lib, row.hc_id ? cachedHardcoverBook(db, want!.title, want!.author) : null));
+    }
+    db.prepare('UPDATE documents SET library_checked_at = ?, library_match = ? WHERE user_id = ? AND document = ?').run(now, lib ? 1 : 0, userId, document);
   }
   const external = metadataApiUrl(env) || env.HARDCOVER_API_KEY || env.ISBNDB_API_KEY;
   let hc: HardcoverBook | null = null;
@@ -322,13 +346,17 @@ export async function documentInfo(
 // time (lookups are throttled, so this never holds up a request).
 const enriching = new Set<number>();
 export function enrichSoon(db: DB, userId: number, http: HttpTransport = fetchTransport, env: NodeJS.ProcessEnv = process.env, limit = 10): void {
-  if (!(metadataApiUrl(env) || env.HARDCOVER_API_KEY || env.ISBNDB_API_KEY || libraryConfig(env)) || enriching.has(userId)) return;
+  const library = libraryConfig(env) !== null;
+  if (!(metadataApiUrl(env) || env.HARDCOVER_API_KEY || env.ISBNDB_API_KEY || library) || enriching.has(userId)) return;
+  // With a library: also books it never answered for, and its misses once they are a day old.
   const docs = db
     .prepare(
-      `SELECT document FROM documents WHERE user_id = ? AND hc_checked_at IS NULL
+      `SELECT document FROM documents WHERE user_id = ?
+         AND (hc_checked_at IS NULL
+              OR (? AND (library_checked_at IS NULL OR (library_match = 0 AND library_checked_at < ?))))
          AND (title IS NOT NULL OR filename IS NOT NULL) ORDER BY updated_at DESC LIMIT ?`
     )
-    .all(userId, limit) as { document: string }[];
+    .all(userId, library ? 1 : 0, nowSeconds() - LIBRARY_MISS_RETRY, limit) as { document: string }[];
   if (!docs.length) return;
   enriching.add(userId);
   (async () => {

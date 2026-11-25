@@ -151,8 +151,8 @@ export function mergeDocuments(
     // documents: canonical metadata wins, alias fills the gaps.
     const manual = MANUAL_COLUMNS.join(', ');
     db.prepare(
-      `INSERT INTO documents (user_id, document, title, author, filename, filesize, status, status_at, pause_reason, start_date, finished_date, cover_url, page_count, language, isbn, user_rating, ${manual}, updated_at)
-       SELECT user_id, ?, title, author, filename, filesize, status, status_at, pause_reason, start_date, finished_date, cover_url, page_count, language, isbn, user_rating, ${manual}, ? FROM documents WHERE user_id = ? AND document = ?
+      `INSERT INTO documents (user_id, document, title, author, filename, filesize, status, status_at, pause_reason, start_date, finished_date, cover_url, cover_manual, page_count, language, isbn, user_rating, ${manual}, updated_at)
+       SELECT user_id, ?, title, author, filename, filesize, status, status_at, pause_reason, start_date, finished_date, cover_url, cover_manual, page_count, language, isbn, user_rating, ${manual}, ? FROM documents WHERE user_id = ? AND document = ?
        ON CONFLICT(user_id, document) DO UPDATE SET
          title = COALESCE(documents.title, excluded.title),
          author = COALESCE(documents.author, excluded.author),
@@ -163,6 +163,7 @@ export function mergeDocuments(
          pause_reason = CASE WHEN documents.status IS NULL THEN excluded.pause_reason ELSE documents.pause_reason END,
          start_date = COALESCE(documents.start_date, excluded.start_date),
          finished_date = COALESCE(documents.finished_date, excluded.finished_date),
+         cover_manual = CASE WHEN documents.cover_url IS NULL THEN excluded.cover_manual ELSE documents.cover_manual END,
          cover_url = COALESCE(documents.cover_url, excluded.cover_url),
          page_count = COALESCE(documents.page_count, excluded.page_count),
          language = COALESCE(documents.language, excluded.language),

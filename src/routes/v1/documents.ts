@@ -329,7 +329,12 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     const now = nowSeconds();
     db.prepare('INSERT INTO documents (user_id, document, updated_at) VALUES (?, ?, ?) ON CONFLICT(user_id, document) DO NOTHING').run(user.id, document, now);
     if (cover !== undefined) {
-      db.prepare('UPDATE documents SET cover_url = ?, cover_checked_at = ? WHERE user_id = ? AND document = ?').run(cover as string | null, cover === null ? null : now, user.id, document);
+      // A cover picked here stays over the user's library; clearing it asks the library again too.
+      db.prepare(
+        `UPDATE documents SET cover_url = ?, cover_checked_at = ?, cover_manual = ?,
+           library_checked_at = CASE WHEN ? IS NULL THEN NULL ELSE library_checked_at END
+         WHERE user_id = ? AND document = ?`
+      ).run(cover as string | null, cover === null ? null : now, cover === null ? 0 : 1, cover as string | null, user.id, document);
     }
     if (pages !== undefined) {
       db.prepare(

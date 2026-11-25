@@ -6,6 +6,7 @@ import { combineGlobalStats, completedBookStatsSql, type GlobalStatsSnapshot } f
 import { readBookorbitStats } from '../models/bookorbit-stats.js';
 import { readingActivity } from '../models/activity.js';
 import { fontFaces } from './web.js';
+import { isLibraryCoverPath } from '../models/library.js';
 
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
@@ -127,7 +128,9 @@ export function publicProfileRoutes(db: DB, basePath: string): Hono<AppEnv> {
     ].join('');
     const book = (b: ProfileBook) => {
       const title = esc(b.title ?? b.filename!.replace(/\.[a-z0-9]+$/i, ''));
-      const cover = b.cover_url && /^https?:\/\//.test(b.cover_url) ? `<img src="${esc(b.cover_url)}" alt="" loading="lazy">` : '<div class="blank"></div>';
+      // A cover from the user's library is a path on this server.
+      const src = isLibraryCoverPath(b.cover_url) ? basePath + b.cover_url : b.cover_url && /^https?:\/\//.test(b.cover_url) ? b.cover_url : null;
+      const cover = src ? `<img src="${esc(src)}" alt="" loading="lazy">` : '<div class="blank"></div>';
       const bar = b.status === 'reading' ? `<div class="bar"><i style="width:${Math.round(b.percentage * 100)}%"></i></div>` : '';
       return `<li>${cover}<div><p class="t">${title}</p>${b.author ? `<p class="a">${esc(b.author)}</p>` : ''}${bar}</div></li>`;
     };

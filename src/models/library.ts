@@ -149,16 +149,24 @@ export function parseEntry(entry: Element, base: string): LibraryBook | null {
 
 const compact = (s: string) => s.replace(/ /g, '');
 
-/** The same book: equal titles (whole, or without a subtitle) and a shared author. */
+/** A shared author: "James S.A. Corey" and "James S. A. Corey" or "Corey, James S. A."; one of several. */
+export function sameAuthor(a: string | null | undefined, b: string | null | undefined): boolean {
+  const split = (s: string) => s.split(/\s*(?:&|;|\band\b|\bund\b)\s*/i).map((x) => compact(normalizeAuthor(x))).filter(Boolean);
+  if (!a?.trim() || !b?.trim()) return false;
+  const theirs = split(b);
+  return split(a).some((x) => theirs.includes(x));
+}
+
+/**
+ * The same book: equal titles (whole, or without a subtitle) and a shared author. A book sent without
+ * an author matches only an entry without one and the very same title.
+ */
 export function sameBook(title: string, author: string, book: LibraryBook): boolean {
   const titles = (t: string) => new Set([normalizeText(t), normalizeText(coreTitle(t))].filter(Boolean));
   const want = titles(title);
   if (![...titles(book.title)].some((t) => want.has(t))) return false;
-  if (!author.trim() || !book.author) return normalizeText(title) === normalizeText(book.title);
-  // "James S.A. Corey" and "James S. A. Corey"; one of several authors.
-  const split = (a: string) => a.split(/\s*(?:&|;|\band\b|\bund\b)\s*/i).map((x) => compact(normalizeAuthor(x))).filter(Boolean);
-  const theirs = split(book.author);
-  return split(author).some((a) => theirs.includes(a));
+  if (!author.trim()) return !book.author && normalizeText(title) === normalizeText(book.title);
+  return sameAuthor(author, book.author);
 }
 
 async function search(http: HttpTransport, cfg: LibraryConfig, query: string): Promise<LibraryBook[]> {
@@ -208,11 +216,35 @@ export async function libraryBook(
 }
 
 /** Where a stored library cover is served, relative to the server's address. */
-export const libraryCoverPath = (id: string) => `/api/v1/library/covers/${id}`;
+export const LIBRARY_COVERS = '/api/v1/library/covers/';
+export const libraryCoverPath = (id: string) => `${LIBRARY_COVERS}${id}`;
+export const isLibraryCoverPath = (url: string | null | undefined): url is string => !!url && /^\/api\/v1\/library\/covers\/[0-9a-f]{32}$/.test(url);
 
-async function readBytes(res: Awaited<ReturnType<HttpTransport>>): Promise<Buffer> {
-  if (res.body) return Buffer.from(await new Response(res.body).arrayBuffer());
-  return Buffer.from(await res.text(), 'binary');
+/** The body, or null as soon as it is larger than `max` (the download is stopped then). */
+export async function readCapped(res: Awaited<ReturnType<HttpTransport>>, max: number): Promise<Buffer | null> {
+  const declared = Number(res.headers?.get('content-length'));
+  if (Number.isFinite(declared) && declared > max) {
+    await res.body?.cancel().catch(() => {});
+    return null;
+  }
+  if (!res.body) {
+    const all = Buffer.from(await res.text(), 'binary');
+    return all.length > max ? null : all;
+  }
+  const reader = res.body.getReader();
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    parts.push(value);
+  }
+  return Buffer.concat(parts);
 }
 
 /**
@@ -233,8 +265,8 @@ export async function storeLibraryCover(
     const res = await http(source, { method: 'GET', headers: headers(cfg, source, 'image/*'), signal: AbortSignal.timeout(15000) });
     const type = res.headers?.get('content-type')?.split(';')[0].trim().toLowerCase() ?? '';
     if (res.status !== 200 || !/^image\/(jpeg|png|gif|webp)$/.test(type)) return null;
-    const data = await readBytes(res);
-    if (!data.length || data.length > MAX_COVER_BYTES) return null;
+    const data = await readCapped(res, MAX_COVER_BYTES);
+    if (!data?.length) return null;
     const id = crypto.randomBytes(16).toString('hex');
     db.prepare(
       `INSERT INTO library_covers (id, source, content_type, data, fetched_at) VALUES (?, ?, ?, ?, ?)

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DOMParser } from '@xmldom/xmldom';
 import { migrate, openDatabase } from '../src/db/db.js';
 import { documentInfo } from '../src/models/cover.js';
-import { parseEntry, resetLibraryTemplates, sameBook } from '../src/models/library.js';
+import { parseEntry, readCapped, resetLibraryTemplates, sameBook } from '../src/models/library.js';
 import type { HttpTransport } from '../src/connectors/types.js';
 import { DOC, makeTestApp, registerUser } from './helpers.js';
 
@@ -96,6 +96,17 @@ describe('the user\'s library as the first source', () => {
     expect(row.hc_checked_at).not.toBeNull();
   });
 
+  it('drops another source\'s book with the same title by another author', async () => {
+    const db = book('Foundryside', 'Robert Jackson Bennett');
+    const base = library(entry(5, 'Foundryside', 'Robert Jackson Bennett'));
+    const http: HttpTransport = async (url, init) =>
+      url.startsWith('https://meta.test/')
+        ? Response.json({ books: [{ id: 't-3', title: 'Foundryside', author: 'Somebody Else', moods: ['dark'], rating: 2.1, description: 'Not it.' }] })
+        : base(url, init);
+    await documentInfo(db, 1, DOC, http, { ...LIB, METADATA_API_URL: 'https://meta.test' }, { hardcover: true });
+    expect(db.prepare('SELECT hc_id, moods, rating, description FROM documents').get()).toEqual({ hc_id: null, moods: null, rating: null, description: null });
+  });
+
   it('keeps another source\'s details for the same book, under the library\'s', async () => {
     const db = book('Foundryside', 'Robert Jackson Bennett');
     const base = library(entry(5, 'Foundryside', 'Robert Jackson Bennett'));
@@ -159,6 +170,88 @@ describe('the user\'s library as the first source', () => {
   });
 });
 
+describe('keeping covers in line with the library', () => {
+  const augeDb = () => book('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
+  const cover = (db: ReturnType<typeof book>) => (db.prepare('SELECT cover_url FROM documents').get() as { cover_url: string | null }).cover_url;
+
+  it('replaces a cover found while the library was down once it answers', async () => {
+    const db = book('Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
+    const down: HttpTransport = async (url, init) => {
+      if (url.startsWith('https://lib.test')) throw new Error('ECONNREFUSED');
+      return library('')(url, init);
+    };
+    await documentInfo(db, 1, DOC, down, LIB);
+    expect(cover(db)).toBe('https://apple.test/600x600bb.jpg');
+    await documentInfo(db, 1, DOC, library(AUGE.replace('241 - ', '')), LIB, { hardcover: true });
+    expect(cover(db)).toMatch(/^\/api\/v1\/library\/covers\//);
+  });
+
+  it('brings an existing book\'s automatic cover and details in line, but keeps a cover picked by hand', async () => {
+    const db = augeDb();
+    const now = Math.floor(Date.now() / 1000);
+    // Looked up before the library was set up: another source's cover and a wrong book's details.
+    db.prepare(
+      `UPDATE documents SET cover_url = 'https://meta.test/wrong.jpg', cover_checked_at = ?, hc_checked_at = ?, hc_id = 't-9',
+         description = 'Another book.', genres = '["Horror"]'`
+    ).run(now, now);
+    await documentInfo(db, 1, DOC, library(AUGE), LIB, { hardcover: true });
+    expect(cover(db)).toMatch(/^\/api\/v1\/library\/covers\//);
+    expect(db.prepare('SELECT description, genres, hc_id FROM documents').get()).toEqual({
+      description: 'Während eines Camping-Wochenendes …', genres: '["Krimi"]', hc_id: null,
+    });
+
+    const manual = augeDb();
+    manual.prepare("UPDATE documents SET cover_url = 'https://mine.test/cover.jpg', cover_manual = 1, cover_checked_at = ?, hc_checked_at = ?").run(now, now);
+    await documentInfo(manual, 1, DOC, library(AUGE), LIB, { hardcover: true });
+    expect(cover(manual)).toBe('https://mine.test/cover.jpg');
+  });
+
+  it('marks a cover picked in the app as manual, and the background enricher leaves it', async () => {
+    for (const [k, v] of Object.entries(LIB)) vi.stubEnv(k, v);
+    const { app, db } = makeTestApp({}, { connectorTransport: library(AUGE) });
+    const { headers } = await registerUser(app);
+    await app.request('/syncs/progress', {
+      method: 'PUT', headers, body: JSON.stringify({ document: DOC, progress: 'x', percentage: 0.1, device: 'X4', device_id: 'x4',
+        metadata: { title: '241 - Die drei Fragezeichen und das weiße Auge', authors: 'Marco Sonnleitner' } }),
+    });
+    await app.request(`/api/v1/documents/${DOC}/info`, { method: 'PUT', headers, body: JSON.stringify({ cover_url: 'https://mine.test/cover.jpg' }) });
+    await documentInfo(db, 1, DOC, library(AUGE), LIB, { hardcover: true });
+    expect(cover(db)).toBe('https://mine.test/cover.jpg');
+    // Cleared again: the library's cover comes back.
+    await app.request(`/api/v1/documents/${DOC}/info`, { method: 'PUT', headers, body: JSON.stringify({ cover_url: null }) });
+    const { url } = await (await app.request(`/api/v1/documents/${DOC}/cover`, { headers })).json();
+    expect(url).toMatch(/^\/api\/v1\/library\/covers\//);
+  });
+
+  it('shows library covers on a public profile, under the base path', async () => {
+    for (const [k, v] of Object.entries(LIB)) vi.stubEnv(k, v);
+    const server = makeTestApp({ basePath: '/reading' }, { connectorTransport: library(AUGE) });
+    const app = { request: (p: string, init?: RequestInit) => server.app.request(`/reading${p}`, init) } as unknown as typeof server.app;
+    const { headers } = await registerUser(app);
+    await app.request('/syncs/progress', {
+      method: 'PUT', headers, body: JSON.stringify({ document: DOC, progress: 'x', percentage: 0.3, device: 'X4', device_id: 'x4',
+        metadata: { title: '241 - Die drei Fragezeichen und das weiße Auge', authors: 'Marco Sonnleitner' } }),
+    });
+    const { url } = await (await app.request(`/api/v1/documents/${DOC}/cover`, { headers })).json();
+    const { slug } = await (await app.request('/api/v1/profile', { method: 'PUT', headers, body: JSON.stringify({ enabled: true }) })).json();
+    const page = await (await app.request(`/u/${slug}`)).text();
+    expect(page).toContain(`<img src="/reading${url}"`);
+    expect((await app.request(url)).status).toBe(200);
+  });
+});
+
+describe('cover downloads', () => {
+  const big = new Uint8Array(1024);
+  it('stops at the size limit, whether the server says so or not', async () => {
+    expect(await readCapped(new Response(big, { headers: { 'content-length': '1024' } }), 100)).toBeNull();
+    let pulled = 0;
+    const endless = new ReadableStream<Uint8Array>({ pull: (c) => { pulled++; c.enqueue(big); } });
+    expect(await readCapped({ status: 200, body: endless, text: async () => '', json: async () => null }, 4096)).toBeNull();
+    expect(pulled).toBeLessThan(10);
+    expect(await readCapped(new Response(big), 4096)).toHaveLength(1024);
+  });
+});
+
 describe('library matching', () => {
   const parse = (xml: string) => parseEntry(new DOMParser().parseFromString(xml, 'text/xml').documentElement!, 'https://lib.test/opds/search/x')!;
 
@@ -187,5 +280,8 @@ describe('library matching', () => {
     expect(sameBook('Leviathan Wakes', 'Someone Else', lib)).toBe(false);
     expect(sameBook('Caliban\'s War', 'James S. A. Corey', lib)).toBe(false);
     expect(sameBook('Leviathan Wakes', 'Daniel Abraham & Ty Franck', { ...lib, author: 'Daniel Abraham & Ty Franck' })).toBe(true);
+    // An entry without an author matches only a book sent without one.
+    expect(sameBook('Leviathan Wakes', 'James S. A. Corey', { ...lib, author: null })).toBe(false);
+    expect(sameBook('Leviathan Wakes', '', { ...lib, author: null })).toBe(true);
   });
 });
