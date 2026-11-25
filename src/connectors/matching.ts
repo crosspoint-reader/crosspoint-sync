@@ -52,9 +52,24 @@ export function searchTitle(title: string): string {
   return parts.separator === ':' && parts.before ? parts.before : parts.full;
 }
 
-/** The title before its first separator, without a "(Series, Book 2)" suffix. */
+/**
+ * A part before the separator that only gives a place in a series: "241", "Book One", "Vol. 3".
+ * Four-digit numbers stay title words, so "1984: A Novel" is still "1984".
+ */
+const SERIES_POSITION = /^(?:(?:book|vol|volume|part|no|band|folge|tome)\s*)?\d{1,3}$|^(?:book|vol|volume|part)\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)$/;
+
+/** The part of a title that names the book: after a bare series position, otherwise before the separator. */
+function mainTitle(p: { before: string; after: string }): string {
+  return p.after && SERIES_POSITION.test(normalizeText(p.before)) ? p.after : p.before;
+}
+
+/**
+ * The title without a subtitle or "(Series, Book 2)" suffix: "Foundryside: A Novel" is
+ * "Foundryside". A bare series position isn't a title, so "241 - Die drei Fragezeichen" is
+ * "Die drei Fragezeichen".
+ */
 export function coreTitle(title: string): string {
-  return titleParts(title).before;
+  return mainTitle(titleParts(title));
 }
 
 /** "Last, First" -> "First Last"; also normalizes. */
@@ -103,20 +118,25 @@ function tokenOverlap(a: string, b: string): number {
 }
 
 /**
- * How alike two titles are, taking the best of their readings: the parts before the separator
- * ("Foundryside: A Novel" vs "Foundryside"), one title's part after the separator against the
- * other's part before it ("241 - Die drei Fragezeichen" vs "Die drei Fragezeichen"), and the
- * whole titles. Parts after a separator are never compared with each other, and whole titles
- * only when one has no separator, so two books that share only a subtitle ("...: A Novel")
- * don't look alike.
+ * How alike two titles are, taking the best of their readings: the main titles ("Foundryside:
+ * A Novel" vs "Foundryside", "241 - Die drei Fragezeichen" vs "Die drei Fragezeichen"), one
+ * title's part after the separator against the other's main title ("Game Changers 6: The Long
+ * Game" vs "The Long Game"), and the whole titles. Subtitles are never compared with each other,
+ * and whole titles only when one has no separator, so two books that share only a subtitle
+ * ("...: A Novel") don't look alike. A bare series position is never compared at all, so
+ * "1 - Dune" and "1 - Foundation" don't look alike either.
  */
 function titleSimilarity(a: string, b: string): number {
   const pa = titleParts(a);
   const pb = titleParts(b);
+  const ma = mainTitle(pa);
+  const mb = mainTitle(pb);
+  const subA = ma === pa.before ? pa.after : '';
+  const subB = mb === pb.before ? pb.after : '';
   const pairs: [string, string][] = [
-    [pa.before, pb.before],
-    [pa.after, pb.before],
-    [pa.before, pb.after],
+    [ma, mb],
+    [subA, mb],
+    [ma, subB],
   ];
   if (!pa.after || !pb.after) pairs.push([pa.full, pb.full]);
   let best = 0;

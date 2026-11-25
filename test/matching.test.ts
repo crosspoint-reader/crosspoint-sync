@@ -15,6 +15,10 @@ describe('matching helpers', () => {
     expect(coreTitle('Foundryside (The Founders Trilogy, Book 1)')).toBe('Foundryside');
     expect(coreTitle('Foundryside (The Founders Trilogy, Book 1): A Novel')).toBe('Foundryside');
     expect(coreTitle('Plain Title')).toBe('Plain Title');
+    expect(coreTitle('241 - Die drei Fragezeichen und das weiße Auge')).toBe('Die drei Fragezeichen und das weiße Auge');
+    expect(coreTitle('Book One - The Fellowship of the Ring')).toBe('The Fellowship of the Ring');
+    expect(coreTitle('Game Changers 6: The Long Game')).toBe('Game Changers 6');
+    expect(coreTitle('1984: A Novel')).toBe('1984');
   });
 
   it('keeps both sides of a title separator', () => {
@@ -49,8 +53,13 @@ describe('matching helpers', () => {
     expect(score('Foundryside: A Novel', 'Foundryside')).toBeGreaterThan(0.9);
     expect(score('Foundryside', 'Foundryside: A Novel')).toBeGreaterThan(0.9);
     expect(score('Foundryside (The Founders Trilogy, Book 1): A Novel', 'Foundryside')).toBeGreaterThan(0.9);
+    // Different series prefixes on the same title.
+    expect(score('Book One - The Fellowship of the Ring', '1: The Fellowship of the Ring')).toBeGreaterThan(0.9);
     // A shared subtitle alone isn't a match.
     expect(score('Beach Read: A Novel', 'Book Lovers: A Novel')).toBeLessThan(0.6);
+    // Nor is a shared series position.
+    expect(score('1 - Dune', '1 - Foundation', '')).toBeLessThan(0.2);
+    expect(score('Book One - The Two Towers', 'Book One - The Fellowship of the Ring')).toBeLessThan(0.6);
   });
 
   it('picks the right book of a numbered series, not another by the same author', () => {
@@ -61,6 +70,20 @@ describe('matching helpers', () => {
     ]);
     expect(decision.accepted).toBe(true);
     expect(decision.best?.externalId).toBe('right');
+  });
+
+  it('does not treat two books at the same series position as one book', () => {
+    const decision = decideMatch('The House on the Hill', 'A', [
+      { externalId: 'blue', title: '1 - The House on the Blue Hill', author: 'A' },
+      { externalId: 'red', title: '1 - The House on the Red Hill', author: 'A' },
+    ]);
+    expect(decision.accepted).toBe(false);
+
+    const dune = decideMatch('Dune', '', [
+      { externalId: 'foundation', title: '1 - Foundation' },
+      { externalId: 'dune', title: '1 - Dune' },
+    ], { threshold: 0.5 });
+    expect(dune.best?.externalId).toBe('dune');
   });
 
   it('normalizes "Last, First" author form', () => {
