@@ -161,7 +161,9 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
   try {
     const result = match
       ? await connector.push(cred, match, ev, http, { db, userId: row.user_id, document: row.document })
-      : await connector.pushUnmatched?.(cred, documentMeta(db, row.user_id, row.document), ev, http);
+      : unmatchedNow(db, row, account.cred_enc)
+        ? await connector.pushUnmatched?.(cred, documentMeta(db, row.user_id, row.document), ev, http)
+        : null;
     if (!stillCurrent()) return;
     if (!result) {
       // Unmatched documents can't be pushed; drop this event (a later manual
@@ -197,6 +199,13 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
     if (!stillCurrent()) return;
     failOperation(db, row, err, 'push failed');
   }
+}
+
+/** True only when matching ran and found nothing: not an opt-out, an unlink, or a discarded stale lookup. */
+function unmatchedNow(db: DB, row: QueueRow, credEnc: string): boolean {
+  const account = getAccount(db, row.user_id, row.connector_id);
+  const current = getMatch(db, row.user_id, row.connector_id, row.document);
+  return !!account?.enabled && account.cred_enc === credEnc && current?.source === 'none' && !current.external_id;
 }
 
 function failOperation(db: DB, row: QueueRow, err: unknown, prefix: string): void {

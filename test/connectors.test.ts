@@ -510,6 +510,56 @@ describe('fan-out on progress sync', () => {
     expect(fake.calls.filter((c) => c.method === 'POST')).toHaveLength(0);
   });
 
+  it('does not send a queued clipping once its book is marked not to sync', async () => {
+    const fake = fakeTransport();
+    fake.on('/list/', 200, { results: [] });
+    const { app, db } = makeTestApp({}, { connectorTransport: fake.transport });
+    const { headers } = await registerUser(app);
+    await app.request('/api/v1/connectors/readwise-reader', {
+      method: 'PUT', headers, body: JSON.stringify({ credential: { token: 'rw-opted-out-queued' } }),
+    });
+    await app.request('/api/v1/documents', {
+      method: 'PUT', headers,
+      body: JSON.stringify({ items: [{ document: DOC, title: 'Obscure Book', author: 'Nobody' }] }),
+    });
+    await app.request(`/api/v1/clippings/${DOC}`, {
+      method: 'PUT', headers,
+      body: JSON.stringify({ items: [{ id: 'c0ffee0011223344', spine: 1, text: 'A clipping', created_at: 1752300000 }] }),
+    });
+    await app.request(`/api/v1/connectors/readwise-reader/matches/${DOC}`, {
+      method: 'PUT', headers, body: JSON.stringify({ external_id: null }),
+    });
+    await drainQueue(db, fake.transport, 10);
+    expect(fake.calls.filter((c) => c.method === 'POST')).toHaveLength(0);
+  });
+
+  it('keeps the separate-book note on an unmatched book after a progress sync', async () => {
+    const fake = fakeTransport();
+    fake.on('/list/', 200, { results: [] });
+    fake.on('/highlights/', 200, []);
+    const { app, db } = makeTestApp({}, { connectorTransport: fake.transport });
+    const { headers } = await registerUser(app);
+    await app.request('/api/v1/connectors/readwise-reader', {
+      method: 'PUT', headers, body: JSON.stringify({ credential: { token: 'rw-note-kept' } }),
+    });
+    await app.request('/api/v1/documents', {
+      method: 'PUT', headers,
+      body: JSON.stringify({ items: [{ document: DOC, title: 'Obscure Book', author: 'Nobody' }] }),
+    });
+    await app.request(`/api/v1/clippings/${DOC}`, {
+      method: 'PUT', headers,
+      body: JSON.stringify({ items: [{ id: 'c0ffee0011223344', spine: 1, text: 'A clipping', created_at: 1752300000 }] }),
+    });
+    await drainQueue(db, fake.transport, 10);
+    await app.request('/syncs/progress', {
+      method: 'PUT', headers,
+      body: JSON.stringify({ document: DOC, progress: 'p', percentage: 0.3, device_id: 'd1' }),
+    });
+    await drainQueue(db, fake.transport, 10);
+    const review = await (await app.request('/api/v1/connectors/readwise-reader/review', { headers })).json();
+    expect(review.books[0].push_note).toMatch(/separate Readwise book/);
+  });
+
   it('does not fan out when no connector is linked', async () => {
     const fake = fakeTransport();
     const { app, db } = makeTestApp({}, { connectorTransport: fake.transport });

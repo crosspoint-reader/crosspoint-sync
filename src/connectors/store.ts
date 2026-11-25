@@ -239,7 +239,9 @@ export function saveMatch(
        confidence = excluded.confidence,
        source = excluded.source,
        query_used = excluded.query_used,
-       push_note = NULL,
+       -- a book that stays unmatched keeps the note on where its clippings went
+       push_note = CASE WHEN excluded.external_id IS NULL AND connector_matches.external_id IS NULL
+                         AND excluded.source = connector_matches.source THEN connector_matches.push_note ELSE NULL END,
        snapshot = NULL,
        anchor = CASE WHEN excluded.external_id IS connector_matches.external_id THEN connector_matches.anchor ELSE NULL END,
        updated_at = excluded.updated_at`
