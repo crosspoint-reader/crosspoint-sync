@@ -5,7 +5,7 @@ import { documentMeta } from '../connectors/store.js';
 import { extractTitleAuthor, scoreCandidate, type Candidate } from '../connectors/matching.js';
 import { nowSeconds } from './sync.js';
 import { cacheKey, cachedHardcoverBook, hardcoverBook, metadataApiUrl, tidy, type HardcoverBook } from './hardcover-catalog.js';
-import { libraryBook, libraryConfig, sameAuthor, storeLibraryCover, type LibraryBook } from './library.js';
+import { LIBRARY_HIT_TTL, libraryBook, libraryConfig, sameAuthor, storeLibraryCover, type LibraryBook } from './library.js';
 import { keepManual } from './manual-details.js';
 
 /**
@@ -277,15 +277,16 @@ export async function documentInfo(
   if (!row) return { cover: null, pages: null }; // no metadata, nothing to search on
   const want = extractTitleAuthor(documentMeta(db, userId, document));
 
-  // The user's own library goes first. A book is due when the library never answered for it, or
-  // didn't have it a day ago. Normal reads ask only for books without a cover; the background
+  // The user's own library goes first. A book is due when the library never answered for it, didn't
+  // have it a day ago, or had it a week ago (the library, or LIBRARY_OPDS_URL, may have changed since). Normal reads ask only for books without a cover; the background
   // enricher also brings books with older covers and details in line.
   const now = nowSeconds();
   const libraryOn = !!want && libraryConfig(env) !== null;
   const due =
     libraryOn &&
     (hardcover || !row.cover_url) &&
-    (row.library_checked_at == null || (!row.library_match && now - row.library_checked_at >= LIBRARY_MISS_RETRY));
+    (row.library_checked_at == null ||
+      now - row.library_checked_at >= (row.library_match ? LIBRARY_HIT_TTL : LIBRARY_MISS_RETRY));
   const asked = due || (libraryOn && row.library_match) ? await libraryBook(db, http, want!.title, want!.author, env) : null;
   const lib = asked === 'later' ? null : asked;
   if (due && asked !== 'later') {
@@ -351,15 +352,16 @@ const enriching = new Set<number>();
 export function enrichSoon(db: DB, userId: number, http: HttpTransport = fetchTransport, env: NodeJS.ProcessEnv = process.env, limit = 10): void {
   const library = libraryConfig(env) !== null;
   if (!(metadataApiUrl(env) || env.HARDCOVER_API_KEY || env.ISBNDB_API_KEY || library) || enriching.has(userId)) return;
-  // With a library: also books it never answered for, and its misses once they are a day old.
+  // With a library: also books it never answered for, its misses once a day old and its hits once a week old.
   const docs = db
     .prepare(
       `SELECT document FROM documents WHERE user_id = ?
          AND (hc_checked_at IS NULL
-              OR (? AND (library_checked_at IS NULL OR (library_match = 0 AND library_checked_at < ?))))
+              OR (? AND (library_checked_at IS NULL
+                         OR library_checked_at < CASE WHEN library_match = 1 THEN ? ELSE ? END)))
          AND (title IS NOT NULL OR filename IS NOT NULL) ORDER BY updated_at DESC LIMIT ?`
     )
-    .all(userId, library ? 1 : 0, nowSeconds() - LIBRARY_MISS_RETRY, limit) as { document: string }[];
+    .all(userId, library ? 1 : 0, nowSeconds() - LIBRARY_HIT_TTL, nowSeconds() - LIBRARY_MISS_RETRY, limit) as { document: string }[];
   if (!docs.length) return;
   enriching.add(userId);
   (async () => {

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DOMParser } from '@xmldom/xmldom';
 import { migrate, openDatabase } from '../src/db/db.js';
 import { documentInfo } from '../src/models/cover.js';
-import { parseEntry, readCapped, resetLibraryTemplates, sameBook } from '../src/models/library.js';
+import { parseEntry, readCapped, resetLibraryState, sameBook } from '../src/models/library.js';
 import type { HttpTransport } from '../src/connectors/types.js';
 import { DOC, makeTestApp, registerUser } from './helpers.js';
 
@@ -50,7 +50,7 @@ function book(title: string, author: string) {
   return db;
 }
 
-beforeEach(() => resetLibraryTemplates());
+beforeEach(() => resetLibraryState());
 afterEach(() => vi.unstubAllEnvs());
 
 describe('the user\'s library as the first source', () => {
@@ -144,7 +144,8 @@ describe('the user\'s library as the first source', () => {
     const row = db.prepare('SELECT hc_checked_at FROM documents').get() as { hc_checked_at: number | null };
     expect(row.hc_checked_at).toBeNull();
     expect(db.prepare("SELECT count(*) AS n FROM catalog_cache WHERE key LIKE 'library:%'").get()).toEqual({ n: 0 });
-    // Back up: the library answers this time.
+    // Back up a while later (past the pause after a failure): the library answers this time.
+    resetLibraryState();
     await documentInfo(db, 1, DOC, library(AUGE), LIB, { hardcover: true });
     expect((db.prepare('SELECT cover_url FROM documents').get() as { cover_url: string }).cover_url).toMatch(/^\/api\/v1\/library\/covers\//);
   });
@@ -182,6 +183,7 @@ describe('keeping covers in line with the library', () => {
     };
     await documentInfo(db, 1, DOC, down, LIB);
     expect(cover(db)).toBe('https://apple.test/600x600bb.jpg');
+    resetLibraryState(); // a while later, past the pause after a failure
     await documentInfo(db, 1, DOC, library(AUGE.replace('241 - ', '')), LIB, { hardcover: true });
     expect(cover(db)).toMatch(/^\/api\/v1\/library\/covers\//);
   });
@@ -250,6 +252,43 @@ describe('library lookups over time', () => {
     db.prepare('UPDATE documents SET library_checked_at = library_checked_at - 86400').run(); // a day later
     await documentInfo(db, 1, DOC, base, LIB, { hardcover: true });
     expect((db.prepare('SELECT cover_url FROM documents').get() as { cover_url: string }).cover_url).toMatch(/^\/api\/v1\/library\/covers\//);
+  });
+
+  it('brings a matched book up to date a week later, e.g. from another catalog', async () => {
+    const db = book('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
+    await documentInfo(db, 1, DOC, library(AUGE), LIB, { hardcover: true });
+    const first = (db.prepare('SELECT cover_url FROM documents').get() as { cover_url: string }).cover_url;
+    const other = { ...LIB, LIBRARY_OPDS_URL: 'https://lib2.test/opds' };
+    const lib2: HttpTransport = async (url, init) =>
+      library(AUGE.replace('Während eines Camping-Wochenendes …', 'Aus dem zweiten Katalog.'))(url.replace('lib2.test', 'lib.test'), init);
+    await documentInfo(db, 1, DOC, lib2, other, { hardcover: true });
+    expect(db.prepare('SELECT cover_url, description FROM documents').get()).toEqual({ cover_url: first, description: 'Während eines Camping-Wochenendes …' });
+    db.prepare('UPDATE documents SET library_checked_at = library_checked_at - 7 * 86400').run();
+    await documentInfo(db, 1, DOC, lib2, other, { hardcover: true });
+    expect(db.prepare('SELECT description FROM documents').get()).toEqual({ description: 'Aus dem zweiten Katalog.' });
+  });
+
+  it('leaves a library that failed alone for a while, and keeps using its last answer', async () => {
+    const db = book('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
+    await documentInfo(db, 1, DOC, library(AUGE), LIB, { hardcover: true });
+    db.prepare("UPDATE catalog_cache SET checked_at = checked_at - 8 * 86400 WHERE key LIKE 'library:%'").run(); // the answer expired
+    let asked = 0;
+    const down: HttpTransport = async (url, init) => {
+      if (url.startsWith('https://lib.test')) {
+        asked++;
+        throw new Error('timeout');
+      }
+      return library('')(url, init);
+    };
+    const { libraryBook } = await import('../src/models/library.js');
+    const first = await libraryBook(db, down, '241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner', LIB);
+    const again = await libraryBook(db, down, '241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner', LIB);
+    expect(first).toMatchObject({ title: '241 - Die drei Fragezeichen und das weiße Auge' });
+    expect(again).toEqual(first);
+    expect(asked).toBe(1);
+    // Another book without a stored answer isn't waited on either.
+    expect(await libraryBook(db, down, 'Something else', 'Someone', LIB)).toBe('later');
+    expect(asked).toBe(1);
   });
 
   it('doesn\'t reuse another catalog\'s answers', async () => {

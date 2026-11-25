@@ -38,8 +38,11 @@ export interface LibraryBook {
 }
 
 /** A found book is kept until the library is asked again after this long; a miss for a day. */
-const HIT_TTL = 7 * 86400;
+export const LIBRARY_HIT_TTL = 7 * 86400;
+const HIT_TTL = LIBRARY_HIT_TTL;
 const MISS_TTL = 86400;
+/** After the library failed to answer, it isn't asked again for this long (the last answer stays in use). */
+const DOWN_COOLDOWN = 300;
 const MAX_COVER_BYTES = 5 * 1024 * 1024;
 const OPDS_IMAGE = 'http://opds-spec.org/image';
 const OPDS_THUMBNAIL = 'http://opds-spec.org/image/thumbnail';
@@ -101,9 +104,13 @@ async function searchTemplate(http: HttpTransport, cfg: LibraryConfig): Promise<
   return template;
 }
 
-/** Test seam: forget discovered search templates. */
-export function resetLibraryTemplates(): void {
+// Catalogs that just failed to answer, until when they are left alone.
+const downUntil = new Map<string, number>();
+
+/** Test seam: forget discovered search templates and failed catalogs. */
+export function resetLibraryState(): void {
   templates.clear();
+  downUntil.clear();
 }
 
 function stripHtml(s: string): string {
@@ -202,6 +209,9 @@ export async function libraryBook(
   if (hit && nowSeconds() - hit.checked_at < (hit.data ? HIT_TTL : MISS_TTL)) {
     return hit.data ? (JSON.parse(hit.data) as LibraryBook) : null;
   }
+  const stale = hit?.data ? (JSON.parse(hit.data) as LibraryBook) : null;
+  // A library that just failed isn't waited on again for every book and every request.
+  if ((downUntil.get(cfg.url) ?? 0) > nowSeconds()) return stale ?? 'later';
   let found: LibraryBook | null = null;
   try {
     const queries = [...new Set([title.trim(), coreTitle(title)].filter(Boolean))];
@@ -210,8 +220,10 @@ export async function libraryBook(
       if (found) break;
     }
   } catch {
-    return hit?.data ? (JSON.parse(hit.data) as LibraryBook) : 'later';
+    downUntil.set(cfg.url, nowSeconds() + DOWN_COOLDOWN);
+    return stale ?? 'later';
   }
+  downUntil.delete(cfg.url);
   db.prepare(
     `INSERT INTO catalog_cache (key, data, checked_at) VALUES (?, ?, ?)
      ON CONFLICT(key) DO UPDATE SET data = excluded.data, checked_at = excluded.checked_at`
