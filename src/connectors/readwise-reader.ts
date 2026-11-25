@@ -1,5 +1,6 @@
 import { ConnectorOperationError } from './types.js';
 import { decideMatch, extractTitleAuthor, normalizeText, type Candidate } from './matching.js';
+import { postHighlight } from './readwise.js';
 import type {
   Connector,
   Credential,
@@ -172,6 +173,22 @@ async function pushHighlight(token: string, m: Match, ev: OutboundEvent, http: H
   return { ok: false, retryable: false, error: `highlight rejected (${res.status}): ${(await res.text()).slice(0, 200)}` };
 }
 
+const UNMATCHED_NOTE = 'No Reader document matched, so clippings go to a separate Readwise book.';
+
+// a book that isn't in Reader still gets its clippings in Readwise, as its own book
+async function pushUnmatched(cred: Credential, doc: DocumentMeta, ev: OutboundEvent, http: HttpTransport): Promise<PushResult | null> {
+  const h = ev.highlight;
+  if (ev.kind !== 'highlight' || !h?.text) return null;
+  const title = h.title ?? extractTitleAuthor(doc)?.title;
+  if (!title) return { ok: false, retryable: false, error: 'no book title' };
+  const token = tokenOf(cred);
+  if (rateLimited(token)) return { ok: false, retryable: true, error: 'rate limited' };
+  const { status, result } = await postHighlight(token, { ...h, title, author: h.author ?? doc.author }, http);
+  noteRateLimit(token, status);
+  if (status === 403) return { ok: false, retryable: false, needsReauth: true, error: 'unauthorized' };
+  return result.ok ? { ok: true, note: UNMATCHED_NOTE } : result;
+}
+
 async function match(cred: Credential, doc: DocumentMeta, http: HttpTransport): Promise<Match | null> {
   const token = tokenOf(cred);
   const ta = extractTitleAuthor(doc);
@@ -295,6 +312,7 @@ export const readwiseReaderConnector: Connector = {
   shouldPush,
   match,
   push,
+  pushUnmatched,
   pullProgress,
   listCurrentlyReading,
   search,

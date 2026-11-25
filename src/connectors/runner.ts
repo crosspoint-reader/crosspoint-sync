@@ -157,17 +157,18 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
     failOperation(db, row, err, 'match failed');
     return;
   }
-  if (!match) {
-    // Unmatched documents can't be pushed; drop this event (a later manual
-    // match + fresh sync will re-enqueue). Not an error state.
-    markFailed(db, row, 'no book match', false);
-    return;
-  }
-
   const cred = decryptCredential(account, db);
   try {
-    const result = await connector.push(cred, match, ev, http, { db, userId: row.user_id, document: row.document });
+    const result = match
+      ? await connector.push(cred, match, ev, http, { db, userId: row.user_id, document: row.document })
+      : await connector.pushUnmatched?.(cred, documentMeta(db, row.user_id, row.document), ev, http);
     if (!stillCurrent()) return;
+    if (!result) {
+      // Unmatched documents can't be pushed; drop this event (a later manual
+      // match + fresh sync will re-enqueue). Not an error state.
+      markFailed(db, row, 'no book match', false);
+      return;
+    }
     if (result.ok) {
       // Persist (or clear) the per-book condition so the review UI can show it.
       // A highlight push says nothing about progress, so it keeps the current note unless it sets one.

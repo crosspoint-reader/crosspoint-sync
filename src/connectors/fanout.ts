@@ -212,6 +212,7 @@ export function backfillConnector(db: DB, userId: number, connectorId: string, d
       .all(userId) as unknown as (ClippingHighlightRow & { id: string; document: string; title: string | null; author: string | null })[];
     for (const r of rows) {
       if (document && r.document !== document) continue;
+      if (!isAttemptable(db, userId, conn, r.document)) continue;
       enqueue(
         db,
         userId,

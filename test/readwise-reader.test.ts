@@ -140,6 +140,54 @@ describe('readwise-reader connector', () => {
     expect(!!r.needsReauth).toBe(needsReauth);
   });
 
+  it('sends a clipping on an unmatched book to /api/v2/highlights/ as its own book', async () => {
+    const fake = fakeTransport();
+    fake.on('/highlights/', 200, []);
+    const doc = { document: 'hash', title: 'Obscure Book', author: 'Nobody', filename: null };
+    const r = await readwiseReaderConnector.pushUnmatched!(CRED, doc,
+      { kind: 'highlight', document: 'hash', timestamp: 1, highlight: { text: 'A line', note: 'mine', highlightedAt: 1752300000 } },
+      fake.transport);
+    expect(r).toMatchObject({ ok: true, note: expect.stringMatching(/separate Readwise book/) });
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0].url).toMatch(/\/api\/v2\/highlights\/$/);
+    expect(JSON.parse(fake.calls[0].body!).highlights[0]).toMatchObject({
+      text: 'A line', note: 'mine', title: 'Obscure Book', author: 'Nobody', source_type: 'crosspoint', category: 'books',
+      highlighted_at: '2025-07-12T06:00:00.000Z',
+    });
+  });
+
+  it('names an unmatched book from its filename when it has no title', async () => {
+    const fake = fakeTransport();
+    fake.on('/highlights/', 200, []);
+    const doc = { document: 'hash', title: null, author: null, filename: 'Obscure Book.epub' };
+    await readwiseReaderConnector.pushUnmatched!(CRED, doc,
+      { kind: 'highlight', document: 'hash', timestamp: 1, highlight: { text: 'A line' } }, fake.transport);
+    expect(JSON.parse(fake.calls[0].body!).highlights[0].title).toBe('Obscure Book');
+  });
+
+  it.each(['progress', 'finished'] as const)('leaves an unmatched %s event undelivered', async kind => {
+    const fake = fakeTransport();
+    const doc = { document: 'hash', title: 'Obscure Book', author: 'Nobody', filename: null };
+    const r = await readwiseReaderConnector.pushUnmatched!(CRED, doc, { kind, document: 'hash', timestamp: 1, percentage: 0.5 }, fake.transport);
+    expect(r).toBeNull();
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it.each([
+    [401, false, true],
+    [403, false, true],
+    [429, true, false],
+    [500, true, false],
+  ])('maps a %s response for an unmatched clipping', async (status, retryable, needsReauth) => {
+    const fake = fakeTransport();
+    fake.on('/highlights/', status, {});
+    const doc = { document: 'hash', title: 'Obscure Book', author: 'Nobody', filename: null };
+    const r = await readwiseReaderConnector.pushUnmatched!(CRED, doc,
+      { kind: 'highlight', document: 'hash', timestamp: 1, highlight: { text: 'A line' } }, fake.transport);
+    expect(r).toMatchObject({ ok: false, retryable });
+    expect(!!(r as { needsReauth?: boolean }).needsReauth).toBe(needsReauth);
+  });
+
   it.each(['progress', 'finished'] as const)('preserves newer Reader progress for queued %s events', async kind => {
     const fake = fakeTransport();
     fake.on('id=', 200, { results: [{ reading_progress: 0.7, updated_at: '2026-01-01T00:00:00Z' }] });
