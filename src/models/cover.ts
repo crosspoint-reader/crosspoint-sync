@@ -241,6 +241,18 @@ export function withLibrary(
   };
 }
 
+/** The details a library entry supplies, as stored in library_fields (",description,series,"), or null. */
+function libraryFields(lib: LibraryBook | null): string | null {
+  if (!lib) return null;
+  const fields = [
+    lib.description && 'description',
+    lib.genres.length && 'genres',
+    lib.series && 'series',
+    lib.release_year && 'release_year',
+  ].filter(Boolean);
+  return fields.length ? `,${fields.join(',')},` : null;
+}
+
 /** Writes below apply only while the book is still the one a lookup started with (no title or author edit since). */
 type Identity = { title: string | null; author: string | null };
 const SAME = 'AND title IS ? AND author IS ?';
@@ -263,23 +275,25 @@ function saveLibraryDetails(db: DB, userId: number, document: string, lib: Libra
   }
   if (lib.release_year) sets.push(keepManual('release_year')), values.push(lib.release_year);
   if (!sets.length) return;
-  sets.push('library_details = 1');
+  // Added to what came from the library before: fields not written here keep their earlier source.
+  sets.push("library_fields = COALESCE(library_fields, '') || ?");
+  values.push(libraryFields(lib));
   db.prepare(`UPDATE documents SET ${sets.join(', ')} WHERE user_id = ? AND document = ? ${SAME}`).run(...values, userId, document, ...same(id));
 }
 
 /** Store Hardcover's details on a document (a miss just records the check). Details set by hand stay. */
-function saveHardcover(db: DB, userId: number, document: string, hc: HardcoverBook | null, id: Identity, fromLibrary = false): void {
+function saveHardcover(db: DB, userId: number, document: string, hc: HardcoverBook | null, id: Identity, lib: LibraryBook | null = null): void {
   const json = (v: string[] | undefined) => (v?.length ? JSON.stringify(v) : null);
   db.prepare(
     `UPDATE documents SET hc_id = ?, hc_slug = ?, ${keepManual('moods')}, ${keepManual('genres')},
        ${keepManual('content_warnings')}, rating = ?, ${keepManual('series')}, ${keepManual('hc_series_id')},
        ${keepManual('series_position')}, ${keepManual('release_year')}, ${keepManual('description')}, hc_checked_at = ?,
-       library_details = ?
+       library_fields = ?
      WHERE user_id = ? AND document = ? ${SAME}`
   ).run(
     hc?.id || null, hc?.slug ?? null, json(hc?.moods), json(hc?.genres), json(hc?.content_warnings), hc?.rating ?? null,
     hc?.series ?? null, hc?.series_id ?? null, hc?.series_position ?? null, hc?.release_year ?? null,
-    hc?.description ?? null, nowSeconds(), fromLibrary ? 1 : 0, userId, document, ...same(id)
+    hc?.description ?? null, nowSeconds(), libraryFields(lib), userId, document, ...same(id)
   );
 }
 
@@ -383,7 +397,7 @@ export async function documentInfo(
         db.prepare(`UPDATE documents SET hc_checked_at = NULL WHERE user_id = ? AND document = ? ${SAME}`).run(userId, document, ...same(id));
         row.hc_checked_at = null;
       } else {
-        saveHardcover(db, userId, document, withLibrary(lib, cached, want!), id, true);
+        saveHardcover(db, userId, document, withLibrary(lib, cached, want!), id, lib);
       }
     }
     // A cover that couldn't be fetched counts as a miss for now, so it is tried again after a day.
@@ -400,7 +414,7 @@ export async function documentInfo(
       : null;
     if (found !== 'later') {
       hc = withLibrary(lib, found, want);
-      saveHardcover(db, userId, document, hc, id, lib !== null);
+      saveHardcover(db, userId, document, hc, id, lib);
     } else if (lib) {
       saveLibraryDetails(db, userId, document, lib, id);
     }

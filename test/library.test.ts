@@ -560,8 +560,8 @@ describe('review round six', () => {
   it('keeps the library\'s covers and details out of the catalog export', async () => {
     const { app, db } = makeTestApp({ catalogExportToken: 'tok' });
     await registerUser(app);
-    db.prepare(`INSERT INTO documents (user_id, document, title, author, isbn, description, genres, cover_url, cover_library, library_details, updated_at)
-      VALUES (1, 'lib', 'Dune', 'Frank Herbert', '9780441013593', 'My own notes.', '["Mine"]', '/api/v1/library/covers/0123456789abcdef0123456789abcdef', 1, 1, 0)`).run();
+    db.prepare(`INSERT INTO documents (user_id, document, title, author, isbn, description, genres, cover_url, cover_library, library_fields, updated_at)
+      VALUES (1, 'lib', 'Dune', 'Frank Herbert', '9780441013593', 'My own notes.', '["Mine"]', '/api/v1/library/covers/0123456789abcdef0123456789abcdef', 1, ',description,genres,', 0)`).run();
     const body = await (await app.request('/api/catalog/books', { headers: { authorization: 'Bearer tok' } })).json();
     expect(body.books[0]).toMatchObject({ title: 'Dune', description: null, genres: [], cover_url: null });
   });
@@ -633,14 +633,14 @@ describe('own review', () => {
   });
 });
 
-describe('review round seven', () => {
+describe('catalog export and cleanup', () => {
   it('keeps library details out of the export after a later library miss', async () => {
     for (const [k, v] of Object.entries(LIB)) vi.stubEnv(k, v);
     const { app, db } = makeTestApp({ catalogExportToken: 'tok' });
     await registerUser(app);
     db.prepare("INSERT INTO documents (user_id, document, title, author, isbn, updated_at) VALUES (1, ?, 'Foundryside', 'Robert Jackson Bennett', '9780593123456', 0)").run(DOC);
     await documentInfo(db, 1, DOC, library(entry(5, 'Foundryside', 'Robert Jackson Bennett', '<summary>My own notes.</summary>')), LIB, { hardcover: true });
-    expect(db.prepare('SELECT description, library_details FROM documents').get()).toEqual({ description: 'My own notes.', library_details: 1 });
+    expect(db.prepare('SELECT description, library_fields FROM documents').get()).toEqual({ description: 'My own notes.', library_fields: ',description,genres,release_year,' });
     // A day later the library has no such book any more (a miss): the details stay, and stay out of the export.
     db.prepare('UPDATE documents SET library_checked_at = library_checked_at - 8 * 86400').run();
     db.prepare("UPDATE catalog_cache SET checked_at = checked_at - 8 * 86400 WHERE key LIKE 'library:%'").run();
@@ -648,6 +648,23 @@ describe('review round seven', () => {
     expect(db.prepare('SELECT library_match FROM documents').get()).toEqual({ library_match: 0 });
     const body = await (await app.request('/api/catalog/books', { headers: { authorization: 'Bearer tok' } })).json();
     expect(body.books[0]).toMatchObject({ title: 'Foundryside', description: null, genres: [] });
+  });
+
+  it('leaves out only the fields that came from the library', async () => {
+    for (const [k, v] of Object.entries(LIB)) vi.stubEnv(k, v);
+    const { app, db } = makeTestApp({ catalogExportToken: 'tok' });
+    await registerUser(app);
+    db.prepare("INSERT INTO documents (user_id, document, title, author, isbn, updated_at) VALUES (1, ?, 'Foundryside', 'Robert Jackson Bennett', '9780593123456', 0)").run(DOC);
+    // The library has a description only; the metadata API (same book) adds the series.
+    const base = library('<entry><title>Foundryside</title><id>urn:5</id><author><name>Robert Jackson Bennett</name></author><summary>My own notes.</summary></entry>');
+    const http: HttpTransport = async (url, init) =>
+      url.startsWith('https://meta.test/')
+        ? Response.json({ books: [{ id: 't-2', title: 'Foundryside', author: 'Robert Jackson Bennett', description: 'A heist.', series: 'The Founders', series_position: 1 }] })
+        : base(url, init);
+    await documentInfo(db, 1, DOC, http, { ...LIB, METADATA_API_URL: 'https://meta.test' }, { hardcover: true });
+    expect(db.prepare('SELECT description, series, library_fields FROM documents').get()).toEqual({ description: 'My own notes.', series: 'The Founders', library_fields: ',description,' });
+    const body = await (await app.request('/api/catalog/books', { headers: { authorization: 'Bearer tok' } })).json();
+    expect(body.books[0]).toMatchObject({ title: 'Foundryside', description: null, series: 'The Founders', series_position: 1 });
   });
 
   it('cleans up covers nothing shows any more without a new download', async () => {
