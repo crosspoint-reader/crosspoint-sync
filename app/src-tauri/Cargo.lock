@@ -4175,7 +4175,7 @@ dependencies = [
 [[package]]
 name = "tauri-plugin-system-components"
 version = "0.1.8"
-source = "git+https://github.com/itsthisjustin/tauri-plugin-system-components?rev=348476a5bd4ff19c95a944d9a5d93bf403d4e07b#348476a5bd4ff19c95a944d9a5d93bf403d4e07b"
+source = "git+https://github.com/itsthisjustin/tauri-plugin-system-components?rev=4b4031f4ec6f4d206936ace57f26784ba3836272#4b4031f4ec6f4d206936ace57f26784ba3836272"
 dependencies = [
  "objc2",
  "objc2-app-kit",

@@ -30,7 +30,7 @@ tauri-plugin-opener = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-haptics = "2"
 # UIKit-managed iPhone/Duo navigation from our fork, pinned with the JS package.
-tauri-plugin-system-components = { git = "https://github.com/itsthisjustin/tauri-plugin-system-components", rev = "348476a5bd4ff19c95a944d9a5d93bf403d4e07b" }
+tauri-plugin-system-components = { git = "https://github.com/itsthisjustin/tauri-plugin-system-components", rev = "4b4031f4ec6f4d206936ace57f26784ba3836272" }
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 block2 = "0.6"
