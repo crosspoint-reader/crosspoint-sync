@@ -74,7 +74,10 @@ describe('device session ingestion',()=>{
     expect((await f.submit()).status).toBe(200);
     expect((f.db.prepare('SELECT COUNT(*) n FROM reading_sessions').get() as any).n).toBe(1);
     expect((await f.submit([{...record,seconds:500}])).status).toBe(200);
-    expect((await f.submit([{...record,document:'b'.repeat(32)}])).status).toBe(403);
+    const moved=await f.submit([{...record,document:'b'.repeat(32)}]);
+    expect(moved.status).toBe(200);
+    expect(await moved.json()).toMatchObject({accepted_session_ids:['session1'],refused:[{session_id:'session1',reason:'conflict'}]});
+    expect((f.db.prepare('SELECT document FROM reading_sessions').get() as any).document).toBe(record.document);
     expect((f.db.prepare('SELECT COUNT(*) n FROM stats_device_global').get() as any).n).toBe(0);
     expect((f.db.prepare('SELECT COUNT(*) n FROM stats_device_book').get() as any).n).toBe(0);
     expect((f.db.prepare('SELECT COUNT(*) n FROM stats_device_day').get() as any).n).toBe(0);
@@ -86,12 +89,55 @@ describe('device session ingestion',()=>{
       expect((f.db.prepare(`SELECT COUNT(*) n FROM ${table}`).get() as any).n).toBe(0);
     expect((f.db.prepare('SELECT COUNT(*) n FROM users').get() as any).n).toBe(1);
   });
-  it('rejects malformed batches atomically and isolates device/user identities',async()=>{
+  it('stores the good sessions of a batch and acknowledges the ones it refuses',async()=>{
     const f=await fixture();
-    for(const item of [{...record,seconds:601},{...record,ended_at:0},{...record,utc_offset_minutes:999},{...record,session_id:'bad/id'}])
-      expect((await f.submit([record,{...item,session_id:item.session_id==='session1'?'other':item.session_id}])).status).toBe(403);
+    const now=Math.floor(Date.now()/1000);
+    const good=(i:number)=>({...record,session_id:`good${i}`,started_at:record.started_at+i*1000,ended_at:record.ended_at+i*1000});
+    const bad=[{...record,session_id:'long',seconds:601},{...record,session_id:'ended',ended_at:0},
+      {...record,session_id:'zone',utc_offset_minutes:999},{...record,session_id:'ahead',started_at:now+3000,ended_at:now+3600}];
+    const res=await f.submit([good(1),...bad,good(2),{...record,session_id:'bad/id'}]);
+    expect(res.status).toBe(200);
+    const body=await res.json();
+    expect(body.accepted_session_ids).toEqual(['good1','long','ended','zone','ahead','good2']);
+    expect(body.refused).toEqual([{session_id:'long',reason:'invalid'},{session_id:'ended',reason:'invalid'},
+      {session_id:'zone',reason:'invalid'},{session_id:'ahead',reason:'future'}]);
+    expect((f.db.prepare('SELECT session_id FROM reading_sessions ORDER BY session_id').all() as any[]).map((r)=>r.session_id))
+      .toEqual(['good1','good2']);
+  });
+  it('lets later sessions through once an earlier session ID conflicts',async()=>{
+    // The reader resends its oldest unacknowledged sessions first, so a refused session that is not
+    // acknowledged would block every session after it.
+    const f=await fixture(); await f.submit();
+    const later={...record,session_id:'session2',started_at:record.started_at+5000,ended_at:record.ended_at+5000};
+    const res=await f.submit([{...record,document:'b'.repeat(32)},later]);
+    expect(res.status).toBe(200);
+    expect((await res.json()).accepted_session_ids).toEqual(['session1','session2']);
+    expect((f.db.prepare('SELECT COUNT(*) n FROM reading_sessions').get() as any).n).toBe(2);
+  });
+  it('merges checkpoints of one session that disagree on time zone or direction',async()=>{
+    const f=await fixture(); await f.submit();
+    expect((await f.submit([{...record,utc_offset_minutes:60,ended_at:record.ended_at+300,seconds:900}])).status).toBe(200);
+    expect((await f.submit([{...record,ended_at:record.ended_at+350,seconds:800}])).status).toBe(200);
+    expect(f.db.prepare('SELECT seconds,ended_at,utc_offset_minutes FROM reading_sessions').get())
+      .toMatchObject({seconds:900,ended_at:record.ended_at+350,utc_offset_minutes:0});
+  });
+  it('grows a stored session even when another session matches the new checkpoint',async()=>{
+    const f=await fixture(); await f.submit([{...record,ended_at:record.started_at+1200}]);
+    await f.submit([{...record,ended_at:record.started_at+1000,seconds:900}],'reader2');
+    expect((await f.submit([{...record,ended_at:record.started_at+1000,seconds:900}])).status).toBe(200);
+    expect((f.db.prepare("SELECT seconds FROM reading_sessions WHERE device_id='reader1'").get() as any).seconds).toBe(900);
+  });
+  it('rejects malformed requests and isolates device/user identities',async()=>{
+    const f=await fixture();
+    for(const body of [{items:[record]},{device_id:'reader1',items:[]},{device_id:'reader1',items:{}},
+      {device_id:'reader1',items:Array.from({length:21},(_,i)=>({...record,session_id:`s${i}`}))}]){
+      const res=await f.app.request('/api/v1/stats/sessions',{method:'PUT',headers:f.user.headers,body:JSON.stringify(body)});
+      expect(res.status).toBe(403);
+    }
     expect((f.db.prepare('SELECT COUNT(*) n FROM reading_sessions').get() as any).n).toBe(0);
-    expect((await f.submit([record,record])).status).toBe(403);
+    const twice=await f.submit([record,{...record,seconds:700,ended_at:record.ended_at+100}]);
+    expect(await twice.json()).toMatchObject({accepted_session_ids:['session1'],refused:[]});
+    expect((f.db.prepare('SELECT seconds FROM reading_sessions').get() as any).seconds).toBe(700);
     await f.submit(); await f.submit([{...record,started_at:record.started_at+1,ended_at:record.ended_at+1}],'reader2');
     const other=await registerUser(f.app);
     expect((await f.app.request('/api/v1/stats/sessions',{method:'PUT',headers:other.headers,body:JSON.stringify({device_id:'reader1',items:[record]})})).status).toBe(200);

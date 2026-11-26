@@ -560,17 +560,27 @@ Accepts 1–20 records. IDs are scoped to the authenticated user and device;
 32-hex reader document ID. Timestamps are integer Unix UTC seconds; the offset
 records the device's local timezone at capture. Active seconds must be at least
 10, no greater than the wall-clock span, and the span cannot exceed seven days.
-Future timestamps beyond five minutes are rejected. Undated reading remains in
-legacy counters and is not manufactured into dated sessions.
+Sessions ending more than five minutes after the server's clock were measured
+with a wrong clock and are not stored. Undated reading remains in legacy
+counters and is not manufactured into dated sessions.
 
-Checkpoints retain their ID and original book, start, and timezone. Later
-checkpoints may increase both duration and end time; exact or older checkpoints
-are acknowledged without decreasing stored values. Inconsistent identities or
-mixed-direction updates reject the complete batch.
+Each record is handled on its own, so one bad record never blocks the rest of
+the batch. Checkpoints keep their ID, book and start; a later checkpoint of the
+same session keeps the larger duration and the later end, and an older or
+repeated one changes nothing. A record whose ID already belongs to a session with
+another book or start is refused and the stored session is left as it is. Only a
+malformed request (no `device_id`, or `items` not an array of 1–20) is answered
+with 403.
 
-Returns `{"until":1609503100,"accepted_session_ids":["stable-session-id"]}`.
-Readers must verify the specific acknowledged IDs before clearing their outbox.
-HTTP success or an old server's generic stats response alone is insufficient.
+Returns `{"until":1609503100,"accepted_session_ids":["stable-session-id"],"refused":[]}`.
+`accepted_session_ids` lists every ID the reader can clear from its outbox:
+stored, already held, or refused for good. `refused` lists the IDs that were not
+stored, each with a `reason`: `invalid` (outside the limits above), `future`
+(dated ahead of the server's clock) or `conflict` (the ID already belongs to
+another session). A refused ID is acknowledged because a reader that kept resending it
+would hold back every session after it. Readers must verify the
+specific acknowledged IDs before clearing their outbox. HTTP success or an old
+server's generic stats response alone is insufficient.
 
 CrossInk keeps session capture in RAM and writes it at existing reader save points
 (progress saves, sleep/exit, tracking disable and restart handoffs), without an
