@@ -6,7 +6,8 @@ import { extractTitleAuthor, scoreCandidate, type Candidate } from '../connector
 import { nowSeconds } from './sync.js';
 import { cacheKey, cachedHardcoverBook, hardcoverBook, metadataApiUrl, tidy, type HardcoverBook } from './hardcover-catalog.js';
 import {
-  LIBRARY_HIT_TTL, hasLibraryCover, isLibraryCoverPath, libraryBook, libraryConfig, sameAuthor, sameTitle, storeLibraryCover,
+  LIBRARY_HIT_TTL, hasLibraryCover, isLibraryCoverPath, libraryBook, libraryConfig, pruneLibraryCovers, sameAuthor, sameTitle,
+  storeLibraryCover,
   type LibraryBook,
 } from './library.js';
 import { keepManual } from './manual-details.js';
@@ -262,21 +263,23 @@ function saveLibraryDetails(db: DB, userId: number, document: string, lib: Libra
   }
   if (lib.release_year) sets.push(keepManual('release_year')), values.push(lib.release_year);
   if (!sets.length) return;
+  sets.push('library_details = 1');
   db.prepare(`UPDATE documents SET ${sets.join(', ')} WHERE user_id = ? AND document = ? ${SAME}`).run(...values, userId, document, ...same(id));
 }
 
 /** Store Hardcover's details on a document (a miss just records the check). Details set by hand stay. */
-function saveHardcover(db: DB, userId: number, document: string, hc: HardcoverBook | null, id: Identity): void {
+function saveHardcover(db: DB, userId: number, document: string, hc: HardcoverBook | null, id: Identity, fromLibrary = false): void {
   const json = (v: string[] | undefined) => (v?.length ? JSON.stringify(v) : null);
   db.prepare(
     `UPDATE documents SET hc_id = ?, hc_slug = ?, ${keepManual('moods')}, ${keepManual('genres')},
        ${keepManual('content_warnings')}, rating = ?, ${keepManual('series')}, ${keepManual('hc_series_id')},
-       ${keepManual('series_position')}, ${keepManual('release_year')}, ${keepManual('description')}, hc_checked_at = ?
+       ${keepManual('series_position')}, ${keepManual('release_year')}, ${keepManual('description')}, hc_checked_at = ?,
+       library_details = ?
      WHERE user_id = ? AND document = ? ${SAME}`
   ).run(
     hc?.id || null, hc?.slug ?? null, json(hc?.moods), json(hc?.genres), json(hc?.content_warnings), hc?.rating ?? null,
     hc?.series ?? null, hc?.series_id ?? null, hc?.series_position ?? null, hc?.release_year ?? null,
-    hc?.description ?? null, nowSeconds(), userId, document, ...same(id)
+    hc?.description ?? null, nowSeconds(), fromLibrary ? 1 : 0, userId, document, ...same(id)
   );
 }
 
@@ -380,7 +383,7 @@ export async function documentInfo(
         db.prepare(`UPDATE documents SET hc_checked_at = NULL WHERE user_id = ? AND document = ? ${SAME}`).run(userId, document, ...same(id));
         row.hc_checked_at = null;
       } else {
-        saveHardcover(db, userId, document, withLibrary(lib, cached, want!), id);
+        saveHardcover(db, userId, document, withLibrary(lib, cached, want!), id, true);
       }
     }
     // A cover that couldn't be fetched counts as a miss for now, so it is tried again after a day.
@@ -397,7 +400,7 @@ export async function documentInfo(
       : null;
     if (found !== 'later') {
       hc = withLibrary(lib, found, want);
-      saveHardcover(db, userId, document, hc, id);
+      saveHardcover(db, userId, document, hc, id, lib !== null);
     } else if (lib) {
       saveLibraryDetails(db, userId, document, lib, id);
     }
@@ -441,9 +444,15 @@ export async function documentInfo(
 // Books still waiting on Hardcover details, filled in the background a few at a
 // time (lookups are throttled, so this never holds up a request).
 const enriching = new Set<number>();
+let lastPrune = 0;
 export function enrichSoon(db: DB, userId: number, http: HttpTransport = fetchTransport, env: NodeJS.ProcessEnv = process.env, limit = 10): void {
   const library = libraryConfig(env) !== null;
   if (!(metadataApiUrl(env) || env.HARDCOVER_API_KEY || env.ISBNDB_API_KEY || library) || enriching.has(userId)) return;
+  // Covers dropped by edits or a library that no longer has them are cleaned up here too, at most hourly.
+  if (library && Date.now() - lastPrune > 3600_000) {
+    lastPrune = Date.now();
+    pruneLibraryCovers(db);
+  }
   // With a library: also books it never answered for, its misses once a day old and its hits once a week old.
   const docs = db
     .prepare(

@@ -19,3 +19,6 @@ ALTER TABLE documents ADD COLUMN cover_library INTEGER NOT NULL DEFAULT 0;
 -- When the library last answered for the book, and whether it had it (a miss is asked again).
 ALTER TABLE documents ADD COLUMN library_checked_at INTEGER;
 ALTER TABLE documents ADD COLUMN library_match INTEGER NOT NULL DEFAULT 0;
+-- The book's details came from the user's library (kept out of the catalog export), whatever the
+-- library answers later.
+ALTER TABLE documents ADD COLUMN library_details INTEGER NOT NULL DEFAULT 0;

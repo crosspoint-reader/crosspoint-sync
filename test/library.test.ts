@@ -560,7 +560,7 @@ describe('review round six', () => {
   it('keeps the library\'s covers and details out of the catalog export', async () => {
     const { app, db } = makeTestApp({ catalogExportToken: 'tok' });
     await registerUser(app);
-    db.prepare(`INSERT INTO documents (user_id, document, title, author, isbn, description, genres, cover_url, cover_library, library_match, updated_at)
+    db.prepare(`INSERT INTO documents (user_id, document, title, author, isbn, description, genres, cover_url, cover_library, library_details, updated_at)
       VALUES (1, 'lib', 'Dune', 'Frank Herbert', '9780441013593', 'My own notes.', '["Mine"]', '/api/v1/library/covers/0123456789abcdef0123456789abcdef', 1, 1, 0)`).run();
     const body = await (await app.request('/api/catalog/books', { headers: { authorization: 'Bearer tok' } })).json();
     expect(body.books[0]).toMatchObject({ title: 'Dune', description: null, genres: [], cover_url: null });
@@ -630,6 +630,34 @@ describe('own review', () => {
     };
     const info = await documentInfo(db, 1, DOC, http, {});
     expect(info).toEqual({ cover: null, pages: null });
+  });
+});
+
+describe('review round seven', () => {
+  it('keeps library details out of the export after a later library miss', async () => {
+    for (const [k, v] of Object.entries(LIB)) vi.stubEnv(k, v);
+    const { app, db } = makeTestApp({ catalogExportToken: 'tok' });
+    await registerUser(app);
+    db.prepare("INSERT INTO documents (user_id, document, title, author, isbn, updated_at) VALUES (1, ?, 'Foundryside', 'Robert Jackson Bennett', '9780593123456', 0)").run(DOC);
+    await documentInfo(db, 1, DOC, library(entry(5, 'Foundryside', 'Robert Jackson Bennett', '<summary>My own notes.</summary>')), LIB, { hardcover: true });
+    expect(db.prepare('SELECT description, library_details FROM documents').get()).toEqual({ description: 'My own notes.', library_details: 1 });
+    // A day later the library has no such book any more (a miss): the details stay, and stay out of the export.
+    db.prepare('UPDATE documents SET library_checked_at = library_checked_at - 8 * 86400').run();
+    db.prepare("UPDATE catalog_cache SET checked_at = checked_at - 8 * 86400 WHERE key LIKE 'library:%'").run();
+    await documentInfo(db, 1, DOC, library(''), LIB, { hardcover: true });
+    expect(db.prepare('SELECT library_match FROM documents').get()).toEqual({ library_match: 0 });
+    const body = await (await app.request('/api/catalog/books', { headers: { authorization: 'Bearer tok' } })).json();
+    expect(body.books[0]).toMatchObject({ title: 'Foundryside', description: null, genres: [] });
+  });
+
+  it('cleans up covers nothing shows any more without a new download', async () => {
+    const { enrichSoon } = await import('../src/models/cover.js');
+    const db = book('x', 'y');
+    db.prepare("UPDATE documents SET hc_checked_at = 1, library_checked_at = ?, library_match = 1").run(Math.floor(Date.now() / 1000));
+    const old = Math.floor(Date.now() / 1000) - 8 * 86400;
+    db.prepare("INSERT INTO library_covers (id, source, digest, content_type, data, fetched_at) VALUES ('ffffffffffffffffffffffffffffffff', 'x a', 'd', 'image/jpeg', x'00', ?)").run(old);
+    enrichSoon(db, 1, library(''), LIB);
+    expect(db.prepare('SELECT count(*) AS n FROM library_covers').get()).toEqual({ n: 0 });
   });
 });
 
