@@ -18,11 +18,58 @@ export function normalizeText(s: string): string {
     .trim();
 }
 
-/** Strip subtitle after a colon and trailing "(Series, Book 2)" style suffixes. */
+/** A trailing "(Series, Book 2)" style suffix. */
+const SERIES_SUFFIX = /\s*\((?:[^)]*\b(?:book|vol|volume|part|no)\b[^)]*)\)\s*$/i;
+/** The first separator in a title: a colon, or a spaced hyphen, en or em dash. */
+const SEPARATOR = /\s*:\s|\s+[-–—]\s+|\s*—\s/;
+
+/**
+ * The ways to read a title. "Foundryside: A Novel" is a title and a subtitle, but
+ * "241 - Die drei Fragezeichen", "Book One - The Fellowship" and "Game Changers 6: The Long Game"
+ * put the real title after the separator. Nothing here guesses which: `before` and `after`
+ * are both kept, and matching scores each reading. `full` is the whole title.
+ */
+export function titleParts(title: string): { full: string; before: string; after: string; separator: string } {
+  const full = title.replace(SERIES_SUFFIX, '').trim();
+  const m = SEPARATOR.exec(full);
+  if (!m) return { full, before: full, after: '', separator: '' };
+  return {
+    full,
+    before: full.slice(0, m.index).replace(SERIES_SUFFIX, '').trim(),
+    after: full.slice(m.index + m[0].length).replace(SERIES_SUFFIX, '').trim(),
+    separator: m[0].trim(),
+  };
+}
+
+/**
+ * The title to search for and to key shared lookups on. A colon conventionally starts a
+ * subtitle, so "Foundryside: A Novel" searches as "Foundryside" and shares its lookup with
+ * "Foundryside". A spaced dash is as often a series prefix ("241 - Title", "Book One - Title")
+ * as a subtitle, so those titles search whole and scoring sorts out which side matched.
+ */
+export function searchTitle(title: string): string {
+  const parts = titleParts(title);
+  return parts.separator === ':' && parts.before ? parts.before : parts.full;
+}
+
+/**
+ * A part before the separator that only gives a place in a series: "241", "Book One", "Vol. 3".
+ * Four-digit numbers stay title words, so "1984: A Novel" is still "1984".
+ */
+const SERIES_POSITION = /^(?:(?:book|vol|volume|part|no|band|folge|tome)\s*)?\d{1,3}$|^(?:book|vol|volume|part)\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)$/;
+
+/** The part of a title that names the book: after a bare series position, otherwise before the separator. */
+function mainTitle(p: { before: string; after: string }): string {
+  return p.after && SERIES_POSITION.test(normalizeText(p.before)) ? p.after : p.before;
+}
+
+/**
+ * The title without a subtitle or "(Series, Book 2)" suffix: "Foundryside: A Novel" is
+ * "Foundryside". A bare series position isn't a title, so "241 - Die drei Fragezeichen" is
+ * "Die drei Fragezeichen".
+ */
 export function coreTitle(title: string): string {
-  let t = title.replace(/\s*[:—-]\s.*$/, ''); // subtitle
-  t = t.replace(/\s*\((?:[^)]*\b(?:book|vol|volume|part|no)\b[^)]*)\)\s*$/i, '');
-  return t.trim();
+  return mainTitle(titleParts(title));
 }
 
 /** "Last, First" -> "First Last"; also normalizes. */
@@ -70,6 +117,37 @@ function tokenOverlap(a: string, b: string): number {
   return inter / (sa.size + sb.size - inter);
 }
 
+/**
+ * How alike two titles are, taking the best of their readings: the main titles ("Foundryside:
+ * A Novel" vs "Foundryside", "241 - Die drei Fragezeichen" vs "Die drei Fragezeichen"), one
+ * title's part after the separator against the other's main title ("Game Changers 6: The Long
+ * Game" vs "The Long Game"), and the whole titles. Subtitles are never compared with each other,
+ * and whole titles only when one has no separator, so two books that share only a subtitle
+ * ("...: A Novel") don't look alike. A bare series position is never compared at all, so
+ * "1 - Dune" and "1 - Foundation" don't look alike either.
+ */
+function titleSimilarity(a: string, b: string): number {
+  const pa = titleParts(a);
+  const pb = titleParts(b);
+  const ma = mainTitle(pa);
+  const mb = mainTitle(pb);
+  const subA = ma === pa.before ? pa.after : '';
+  const subB = mb === pb.before ? pb.after : '';
+  const pairs: [string, string][] = [
+    [ma, mb],
+    [subA, mb],
+    [ma, subB],
+  ];
+  if (!pa.after || !pb.after) pairs.push([pa.full, pb.full]);
+  let best = 0;
+  for (const [x, y] of pairs) {
+    const nx = normalizeText(x);
+    const ny = normalizeText(y);
+    if (nx && ny) best = Math.max(best, tokenOverlap(nx, ny));
+  }
+  return best;
+}
+
 export interface Candidate {
   externalId: string;
   title: string;
@@ -91,9 +169,7 @@ export function scoreCandidate(
   wantAuthor: string,
   cand: Candidate
 ): number {
-  const wt = normalizeText(coreTitle(wantTitle));
-  const ct = normalizeText(coreTitle(cand.title));
-  const titleScore = wt && ct ? tokenOverlap(wt, ct) : 0;
+  const titleScore = titleSimilarity(wantTitle, cand.title);
 
   const wa = wantAuthor ? normalizeAuthor(wantAuthor) : '';
   const ca = cand.author ? normalizeAuthor(cand.author) : '';

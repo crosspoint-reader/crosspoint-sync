@@ -5,13 +5,85 @@ import {
   extractTitleAuthor,
   normalizeAuthor,
   scoreCandidate,
+  searchTitle,
+  titleParts,
 } from '../src/connectors/matching.js';
 
 describe('matching helpers', () => {
   it('strips subtitles and series suffixes from titles', () => {
     expect(coreTitle('Foundryside: A Novel')).toBe('Foundryside');
     expect(coreTitle('Foundryside (The Founders Trilogy, Book 1)')).toBe('Foundryside');
+    expect(coreTitle('Foundryside (The Founders Trilogy, Book 1): A Novel')).toBe('Foundryside');
     expect(coreTitle('Plain Title')).toBe('Plain Title');
+    expect(coreTitle('241 - Die drei Fragezeichen und das weiße Auge')).toBe('Die drei Fragezeichen und das weiße Auge');
+    expect(coreTitle('Book One - The Fellowship of the Ring')).toBe('The Fellowship of the Ring');
+    expect(coreTitle('Game Changers 6: The Long Game')).toBe('Game Changers 6');
+    expect(coreTitle('1984: A Novel')).toBe('1984');
+  });
+
+  it('keeps both sides of a title separator', () => {
+    expect(titleParts('241 - Die drei Fragezeichen und das weiße Auge')).toEqual({
+      full: '241 - Die drei Fragezeichen und das weiße Auge',
+      before: '241',
+      after: 'Die drei Fragezeichen und das weiße Auge',
+      separator: '-',
+    });
+    expect(titleParts('Book One – The Fellowship of the Ring')).toMatchObject({ before: 'Book One', after: 'The Fellowship of the Ring' });
+    expect(titleParts('1984: A Novel')).toMatchObject({ before: '1984', after: 'A Novel' });
+    expect(titleParts('Catch-22')).toEqual({ full: 'Catch-22', before: 'Catch-22', after: '', separator: '' });
+    expect(titleParts('Foundryside (The Founders Trilogy, Book 1)')).toEqual({ full: 'Foundryside', before: 'Foundryside', after: '', separator: '' });
+  });
+
+  it('searches colon titles by their main title and dashed titles whole', () => {
+    expect(searchTitle('Foundryside: A Novel')).toBe('Foundryside');
+    expect(searchTitle('241 - Die drei Fragezeichen und das weiße Auge')).toBe('241 - Die drei Fragezeichen und das weiße Auge');
+    expect(searchTitle('Book One – The Fellowship of the Ring')).toBe('Book One – The Fellowship of the Ring');
+    expect(searchTitle('Dune')).toBe('Dune');
+  });
+
+  it('matches a title on whichever side of the separator is the real title', () => {
+    const score = (want: string, cand: string, author = 'A') => scoreCandidate(want, author, { externalId: '1', title: cand, author });
+    // Series number or prefix first.
+    expect(score('241 - Die drei Fragezeichen und das weiße Auge', 'Die drei Fragezeichen und das weiße Auge')).toBeGreaterThan(0.9);
+    expect(score('Book One - The Fellowship of the Ring', 'The Fellowship of the Ring')).toBeGreaterThan(0.9);
+    expect(score('Game Changers 6: The Long Game', 'The Long Game')).toBeGreaterThan(0.9);
+    // Subtitle second.
+    expect(score('1984: A Novel', '1984')).toBeGreaterThan(0.9);
+    expect(score('1984 - A Novel', '1984')).toBeGreaterThan(0.9);
+    expect(score('Foundryside: A Novel', 'Foundryside')).toBeGreaterThan(0.9);
+    expect(score('Foundryside', 'Foundryside: A Novel')).toBeGreaterThan(0.9);
+    expect(score('Foundryside (The Founders Trilogy, Book 1): A Novel', 'Foundryside')).toBeGreaterThan(0.9);
+    // Different series prefixes on the same title.
+    expect(score('Book One - The Fellowship of the Ring', '1: The Fellowship of the Ring')).toBeGreaterThan(0.9);
+    // A shared subtitle alone isn't a match.
+    expect(score('Beach Read: A Novel', 'Book Lovers: A Novel')).toBeLessThan(0.6);
+    // Nor is a shared series position.
+    expect(score('1 - Dune', '1 - Foundation', '')).toBeLessThan(0.2);
+    expect(score('Book One - The Two Towers', 'Book One - The Fellowship of the Ring')).toBeLessThan(0.6);
+  });
+
+  it('picks the right book of a numbered series, not another by the same author', () => {
+    const want = '241 - Die drei Fragezeichen und das weiße Auge';
+    const decision = decideMatch(want, 'Marco Sonnleitner', [
+      { externalId: 'other', title: 'Die drei Fragezeichen und der Fluch des Rubins', author: 'Marco Sonnleitner' },
+      { externalId: 'right', title: 'Die drei Fragezeichen und das weiße Auge', author: 'Marco Sonnleitner' },
+    ]);
+    expect(decision.accepted).toBe(true);
+    expect(decision.best?.externalId).toBe('right');
+  });
+
+  it('does not treat two books at the same series position as one book', () => {
+    const decision = decideMatch('The House on the Hill', 'A', [
+      { externalId: 'blue', title: '1 - The House on the Blue Hill', author: 'A' },
+      { externalId: 'red', title: '1 - The House on the Red Hill', author: 'A' },
+    ]);
+    expect(decision.accepted).toBe(false);
+
+    const dune = decideMatch('Dune', '', [
+      { externalId: 'foundation', title: '1 - Foundation' },
+      { externalId: 'dune', title: '1 - Dune' },
+    ], { threshold: 0.5 });
+    expect(dune.best?.externalId).toBe('dune');
   });
 
   it('normalizes "Last, First" author form', () => {
