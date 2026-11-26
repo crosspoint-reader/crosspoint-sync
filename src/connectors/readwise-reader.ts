@@ -164,7 +164,10 @@ async function walkLibrary(token: string, http: HttpTransport): Promise<Candidat
     }
     const next = body.nextPageCursor ?? undefined;
     if (!next) { finished = true; break; }
-    if (walk.seenCursors.has(next)) { walks.delete(token); break; } // Reader looped; start over next time
+    if (walk.seenCursors.has(next)) {
+      walks.delete(token); // Reader looped: start over next time rather than match against part of the list
+      throw new ConnectorOperationError('Readwise Reader repeated a page; try again later', true);
+    }
     walk.seenCursors.add(next);
     walk.cursor = next;
   }

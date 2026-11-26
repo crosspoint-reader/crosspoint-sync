@@ -482,3 +482,13 @@ it('goes on from its cursor after the page limit, without marking the listing do
     expect(new URL(calls[201]).searchParams.get('updatedAfter')).toBe(new Date(3_000_000).toISOString());
   } finally { now.mockRestore(); }
 });
+
+it('fails a listing whose cursor repeats and starts it over next time', async () => {
+  const fake = fakeTransport();
+  fake.on('/list/', 200, { results: [{ id: 'b1', title: 'Book One' }], nextPageCursor: 'P2' });
+  fake.on('pageCursor=P2', 200, { results: [{ id: 'b2', title: 'Book Two' }], nextPageCursor: 'P2' });
+  await expect(readwiseReaderConnector.search!(CRED, 'book', fake.transport)).rejects.toThrow('repeated');
+  fake.on('pageCursor=P2', 200, { results: [{ id: 'b2', title: 'Book Two' }] });
+  expect(await readwiseReaderConnector.search!(CRED, 'book', fake.transport)).toHaveLength(2);
+  expect(fake.calls[2].url).not.toContain('pageCursor=');
+});
