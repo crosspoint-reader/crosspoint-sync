@@ -6,7 +6,8 @@ import type { DB } from '../db/db.js';
  * Operator-only export of the published books this install knows, for an
  * external metadata catalog. One row per ISBN, or per title and author for
  * books without one. Catalog fields only: no user ids, statuses or ratings,
- * and anything a reader typed by hand is left out. A document without an ISBN
+ * and anything a reader typed by hand or that came from their own library
+ * (LIBRARY_OPDS_URL: its covers and details) is left out. A document without an ISBN
  * is exported only once Hardcover has matched it, so personal documents and
  * unrecognised files never leave. Mounted only when CATALOG_EXPORT_TOKEN is set.
  *
@@ -29,17 +30,17 @@ export function catalogRoutes(db: DB, token: string): Hono {
               isbn,
               MAX(CASE WHEN meta_manual = 0 THEN title END) AS title,
               MAX(CASE WHEN meta_manual = 0 THEN author END) AS author,
-              MAX(CASE WHEN description_manual = 0 THEN description END) AS description,
-              MAX(CASE WHEN genres_manual = 0 THEN genres END) AS genres,
+              MAX(CASE WHEN description_manual = 0 AND instr(COALESCE(library_fields, ''), ',description,') = 0 THEN description END) AS description,
+              MAX(CASE WHEN genres_manual = 0 AND instr(COALESCE(library_fields, ''), ',genres,') = 0 THEN genres END) AS genres,
               MAX(CASE WHEN moods_manual = 0 THEN moods END) AS moods,
               MAX(CASE WHEN content_warnings_manual = 0 THEN content_warnings END) AS content_warnings,
-              MAX(CASE WHEN series_manual = 0 THEN series END) AS series,
-              MAX(CASE WHEN series_manual = 0 THEN series_position END) AS series_position,
-              MAX(CASE WHEN release_year_manual = 0 THEN release_year END) AS release_year,
+              MAX(CASE WHEN series_manual = 0 AND instr(COALESCE(library_fields, ''), ',series,') = 0 THEN series END) AS series,
+              MAX(CASE WHEN series_manual = 0 AND instr(COALESCE(library_fields, ''), ',series,') = 0 THEN series_position END) AS series_position,
+              MAX(CASE WHEN release_year_manual = 0 AND instr(COALESCE(library_fields, ''), ',release_year,') = 0 THEN release_year END) AS release_year,
               MAX(page_count) AS page_count,
               MAX(rating) AS rating,
               MAX(language) AS language,
-              MAX(cover_url) AS cover_url
+              MAX(CASE WHEN cover_library = 0 THEN cover_url END) AS cover_url
          FROM documents
         WHERE isbn IS NOT NULL OR (hc_id IS NOT NULL AND meta_manual = 0)
         GROUP BY k

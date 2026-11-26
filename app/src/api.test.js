@@ -7,7 +7,7 @@ const fetchMock = vi.fn()
 vi.stubGlobal('fetch', fetchMock)
 // Node's experimental localStorage can shadow jsdom's storage in Vitest.
 vi.stubGlobal('localStorage', new JSDOM('', { url: 'https://app.test' }).window.localStorage)
-const { api, cached, loadSession, login, logout, saveSession, hostedServerUrl, setShowUntitled, showUntitled } = await import('./api.js')
+const { api, cached, loadSession, login, logout, saveSession, hostedServerUrl, setShowUntitled, showUntitled, withServerCovers } = await import('./api.js')
 const session = (username, server = 'https://sync.test') => ({ server, username, key: 'key' })
 const prefix = (s) => `crosspoint-offline:v2:${s.username}@${s.server}`
 const progress = '/api/v1/progress?limit=500'
@@ -108,6 +108,26 @@ it('serializes the explicit clippings recreation destination choice', async () =
   expect(fetchMock).toHaveBeenCalledWith('https://sync.test/api/v1/connectors/microblog/clipping-posts/book/recreate', expect.objectContaining({
     method: 'POST', body: '{"target":"current"}',
   }))
+})
+
+describe('library covers', () => {
+  it('makes covers served by the sync server absolute, and leaves other covers alone', () => {
+    const session = { server: 'https://sync.example/reading', username: 'u', key: 'k' }
+    const data = withServerCovers(session, {
+      items: [
+        { document: 'a', cover_url: '/api/v1/library/covers/0123456789abcdef0123456789abcdef' },
+        { document: 'b', cover_url: 'https://covers.openlibrary.org/b/id/1-L.jpg' },
+        { document: 'c', cover_url: null },
+      ],
+      url: '/api/v1/library/covers/fedcba9876543210fedcba9876543210',
+    })
+    expect(data.items.map((b) => b.cover_url)).toEqual([
+      'https://sync.example/reading/api/v1/library/covers/0123456789abcdef0123456789abcdef',
+      'https://covers.openlibrary.org/b/id/1-L.jpg',
+      null,
+    ])
+    expect(data.url).toBe('https://sync.example/reading/api/v1/library/covers/fedcba9876543210fedcba9876543210')
+  })
 })
 
 describe('prefixed server URLs', () => {

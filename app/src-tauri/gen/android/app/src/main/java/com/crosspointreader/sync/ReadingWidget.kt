@@ -158,7 +158,9 @@ open class ReadingWidget : AppWidgetProvider() {
             .put("author", current?.takeUnless { it.isNull("author") }?.optString("author") ?: "")
             .put("percent", current?.let { ((it.optDouble("percentage", 0.0).takeIf { value -> value.isFinite() } ?: 0.0).coerceIn(0.0, 1.0) * 100).roundToInt() } ?: -1)
             .put("book_document", current?.optString("document") ?: JSONObject.NULL)
+          // A cover from the server's own library is a path on the server: resolve it like the app does.
           val url = current?.takeUnless { it.isNull("cover_url") }?.optString("cover_url")
+            ?.let { if (it.startsWith("/")) session.getString("server") + it else it }
           val old = data.takeUnless { it.isNull("cover_url") }?.optString("cover_url")
           changedCover = url != old || current?.optString("document") != oldDocument || !hasCover
           if (changedCover && url != null) cover = runCatching { coverPng(url) }.getOrNull()

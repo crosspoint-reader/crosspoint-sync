@@ -129,15 +129,17 @@ struct Provider: TimelineProvider {
         data.title = current?.title ?? current?.filename ?? "Nothing in progress"
         data.author = current?.author ?? ""
         data.percent = current.map { min(100, max(0, Int((($0.percentage ?? 0) * 100).rounded()))) } ?? -1
-        coverChanged = current?.document != data.book_document || current?.cover_url != data.cover_url || !hasCover
+        // A cover from the server's own library is a path on the server: resolve it like the app does.
+        let currentCover = current?.cover_url.map { $0.hasPrefix("/") ? session.server + $0 : $0 }
+        coverChanged = current?.document != data.book_document || currentCover != data.cover_url || !hasCover
         data.book_document = current?.document
-        if coverChanged, let link = current?.cover_url, let url = URL(string: link),
+        if coverChanged, let link = currentCover, let url = URL(string: link),
           let (bytes, response) = try? await URLSession.shared.data(for: URLRequest(url: url, timeoutInterval: 10)),
           (response as? HTTPURLResponse)?.statusCode == 200, let image = UIImage(data: bytes) {
           newCover = coverPNG(image)
         }
         // A failed cover remains retryable on the next refresh.
-        data.cover_url = current?.cover_url
+        data.cover_url = currentCover
       }
       if overview != nil && books != nil && goals != nil { data.updated_at = ISO8601DateFormatter().string(from: Date()) }
     } catch {

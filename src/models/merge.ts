@@ -91,6 +91,22 @@ export function statsAliases(db: DB, userId: number): Map<string, string> {
  * stats are not moved; `mergeStats` decides whether they combine on read.
  * Callers must pass already-resolved, distinct documents.
  */
+/**
+ * library_fields after a merge: per detail, from the copy whose value mergeManualSql() keeps (the alias's
+ * when only it was set by hand, else the kept document's when it has one, else the alias's), so a value
+ * from another source isn't marked as the library's or the other way round.
+ */
+function mergeLibraryFieldsSql(): string {
+  const fields: [field: string, flag: string][] = [['description', 'description'], ['genres', 'genres'], ['series', 'series'], ['release_year', 'release_year']];
+  const pieces = fields.map(([field, flag]) => {
+    const has = (row: string) => `instr(COALESCE(${row}.library_fields, ''), ',${field},') > 0`;
+    const fromAlias = `excluded.${flag}_manual AND NOT documents.${flag}_manual`;
+    const keepOwn = `documents.${flag}_manual OR documents.${field} IS NOT NULL`;
+    return `CASE WHEN CASE WHEN ${fromAlias} THEN ${has('excluded')} WHEN ${keepOwn} THEN ${has('documents')} ELSE ${has('excluded')} END THEN '${field},' ELSE '' END`;
+  });
+  return `library_fields = NULLIF(',' || ${pieces.join(' || ')}, ',')`;
+}
+
 export function mergeDocuments(
   db: DB,
   userId: number,
@@ -151,8 +167,8 @@ export function mergeDocuments(
     // documents: canonical metadata wins, alias fills the gaps.
     const manual = MANUAL_COLUMNS.join(', ');
     db.prepare(
-      `INSERT INTO documents (user_id, document, title, author, filename, filesize, status, status_at, pause_reason, start_date, finished_date, cover_url, page_count, language, isbn, user_rating, ${manual}, updated_at)
-       SELECT user_id, ?, title, author, filename, filesize, status, status_at, pause_reason, start_date, finished_date, cover_url, page_count, language, isbn, user_rating, ${manual}, ? FROM documents WHERE user_id = ? AND document = ?
+      `INSERT INTO documents (user_id, document, title, author, filename, filesize, status, status_at, pause_reason, start_date, finished_date, cover_url, cover_manual, cover_library, library_fields, page_count, language, isbn, user_rating, ${manual}, updated_at)
+       SELECT user_id, ?, title, author, filename, filesize, status, status_at, pause_reason, start_date, finished_date, cover_url, cover_manual, cover_library, library_fields, page_count, language, isbn, user_rating, ${manual}, ? FROM documents WHERE user_id = ? AND document = ?
        ON CONFLICT(user_id, document) DO UPDATE SET
          title = COALESCE(documents.title, excluded.title),
          author = COALESCE(documents.author, excluded.author),
@@ -163,7 +179,14 @@ export function mergeDocuments(
          pause_reason = CASE WHEN documents.status IS NULL THEN excluded.pause_reason ELSE documents.pause_reason END,
          start_date = COALESCE(documents.start_date, excluded.start_date),
          finished_date = COALESCE(documents.finished_date, excluded.finished_date),
-         cover_url = COALESCE(documents.cover_url, excluded.cover_url),
+         -- A cover picked by hand beats an automatic one, whichever copy has it.
+         cover_manual = CASE WHEN documents.cover_url IS NULL OR (excluded.cover_manual AND NOT documents.cover_manual)
+           THEN excluded.cover_manual ELSE documents.cover_manual END,
+         ${mergeLibraryFieldsSql()},
+         cover_library = CASE WHEN documents.cover_url IS NULL OR (excluded.cover_manual AND NOT documents.cover_manual)
+           THEN excluded.cover_library ELSE documents.cover_library END,
+         cover_url = CASE WHEN excluded.cover_manual AND NOT documents.cover_manual THEN excluded.cover_url
+           ELSE COALESCE(documents.cover_url, excluded.cover_url) END,
          page_count = COALESCE(documents.page_count, excluded.page_count),
          language = COALESCE(documents.language, excluded.language),
          isbn = COALESCE(documents.isbn, excluded.isbn),
