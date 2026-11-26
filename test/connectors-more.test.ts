@@ -1067,6 +1067,31 @@ describe('bookorbit connector', () => {
     expect(m?.externalEdition).toBe('71');
   });
 
+  it.each([
+    ['a media overlay', { mediaOverlay: true }],
+    ['a .readaloud.epub name', { filename: 'Foundryside.readaloud.epub' }],
+  ])('skips the read-along EPUB marked by %s', async (_label, readAlong) => {
+    const fake = fakeTransport();
+    fake.on('/auth/login', 200, LOGIN);
+    fake.on('/books/search', 200, [{ id: 12, title: 'Foundryside', authors: ['Robert Jackson Bennett'], formats: ['epub'] }]);
+    fake.on('/books/12', 200, { id: 12, files: [
+      { id: 80, format: 'epub', role: 'primary', sizeBytes: 300_000_000, ...readAlong },
+      { id: 82, format: 'epub', role: 'alternate', sizeBytes: 4_000_000, filename: 'Foundryside (copy).epub' },
+      { id: 81, format: 'epub', role: 'alternate', sizeBytes: 2_000_000, filename: 'Foundryside.epub' },
+    ] });
+    const m = await bookorbitConnector.match(cred('ra'), { document: 'd', title: 'Foundryside', author: 'Robert Jackson Bennett', filename: null }, fake.transport);
+    expect(m?.externalEdition).toBe('81');
+  });
+
+  it('falls back to a read-along EPUB when the book has no other', async () => {
+    const fake = fakeTransport();
+    fake.on('/auth/login', 200, LOGIN);
+    fake.on('/books/search', 200, [{ id: 12, title: 'Foundryside', authors: ['Robert Jackson Bennett'], formats: ['epub'] }]);
+    fake.on('/books/12', 200, { id: 12, files: [{ id: 80, format: 'epub', role: 'primary', mediaOverlay: true }] });
+    const m = await bookorbitConnector.match(cred('ro'), { document: 'd', title: 'Foundryside', author: 'Robert Jackson Bennett', filename: null }, fake.transport);
+    expect(m?.externalEdition).toBe('80');
+  });
+
   it('pushes percentage and XPointer, and marks finished books read', async () => {
     const fake = fakeTransport();
     fake.on('/auth/login', 200, LOGIN);
