@@ -37,6 +37,8 @@ const PER_BOOK_PULLERS: { id: string; strict: boolean; sidecarOnly: boolean; mat
   { id: 'seekquel', strict: false, sidecarOnly: false, matchOnDemand: true },
   { id: 'readest', strict: false, sidecarOnly: false, matchOnDemand: true },
   { id: 'kosync', strict: false, sidecarOnly: false, matchOnDemand: true },
+  // Matching lists the whole Reader library, too slow for a progress request; pull matched books only.
+  { id: 'readwise-reader', strict: false, sidecarOnly: false },
 ];
 
 /** Shared by both progress endpoints; only overlapping requests share a refresh. */

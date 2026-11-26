@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import { readwiseReaderConnector } from '../src/connectors/readwise-reader.js';
 import { drainQueue } from '../src/connectors/runner.js';
 import { saveMatch, setMatchSnapshot, upsertAccount } from '../src/connectors/store.js';
+import { upsertProgress } from '../src/routes/kosync.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
 import type { HttpTransport } from '../src/connectors/types.js';
 import { DOC, makeTestApp, registerUser } from './helpers.js';
@@ -79,4 +80,18 @@ it('keeps a position read further in Reader', async () => {
   expect(r.doc.reading_progress).toBe(0.6);
   // The next pull still brings Reader's position down to the device.
   expect(await readwiseReaderConnector.pullProgress!(r.cred, MATCH, r.http, 0, ctx)).toMatchObject({ percentage: 0.6 });
+});
+
+it('returns a position read further in Reader when a device asks for progress', async () => {
+  const r = reader(0.6, new Date().toISOString());
+  const f = await app(r.http, r.cred.token);
+  setMatchSnapshot(f.db, f.id, 'readwise-reader', MATCH.externalId, { progress: 0.52 });
+  upsertProgress(f.db, { userId: f.id, document: DOC, deviceId: 'd1', device: 'X4', percentage: 0.52, progress: 'p',
+    position: null, metadata: null, updatedAt: Math.floor(Date.now() / 1000) - 3600 });
+  const got = await (await f.app.request(`/syncs/progress/${DOC}`, { headers: f.headers })).json();
+  expect(got).toMatchObject({ percentage: 0.6, device_id: 'readwise-reader' });
+  // Asking again doesn't echo the pulled position back to Reader.
+  await f.app.request(`/syncs/progress/${DOC}`, { headers: f.headers });
+  await drainQueue(f.db, r.http, 10);
+  expect(r.calls.filter((c) => c.url.endsWith('/bulk_update/'))).toEqual([]);
 });
