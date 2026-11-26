@@ -166,8 +166,13 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
     failOperation(db, row, err, 'match failed');
     return;
   }
+  const canPull = !!connector.pullProgress && connector.capabilities.read;
+  // A highlight pushes no position, so the first position event after it still pulls first.
+  if (match && !wasMatched && ev.kind === 'highlight' && canPull) {
+    setFirstPullPending(db, row.user_id, row.connector_id, row.document, true);
+  }
   // A new match may point at a book already read elsewhere: pull its place first, like Sync now.
-  if (match && !wasMatched && ev.kind !== 'highlight' && connector.pullProgress && connector.capabilities.read) {
+  if (match && !wasMatched && ev.kind !== 'highlight' && canPull) {
     try {
       const applied = await pollConnector(db, row.user_id, row.connector_id, http,
         { document: row.document, throwOnError: true, firstContact: true, positionOnly: true });

@@ -128,6 +128,27 @@ it('does not push to a book that was unlinked while its first pull ran', async (
   expect(f.calls.filter((c) => c.method === 'POST' && c.url.endsWith('/books/files/71/progress'))).toEqual([]);
 });
 
+it('still pulls before the first position push when a highlight made the match', async () => {
+  const f = await fixture(60);
+  const { id } = f.db.prepare('SELECT id FROM users').get() as { id: number };
+  f.db.prepare('INSERT INTO documents (user_id, document, title, author, updated_at) VALUES (?, ?, ?, ?, 0)')
+    .run(id, DOC, 'Piranesi', 'Susanna Clarke');
+  vi.spyOn(bookorbitConnector, 'push').mockResolvedValue({ ok: true });
+  const clip = await f.app.request(`/api/v1/clippings/${DOC}`, {
+    method: 'PUT', headers: f.headers,
+    body: JSON.stringify({ items: [{ id: 'c0ffee0011223366', spine: 2, start_page: 1, end_page: 1, pages: 20,
+      start_word: 0, end_word: 6, words: 6, para: 3, chapter: 'Chapter 1', text: 'A quiet house of tides.',
+      created_at: 1764000000 }] }),
+  });
+  expect(clip.status).toBe(200);
+  await drainQueue(f.db, f.http, 10);
+  expect(vi.mocked(bookorbitConnector.push).mock.calls.map(([, , ev]) => ev.kind)).toEqual(['highlight']);
+  await firstSync(f, 0);
+  expect(vi.mocked(bookorbitConnector.push).mock.calls.map(([, , ev]) => ev.kind)).toEqual(['highlight']);
+  const got = await (await f.app.request(`/syncs/progress/${DOC}`, { headers: f.headers })).json();
+  expect(got).toMatchObject({ percentage: 0.6, device_id: 'bookorbit' });
+});
+
 it('keeps a further BookOrbit position when a progress request makes the first match', async () => {
   const f = await fixture(60);
   await f.app.request('/syncs/progress', {
