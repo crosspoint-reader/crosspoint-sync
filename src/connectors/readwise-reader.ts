@@ -19,10 +19,15 @@ import type {
 /** Sync percentage progress with Readwise Reader; completion also archives the document. */
 const BASE = 'https://readwise.io/api/v3';
 
-// Follow nextPageCursor through the library; this is just a safety bound
-// against a pathological cursor loop (a 429 mid-walk stops us far sooner and the
-// backfill/fan-in worker resumes after the cooldown).
-const MAX_CANDIDATE_PAGES = 50;
+// Books live in these locations. The feed (RSS, newsletters) can hold thousands of
+// documents and is never a book, so we don't list it.
+const LIBRARY_LOCATIONS = ['new', 'later', 'shortlist', 'archive'] as const;
+// Safety bound on pages per walk, against a cursor loop.
+const MAX_CANDIDATE_PAGES = 200;
+// A walk stopped by a rate limit resumes from its cursor if it is younger than this.
+const WALK_TTL_MS = 3_600_000;
+// How long a finished library listing serves matching and the picker.
+const CANDIDATE_TTL_MS = 3_600_000;
 // Archiving the wrong doc is worse than not archiving; our titles match ~1.0.
 const MATCH_THRESHOLD = 0.85;
 
@@ -87,40 +92,60 @@ function authHeaders(token: string): Record<string, string> {
   return { authorization: `Token ${token}`, 'content-type': 'application/json' };
 }
 
-async function listDocs(token: string, http: HttpTransport): Promise<ReaderDoc[]> {
-  const out: ReaderDoc[] = [];
-  let cursor: string | undefined;
-  const seenCursors = new Set<string>();
-  for (let page = 0; page < MAX_CANDIDATE_PAGES; page++) {
-    const params = new URLSearchParams({ withHtmlContent: 'false' });
-    if (cursor) params.set('pageCursor', cursor);
-    const res = await http(`${BASE}/list/?${params.toString()}`, {
-      method: 'GET',
-      headers: authHeaders(token),
-    });
-    noteRateLimit(token, res.status);
-    if (res.status !== 200) throw new ConnectorOperationError(`Readwise Reader request failed (${res.status})`, res.status === 429 || res.status >= 500, res.status === 401 || res.status === 403);
-    const body = (await res.json()) as ReaderList;
-    out.push(...(body.results ?? []));
-    const next = body.nextPageCursor ?? undefined;
-    // Stop at the last page, or if the API ever repeats a cursor (loop guard).
-    if (!next || seenCursors.has(next)) break;
-    seenCursors.add(next);
-    cursor = next;
-  }
-  return out;
+interface LibraryWalk {
+  pool: Candidate[];
+  ids: Set<string>;
+  location: number;
+  cursor?: string;
+  seenCursors: Set<string>;
+  pages: number;
+  startedAt: number;
+}
+// Per-token progress through the library, kept when a 429 or 5xx stops the walk so the
+// retry goes on from the same page instead of starting again from page one.
+const walks = new Map<string, LibraryWalk>();
+
+function walkFor(token: string): LibraryWalk {
+  const walk = walks.get(token);
+  if (walk && Date.now() - walk.startedAt < WALK_TTL_MS) return walk;
+  if (walks.size >= 100) walks.delete(walks.keys().next().value!);
+  const fresh: LibraryWalk = { pool: [], ids: new Set(), location: 0, seenCursors: new Set(), pages: 0, startedAt: Date.now() };
+  walks.set(token, fresh);
+  return fresh;
 }
 
 async function loadCandidatePool(token: string, http: HttpTransport): Promise<Candidate[]> {
-  const seen = new Set<string>();
-  const pool: Candidate[] = [];
   if (rateLimited(token)) throw new ConnectorOperationError('Readwise Reader is rate limited; try again later', true);
-  for (const d of await listDocs(token, http)) {
-    if (!d.title || seen.has(d.id) || d.category === 'highlight' || d.category === 'note') continue;
-    seen.add(d.id);
-    pool.push({ externalId: d.id, title: d.title, author: d.author ?? d.site_name ?? null });
+  const walk = walkFor(token);
+  while (walk.location < LIBRARY_LOCATIONS.length && walk.pages < MAX_CANDIDATE_PAGES) {
+    const params = new URLSearchParams({ withHtmlContent: 'false', location: LIBRARY_LOCATIONS[walk.location] });
+    if (walk.cursor) params.set('pageCursor', walk.cursor);
+    const res = await http(`${BASE}/list/?${params.toString()}`, { method: 'GET', headers: authHeaders(token) });
+    noteRateLimit(token, res.status);
+    if (res.status !== 200) {
+      const needsReauth = res.status === 401 || res.status === 403;
+      if (needsReauth) walks.delete(token);
+      throw new ConnectorOperationError(`Readwise Reader request failed (${res.status})`, res.status === 429 || res.status >= 500, needsReauth);
+    }
+    const body = (await res.json()) as ReaderList;
+    walk.pages++;
+    for (const d of body.results ?? []) {
+      if (!d.title || walk.ids.has(d.id) || d.category === 'highlight' || d.category === 'note') continue;
+      walk.ids.add(d.id);
+      walk.pool.push({ externalId: d.id, title: d.title, author: d.author ?? d.site_name ?? null });
+    }
+    const next = body.nextPageCursor ?? undefined;
+    if (next && !walk.seenCursors.has(next)) {
+      walk.seenCursors.add(next);
+      walk.cursor = next;
+    } else {
+      walk.location++;
+      walk.cursor = undefined;
+      walk.seenCursors.clear();
+    }
   }
-  return pool;
+  walks.delete(token);
+  return walk.pool;
 }
 
 // Share in-flight library requests across matching and the picker; never cache positions.
@@ -132,7 +157,7 @@ function candidatePool(token: string, http: HttpTransport): Promise<Candidate[]>
     if (entry.expires <= Date.now()) candidateCache.delete(key);
   }
   if (candidateCache.size >= 100) candidateCache.delete(candidateCache.keys().next().value!);
-  const entry = { expires: Date.now() + 300_000, pending: loadCandidatePool(token, http) };
+  const entry = { expires: Date.now() + CANDIDATE_TTL_MS, pending: loadCandidatePool(token, http) };
   candidateCache.set(token, entry);
   entry.pending.catch(() => {
     if (candidateCache.get(token) === entry) candidateCache.delete(token);

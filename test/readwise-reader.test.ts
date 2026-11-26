@@ -246,8 +246,33 @@ describe('readwise-reader connector', () => {
     ] });
     expect(await readwiseReaderConnector.listCurrentlyReading!(CRED, fake.transport))
       .toEqual([{ externalId: 'book', title: 'Book', author: null }]);
-    expect(fake.calls).toHaveLength(1);
-    expect(fake.calls[0].url).not.toContain('location=');
+    expect(fake.calls.map(c => new URL(c.url).searchParams.get('location')))
+      .toEqual(['new', 'later', 'shortlist', 'archive']);
+  });
+
+  it('resumes the library walk from its cursor after a rate limit', async () => {
+    const fake = fakeTransport();
+    fake.on('location=new', 200, { results: [{ id: 'n1', title: 'Inbox Book' }] });
+    fake.on('location=later', 200, { results: [{ id: 'l1', title: 'Later One' }], nextPageCursor: 'L2' });
+    fake.on('pageCursor=L2', 429, {});
+    const now = vi.spyOn(Date, 'now');
+    try {
+      now.mockReturnValue(5_000_000);
+      await expect(readwiseReaderConnector.search!(CRED, 'book', fake.transport)).rejects.toThrow('429');
+      expect(fake.calls).toHaveLength(3);
+      now.mockReturnValue(5_000_000 + 61_000);
+      fake.on('pageCursor=L2', 200, { results: [{ id: 'l2', title: 'Later Book' }] });
+      fake.on('location=shortlist', 200, { results: [] });
+      fake.on('location=archive', 200, { results: [{ id: 'a1', title: 'Archived Book' }] });
+      const found = await readwiseReaderConnector.search!(CRED, 'book', fake.transport);
+      expect(found.map(b => b.externalId)).toEqual(['n1', 'l2', 'a1']);
+      expect(fake.calls.slice(3).map(c => c.url.replace(/^.*\?/, ''))).toEqual([
+        'withHtmlContent=false&location=later&pageCursor=L2',
+        'withHtmlContent=false&location=shortlist',
+        'withHtmlContent=false&location=archive',
+      ]);
+      expect(fake.calls.some(c => c.url.includes('location=feed'))).toBe(false);
+    } finally { now.mockRestore(); }
   });
 
   it('retries a 207 partial failure', async () => {
@@ -370,9 +395,9 @@ it('shares paginated candidates between concurrent searches and automatic matchi
   expect(books).toHaveLength(2);
   expect(results.map(b => b.externalId)).toEqual(['book']);
   expect(match?.externalId).toBe('book');
-  expect(fake.calls).toHaveLength(2);
+  expect(fake.calls).toHaveLength(8); // two pages in each of the four locations
   expect(await readwiseReaderConnector.search!({ token: CRED.token + '-other' }, 'robots', fake.transport)).toHaveLength(1);
-  expect(fake.calls).toHaveLength(4);
+  expect(fake.calls).toHaveLength(16);
 });
 
 it('expires cached candidates and does not retain failed requests', async () => {
@@ -384,9 +409,9 @@ it('expires cached candidates and does not retain failed requests', async () => 
     await expect(readwiseReaderConnector.search!(CRED, 'book', fake.transport)).rejects.toThrow('500');
     fake.on('/list/', 200, { results: [{ id: 'book', title: 'Book' }] });
     expect(await readwiseReaderConnector.search!(CRED, 'book', fake.transport)).toHaveLength(1);
-    expect(fake.calls).toHaveLength(2);
-    now.mockReturnValue(1_300_001);
+    expect(fake.calls).toHaveLength(5);
+    now.mockReturnValue(1_000_000 + 3_600_001);
     await readwiseReaderConnector.search!(CRED, 'book', fake.transport);
-    expect(fake.calls).toHaveLength(3);
+    expect(fake.calls).toHaveLength(9);
   } finally { now.mockRestore(); }
 });
