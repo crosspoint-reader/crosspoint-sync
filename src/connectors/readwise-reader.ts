@@ -1,8 +1,10 @@
 import { ConnectorOperationError } from './types.js';
 import { decideMatch, extractTitleAuthor, normalizeText, type Candidate } from './matching.js';
 import { postHighlight } from './readwise.js';
+import { getMatchSnapshot, setMatchSnapshot } from './store.js';
 import type {
   Connector,
+  ConnectorContext,
   Credential,
   DocumentMeta,
   ExternalBook,
@@ -59,6 +61,21 @@ interface ReaderList {
   results?: ReaderDoc[];
   nextPageCursor?: string | null;
 }
+
+/**
+ * The reading_progress we last wrote to Reader. Any edit (a highlight we add, a tag) moves a
+ * document's updated_at, so only a change from this value means someone read on in Reader.
+ */
+interface ProgressSnapshot { progress: number }
+const SAME_PROGRESS = 0.0005;
+function knownProgress(ctx: ConnectorContext | undefined, m: Match): number | null {
+  const snap = ctx ? getMatchSnapshot<ProgressSnapshot>(ctx.db, ctx.userId, 'readwise-reader', m.externalId) : null;
+  return typeof snap?.progress === 'number' ? snap.progress : null;
+}
+function rememberProgress(ctx: ConnectorContext | undefined, m: Match, progress: number): void {
+  if (ctx) setMatchSnapshot(ctx.db, ctx.userId, 'readwise-reader', m.externalId, { progress } satisfies ProgressSnapshot);
+}
+const unchanged = (known: number | null, progress: number) => known != null && Math.abs(progress - known) < SAME_PROGRESS;
 
 function tokenOf(cred: Credential): string {
   const t = (cred as ReadwiseCred).token;
@@ -222,7 +239,8 @@ async function pullProgress(
   cred: Credential,
   match: Match,
   http: HttpTransport,
-  sinceMs: number
+  sinceMs: number,
+  ctx?: ConnectorContext
 ): Promise<InboundChange | null> {
   const token = tokenOf(cred);
   if (rateLimited(token)) throw new ConnectorOperationError('Readwise Reader is rate limited; try again later', true);
@@ -238,6 +256,7 @@ async function pullProgress(
   const doc = body.results?.[0];
   if (!doc || typeof doc.reading_progress !== 'number' || !Number.isFinite(doc.reading_progress)) return null;
   const pct = Math.max(0, Math.min(1, doc.reading_progress));
+  if (unchanged(knownProgress(ctx, match), pct)) return null; // still what we wrote; only updated_at moved
   // Always return a finite timestamp: a missing/unparseable updated_at falls
   // back to "now" so the cursor comparison works and we never leak NaN.
   const parsed = doc.updated_at ? Date.parse(doc.updated_at) : NaN;
@@ -250,7 +269,8 @@ async function push(
   cred: Credential,
   m: Match,
   ev: OutboundEvent,
-  http: HttpTransport
+  http: HttpTransport,
+  ctx?: ConnectorContext
 ): Promise<PushResult> {
   if (!shouldPush(ev)) return { ok: true };
   if (ev.kind === 'highlight') return pushHighlight(tokenOf(cred), m, ev, http);
@@ -272,7 +292,10 @@ async function push(
   if (!Number.isFinite(updatedAt) || !Number.isFinite(ev.timestamp)) {
     return { ok: false, retryable: true, error: 'Cannot safely compare Reader progress timestamps' };
   }
-  if (updatedAt > ev.timestamp * 1000) return { ok: true, note: 'Newer Reader progress kept; sync this book to pull it.' };
+  const readerProgress = typeof doc.reading_progress === 'number' ? doc.reading_progress : 0;
+  if (updatedAt > ev.timestamp * 1000 && !unchanged(knownProgress(ctx, m), readerProgress)) {
+    return { ok: true, note: 'Newer Reader progress kept; sync this book to pull it.' };
+  }
   if (doc.category === 'pdf' && ev.kind === 'progress') {
     return { ok: true, note: 'Readwise Reader does not support updating PDF reading progress.' };
   }
@@ -295,7 +318,10 @@ async function push(
     // Partial failure: the single item we sent didn't apply. Retry.
     return { ok: false, retryable: true, error: 'bulk_update partial failure' };
   }
-  if (res.status >= 200 && res.status < 300) return { ok: true };
+  if (res.status >= 200 && res.status < 300) {
+    rememberProgress(ctx, m, doc.category !== 'pdf' ? ev.percentage : readerProgress);
+    return { ok: true };
+  }
   return { ok: false, retryable: false, error: `unexpected status ${res.status}` };
 }
 

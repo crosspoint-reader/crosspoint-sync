@@ -61,7 +61,8 @@ export function claimReady(db: DB, limit: number, now = nowSeconds()): QueueRow[
       `SELECT id, user_id, connector_id, document, kind, payload, attempts, status, next_try_at, last_error
        FROM connector_queue
        WHERE status = 'pending' AND next_try_at <= ?
-       ORDER BY next_try_at
+       -- Positions before highlights: adding a highlight can make a service's copy look newer.
+       ORDER BY kind LIKE 'highlight:%', next_try_at
        LIMIT ?`
     )
     .all(now, limit) as unknown as QueueRow[];
