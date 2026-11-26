@@ -19,15 +19,17 @@ import type {
 /** Sync percentage progress with Readwise Reader; completion also archives the document. */
 const BASE = 'https://readwise.io/api/v3';
 
-// Books live in these locations. The feed (RSS, newsletters) can hold thousands of
-// documents and is never a book, so we don't list it.
-const LIBRARY_LOCATIONS = ['new', 'later', 'shortlist', 'archive'] as const;
+// CrossPoint reads EPUBs, so only Reader's EPUB documents are match candidates. Reader has
+// no title search, so we list them, then fetch only what changed since the last listing.
+const BOOK_CATEGORY = 'epub';
 // Safety bound on pages per walk, against a cursor loop.
 const MAX_CANDIDATE_PAGES = 200;
 // A walk stopped by a rate limit resumes from its cursor if it is younger than this.
 const WALK_TTL_MS = 3_600_000;
-// How long a finished library listing serves matching and the picker.
-const CANDIDATE_TTL_MS = 3_600_000;
+// How long a listing serves matching and the picker before we ask Reader what changed.
+const CANDIDATE_TTL_MS = 300_000;
+// A full listing drops documents deleted from Reader, which a changes-only fetch can't see.
+const FULL_LISTING_MS = 86_400_000;
 // Archiving the wrong doc is worse than not archiving; our titles match ~1.0.
 const MATCH_THRESHOLD = 0.85;
 
@@ -92,60 +94,76 @@ function authHeaders(token: string): Record<string, string> {
   return { authorization: `Token ${token}`, 'content-type': 'application/json' };
 }
 
+interface Library {
+  byId: Map<string, Candidate>;
+  listedAt: number; // start of the last finished walk
+  fullAt: number; // start of the last full walk
+}
 interface LibraryWalk {
-  pool: Candidate[];
-  ids: Set<string>;
-  location: number;
+  since?: number; // set for a changes-only walk
+  found: Map<string, Candidate>;
   cursor?: string;
   seenCursors: Set<string>;
   pages: number;
   startedAt: number;
 }
-// Per-token progress through the library, kept when a 429 or 5xx stops the walk so the
-// retry goes on from the same page instead of starting again from page one.
+const libraries = new Map<string, Library>();
+// Per-token progress through a listing, kept when a 429 or 5xx stops it so the retry
+// goes on from the same page instead of starting again from page one.
 const walks = new Map<string, LibraryWalk>();
 
-function walkFor(token: string): LibraryWalk {
+function remember<V>(map: Map<string, V>, key: string, value: V): void {
+  map.delete(key);
+  if (map.size >= 100) map.delete(map.keys().next().value!);
+  map.set(key, value);
+}
+
+function walkFor(token: string, since: number | undefined): LibraryWalk {
   const walk = walks.get(token);
-  if (walk && Date.now() - walk.startedAt < WALK_TTL_MS) return walk;
-  if (walks.size >= 100) walks.delete(walks.keys().next().value!);
-  const fresh: LibraryWalk = { pool: [], ids: new Set(), location: 0, seenCursors: new Set(), pages: 0, startedAt: Date.now() };
-  walks.set(token, fresh);
+  if (walk && walk.since === since && Date.now() - walk.startedAt < WALK_TTL_MS) return walk;
+  const fresh: LibraryWalk = { since, found: new Map(), seenCursors: new Set(), pages: 0, startedAt: Date.now() };
+  remember(walks, token, fresh);
   return fresh;
 }
 
 async function loadCandidatePool(token: string, http: HttpTransport): Promise<Candidate[]> {
   if (rateLimited(token)) throw new ConnectorOperationError('Readwise Reader is rate limited; try again later', true);
-  const walk = walkFor(token);
-  while (walk.location < LIBRARY_LOCATIONS.length && walk.pages < MAX_CANDIDATE_PAGES) {
-    const params = new URLSearchParams({ withHtmlContent: 'false', location: LIBRARY_LOCATIONS[walk.location] });
+  const library = libraries.get(token);
+  const since = library && Date.now() - library.fullAt < FULL_LISTING_MS ? library.listedAt : undefined;
+  const walk = walkFor(token, since);
+  while (walk.pages < MAX_CANDIDATE_PAGES) {
+    const params = new URLSearchParams({ withHtmlContent: 'false', category: BOOK_CATEGORY });
+    if (walk.since !== undefined) params.set('updatedAfter', new Date(walk.since).toISOString());
     if (walk.cursor) params.set('pageCursor', walk.cursor);
     const res = await http(`${BASE}/list/?${params.toString()}`, { method: 'GET', headers: authHeaders(token) });
     noteRateLimit(token, res.status);
     if (res.status !== 200) {
       const needsReauth = res.status === 401 || res.status === 403;
-      if (needsReauth) walks.delete(token);
+      if (needsReauth) {
+        walks.delete(token);
+        libraries.delete(token);
+      }
       throw new ConnectorOperationError(`Readwise Reader request failed (${res.status})`, res.status === 429 || res.status >= 500, needsReauth);
     }
     const body = (await res.json()) as ReaderList;
     walk.pages++;
     for (const d of body.results ?? []) {
-      if (!d.title || walk.ids.has(d.id) || d.category === 'highlight' || d.category === 'note') continue;
-      walk.ids.add(d.id);
-      walk.pool.push({ externalId: d.id, title: d.title, author: d.author ?? d.site_name ?? null });
+      if (d.title) walk.found.set(d.id, { externalId: d.id, title: d.title, author: d.author ?? d.site_name ?? null });
     }
     const next = body.nextPageCursor ?? undefined;
-    if (next && !walk.seenCursors.has(next)) {
-      walk.seenCursors.add(next);
-      walk.cursor = next;
-    } else {
-      walk.location++;
-      walk.cursor = undefined;
-      walk.seenCursors.clear();
-    }
+    if (!next || walk.seenCursors.has(next)) break;
+    walk.seenCursors.add(next);
+    walk.cursor = next;
   }
   walks.delete(token);
-  return walk.pool;
+  const byId = walk.since !== undefined && library ? library.byId : new Map<string, Candidate>();
+  for (const [id, candidate] of walk.found) byId.set(id, candidate);
+  remember(libraries, token, {
+    byId,
+    listedAt: walk.startedAt,
+    fullAt: walk.since !== undefined && library ? library.fullAt : walk.startedAt,
+  });
+  return [...byId.values()];
 }
 
 // Share in-flight library requests across matching and the picker; never cache positions.
