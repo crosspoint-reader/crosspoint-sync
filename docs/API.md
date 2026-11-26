@@ -776,7 +776,8 @@ has `LIBRARY_OPDS_URL`, the user's own library is asked first: a book there with
 author gets the library's cover. A cover on the library's own address is served by this server, so `url` (and
 `cover_url` everywhere else) is then a path on this server (after any `BASE_PATH`: prepend the server's base
 URL, e.g. `https://host/reading` + `/api/v1/library/covers/…`, not just its origin), `/api/v1/library/covers/{id}`: resolve it against the server's address. The library's cover
-also replaces one another source found earlier, but never one set with `PUT /info`. Otherwise covers come
+also replaces one another source found earlier, but never one set with `PUT /info`; it goes again when the library
+drops it or the book's title or author is edited. Otherwise covers come
 from iTunes Search (ebooks), then Open Library; page counts from Open Library, then Google Books when
 the server has `GOOGLE_BOOKS_API_KEY`. A book-metadata API (`METADATA_API_URL`) and Hardcover fill
 both in the background when the server has them. `GET /api/v1/progress` items also carry

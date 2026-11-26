@@ -331,7 +331,7 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     if (cover !== undefined) {
       // A cover picked here stays over the user's library; clearing it asks the library again too.
       db.prepare(
-        `UPDATE documents SET cover_url = ?, cover_checked_at = ?, cover_manual = ?,
+        `UPDATE documents SET cover_url = ?, cover_checked_at = ?, cover_manual = ?, cover_library = 0,
            library_checked_at = CASE WHEN ? IS NULL THEN NULL ELSE library_checked_at END
          WHERE user_id = ? AND document = ?`
       ).run(cover as string | null, cover === null ? null : now, cover === null ? 0 : 1, cover as string | null, user.id, document);
@@ -363,7 +363,8 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
       db.prepare(
         `UPDATE documents SET title = COALESCE(?, title), author = CASE WHEN ? THEN NULLIF(?, '') ELSE author END,
            meta_manual = 1, cover_checked_at = NULL, hc_checked_at = NULL, library_checked_at = NULL, library_match = 0,
-           cover_url = CASE WHEN cover_manual = 0 AND cover_url LIKE '/api/v1/library/covers/%' THEN NULL ELSE cover_url END
+           cover_url = CASE WHEN cover_manual = 0 AND cover_library = 1 THEN NULL ELSE cover_url END,
+           cover_library = CASE WHEN cover_manual = 0 THEN 0 ELSE cover_library END
          WHERE user_id = ? AND document = ?`
       ).run((title as string | undefined) ?? null, author !== undefined ? 1 : 0, (author as string | undefined) ?? '', user.id, document);
       db.prepare("DELETE FROM connector_matches WHERE user_id = ? AND document = ? AND source IN ('auto', 'none')").run(user.id, document);

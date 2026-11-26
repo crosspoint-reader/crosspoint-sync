@@ -468,6 +468,171 @@ describe('library lookups over time', () => {
   });
 });
 
+describe('review round six', () => {
+  const cover = (db: ReturnType<typeof book>) => (db.prepare('SELECT cover_url FROM documents').get() as { cover_url: string | null }).cover_url;
+  const CDN_AUGE = AUGE.replace('href="/opds/cover/170"', 'href="https://cdn.test/170.jpg"');
+
+  it('clears a library cover on another host when the library drops it, or the title is edited', async () => {
+    const db = book('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
+    await documentInfo(db, 1, DOC, library(CDN_AUGE), LIB, { hardcover: true });
+    expect(db.prepare('SELECT cover_url, cover_library FROM documents').get()).toEqual({ cover_url: 'https://cdn.test/170.jpg', cover_library: 1 });
+    // A week later the entry has no cover: the other sources' cover takes its place.
+    db.prepare('UPDATE documents SET library_checked_at = library_checked_at - 7 * 86400').run();
+    db.prepare("UPDATE catalog_cache SET checked_at = checked_at - 8 * 86400 WHERE key LIKE 'library:%'").run();
+    const info = await documentInfo(db, 1, DOC, library(AUGE.replace(/<link type="image\/jpeg"[^>]*\/>/, '')), LIB, { hardcover: true });
+    expect(info.cover).toBe('https://apple.test/600x600bb.jpg');
+    expect(db.prepare('SELECT cover_library FROM documents').get()).toEqual({ cover_library: 0 });
+
+    for (const [k, v] of Object.entries(LIB)) vi.stubEnv(k, v);
+    const { app, db: db2 } = makeTestApp({}, { connectorTransport: library(CDN_AUGE) });
+    const { headers } = await registerUser(app);
+    await app.request('/syncs/progress', {
+      method: 'PUT', headers, body: JSON.stringify({ document: DOC, progress: 'x', percentage: 0.1, device: 'X4', device_id: 'x4',
+        metadata: { title: '241 - Die drei Fragezeichen und das weiße Auge', authors: 'Marco Sonnleitner' } }),
+    });
+    await documentInfo(db2, 1, DOC, library(CDN_AUGE), LIB, { hardcover: true });
+    expect(cover(db2)).toBe('https://cdn.test/170.jpg');
+    await app.request(`/api/v1/documents/${DOC}/info`, { method: 'PUT', headers, body: JSON.stringify({ author: 'Somebody Else' }) });
+    expect(db2.prepare('SELECT cover_url, cover_library FROM documents').get()).toEqual({ cover_url: null, cover_library: 0 });
+  });
+
+  it('discards a lookup that finishes after the book was renamed', async () => {
+    const db = book('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
+    const base = library(AUGE);
+    const http: HttpTransport = async (url, init) => {
+      if (url.endsWith('/opds/cover/170')) {
+        // The user corrects the book while the cover downloads (what PUT /info does).
+        db.prepare("UPDATE documents SET title = 'Another Book', meta_manual = 1, library_checked_at = NULL, library_match = 0, hc_checked_at = NULL").run();
+      }
+      return base(url, init);
+    };
+    await documentInfo(db, 1, DOC, http, LIB, { hardcover: true });
+    expect(db.prepare('SELECT title, cover_url, library_match, library_checked_at, description FROM documents').get()).toEqual({
+      title: 'Another Book', cover_url: null, library_match: 0, library_checked_at: null, description: null,
+    });
+  });
+
+  it('checks another source\'s author against the reader\'s too', async () => {
+    const db = book('Home', 'Alice Smith');
+    const base = library(entry(10, 'Home', 'Alice Smith &amp; Bob Jones'));
+    const http: HttpTransport = async (url, init) =>
+      url.startsWith('https://meta.test/')
+        ? Response.json({ books: [{ id: 't-7', title: 'Home', author: 'Bob Jones', rating: 3.1, moods: ['dark'] }] })
+        : base(url, init);
+    await documentInfo(db, 1, DOC, http, { ...LIB, METADATA_API_URL: 'https://meta.test' }, { hardcover: true });
+    expect(db.prepare('SELECT hc_id, rating, moods FROM documents').get()).toEqual({ hc_id: null, rating: null, moods: null });
+  });
+
+  it('drops another source\'s series id with its series when the library\'s comes in', async () => {
+    const db = book('Foundryside', 'Robert Jackson Bennett');
+    db.prepare("UPDATE documents SET series = 'Old', hc_series_id = 10").run();
+    const base = library(entry(11, 'Foundryside', 'Robert Jackson Bennett').replace('<published>', '<content type="text">SERIES: The Founders [1]</content><published>'));
+    const busy: HttpTransport = async (url, init) => (url.startsWith('https://meta.test/') ? new Response('', { status: 503 }) : base(url, init));
+    await documentInfo(db, 1, DOC, busy, { ...LIB, METADATA_API_URL: 'https://meta.test' }, { hardcover: true });
+    expect(db.prepare('SELECT series, series_position, hc_series_id FROM documents').get()).toEqual({ series: 'The Founders', series_position: 1, hc_series_id: null });
+  });
+
+  it('keeps "Alice & Bob" and "Alice Bob" apart in the cache', async () => {
+    const { libraryBook } = await import('../src/models/library.js');
+    const db = book('x', 'y');
+    const home = library(entry(12, 'Home', 'Alice'));
+    expect(await libraryBook(db, home, 'Home', 'Alice & Bob', LIB)).toMatchObject({ title: 'Home' });
+    expect(await libraryBook(db, home, 'Home', 'Alice Bob', LIB)).toBeNull();
+  });
+
+  it('downloads a cover again on the retry after a failed weekly download', async () => {
+    const db = book('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
+    await documentInfo(db, 1, DOC, library(AUGE), LIB, { hardcover: true });
+    const busy: HttpTransport = async (url, init) => (url.endsWith('/opds/cover/170') ? new Response('busy', { status: 503 }) : library(AUGE)(url, init));
+    db.prepare('UPDATE documents SET library_checked_at = library_checked_at - 7 * 86400').run();
+    await documentInfo(db, 1, DOC, busy, LIB, { hardcover: true });
+    expect(db.prepare('SELECT library_match FROM documents').get()).toEqual({ library_match: 0 });
+    // A day later: the cover link is requested again.
+    let fetched = 0;
+    const base = library(AUGE);
+    const counting: HttpTransport = async (url, init) => (url.endsWith('/opds/cover/170') && fetched++, base(url, init));
+    db.prepare('UPDATE documents SET library_checked_at = library_checked_at - 86400').run();
+    await documentInfo(db, 1, DOC, counting, LIB, { hardcover: true });
+    expect(fetched).toBe(1);
+    expect(db.prepare('SELECT library_match FROM documents').get()).toEqual({ library_match: 1 });
+  });
+
+  it('keeps the library\'s covers and details out of the catalog export', async () => {
+    const { app, db } = makeTestApp({ catalogExportToken: 'tok' });
+    await registerUser(app);
+    db.prepare(`INSERT INTO documents (user_id, document, title, author, isbn, description, genres, cover_url, cover_library, library_match, updated_at)
+      VALUES (1, 'lib', 'Dune', 'Frank Herbert', '9780441013593', 'My own notes.', '["Mine"]', '/api/v1/library/covers/0123456789abcdef0123456789abcdef', 1, 1, 0)`).run();
+    const body = await (await app.request('/api/catalog/books', { headers: { authorization: 'Bearer tok' } })).json();
+    expect(body.books[0]).toMatchObject({ title: 'Dune', description: null, genres: [], cover_url: null });
+  });
+
+  it('carries the library flag with the cover when copies are merged', async () => {
+    const { mergeDocuments } = await import('../src/models/merge.js');
+    const db = book('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
+    const alias = 'e'.repeat(32);
+    db.prepare("INSERT INTO documents (user_id, document, title, cover_url, cover_library, updated_at) VALUES (1, ?, 'x', 'https://cdn.test/170.jpg', 1, 0)").run(alias);
+    mergeDocuments(db, 1, alias, DOC, Math.floor(Date.now() / 1000));
+    expect(db.prepare('SELECT cover_url, cover_library FROM documents WHERE document = ?').get(DOC)).toEqual({ cover_url: 'https://cdn.test/170.jpg', cover_library: 1 });
+  });
+});
+
+describe('own review', () => {
+  it('asks the other source again on a weekly refresh when its cached answer is gone', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const stored = (db: ReturnType<typeof book>) =>
+      db.prepare("UPDATE documents SET hc_id = '42', rating = 4.2, moods = '[\"Tense\"]', hc_checked_at = ?").run(now);
+    const answering = (title: string, author: string): HttpTransport => {
+      const base = library(entry(5, 'Foundryside', 'Robert Jackson Bennett'));
+      return async (url, init) =>
+        url.startsWith('https://meta.test/') ? Response.json({ books: [{ id: '42', title, author, rating: 4.2, moods: ['Tense'] }] }) : base(url, init);
+    };
+    const env = { ...LIB, METADATA_API_URL: 'https://meta.test' };
+    // It answers with the same book: its details stay, under the library's.
+    const same = book('Foundryside', 'Robert Jackson Bennett');
+    stored(same);
+    await documentInfo(same, 1, DOC, answering('Foundryside', 'Robert Jackson Bennett'), env, { hardcover: true });
+    expect(same.prepare('SELECT hc_id, rating, moods, genres FROM documents').get()).toEqual({ hc_id: '42', rating: 4.2, moods: '["Tense"]', genres: '["Krimi"]' });
+    // It answers with another book: its details go.
+    const other = book('Foundryside', 'Robert Jackson Bennett');
+    stored(other);
+    await documentInfo(other, 1, DOC, answering('The Secret of the Haunted Mirror', 'Robert Jackson Bennett'), env, { hardcover: true });
+    expect(other.prepare('SELECT hc_id, rating, moods, genres FROM documents').get()).toEqual({ hc_id: null, rating: null, moods: null, genres: '["Krimi"]' });
+  });
+
+  it('drops stored covers no book shows any more, once a week old', async () => {
+    const { pruneLibraryCovers } = await import('../src/models/library.js');
+    const db = book('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
+    await documentInfo(db, 1, DOC, library(AUGE), LIB, { hardcover: true });
+    const old = Math.floor(Date.now() / 1000) - 8 * 86400;
+    db.prepare("INSERT INTO library_covers (id, source, digest, content_type, data, fetched_at) VALUES ('ffffffffffffffffffffffffffffffff', 'x old', 'd', 'image/jpeg', x'00', ?)").run(old);
+    db.prepare('UPDATE library_covers SET fetched_at = ?').run(old); // the shown one is old too, but in use
+    pruneLibraryCovers(db);
+    const shown = (db.prepare('SELECT cover_url FROM documents').get() as { cover_url: string }).cover_url;
+    expect(db.prepare('SELECT id FROM library_covers').all()).toEqual([{ id: shown.split('/').pop() }]);
+  });
+
+  it('treats a library cover this server doesn\'t hold as none (an account restored elsewhere)', async () => {
+    const db = book('Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
+    db.prepare("UPDATE documents SET cover_url = '/api/v1/library/covers/0123456789abcdef0123456789abcdef', cover_library = 1, cover_checked_at = ?").run(Math.floor(Date.now() / 1000));
+    const info = await documentInfo(db, 1, DOC, library(''), {});
+    expect(info.cover).toBe('https://apple.test/600x600bb.jpg'); // no library configured here: the other sources fill in
+  });
+
+  it('answers with what is stored after a title edit during the lookup', async () => {
+    const db = book('Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
+    const base = library('');
+    const http: HttpTransport = async (url, init) => {
+      if (url.includes('openlibrary')) {
+        db.prepare("UPDATE documents SET title = 'Another Book', meta_manual = 1").run();
+        return Response.json({ docs: [{ title: 'Die drei Fragezeichen und das weiße Auge', author_name: ['Marco Sonnleitner'], number_of_pages_median: 160 }] });
+      }
+      return base(url, init);
+    };
+    const info = await documentInfo(db, 1, DOC, http, {});
+    expect(info).toEqual({ cover: null, pages: null });
+  });
+});
+
 describe('cover downloads', () => {
   const big = new Uint8Array(1024);
   it('stops at the size limit, whether the server says so or not', async () => {

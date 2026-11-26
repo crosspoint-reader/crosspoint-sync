@@ -39,7 +39,6 @@ export interface LibraryBook {
 
 /** A found book is kept until the library is asked again after this long; a miss for a day. */
 export const LIBRARY_HIT_TTL = 7 * 86400;
-const HIT_TTL = LIBRARY_HIT_TTL;
 const MISS_TTL = 86400;
 /** After the library failed to answer, it isn't asked again for this long. */
 const DOWN_COOLDOWN = 300;
@@ -167,12 +166,14 @@ export function parseEntry(entry: Element, base: string): LibraryBook | null {
 
 const compact = (s: string) => s.replace(/ /g, '');
 
+/** An author list as compact names: "Alice & Bob" is two names, "Alice Bob" one. */
+const authorNames = (s: string) => s.split(/\s*(?:&|;|\band\b|\bund\b)\s*/i).map((x) => compact(normalizeAuthor(x))).filter(Boolean);
+
 /** A shared author: "James S.A. Corey" and "James S. A. Corey" or "Corey, James S. A."; one of several. */
 export function sameAuthor(a: string | null | undefined, b: string | null | undefined): boolean {
-  const split = (s: string) => s.split(/\s*(?:&|;|\band\b|\bund\b)\s*/i).map((x) => compact(normalizeAuthor(x))).filter(Boolean);
   if (!a?.trim() || !b?.trim()) return false;
-  const theirs = split(b);
-  return split(a).some((x) => theirs.includes(x));
+  const theirs = authorNames(b);
+  return authorNames(a).some((x) => theirs.includes(x));
 }
 
 /**
@@ -200,9 +201,10 @@ async function search(http: HttpTransport, cfg: LibraryConfig, query: string): P
 
 // Keyed on the catalog too: another LIBRARY_OPDS_URL or login must not reuse this one's answers.
 const catalogId = (cfg: LibraryConfig) => crypto.createHash('sha256').update(`${cfg.url}\n${cfg.username}`).digest('hex').slice(0, 12);
-// The title without its subtitle is in the key too: "Saga: A Novel" and "Saga A Novel" match differently.
+// The key keeps every boundary matching depends on: the subtitle ("Saga: A Novel" and "Saga A Novel" match
+// differently) and the authors ("Alice & Bob" and "Alice Bob" too).
 const cacheKey = (cfg: LibraryConfig, title: string, author: string) =>
-  `library:${catalogId(cfg)}:${normalizeText(coreTitle(title))}|${normalizeText(title)}|${normalizeAuthor(author)}`;
+  `library:${catalogId(cfg)}:${normalizeText(coreTitle(title))}|${normalizeText(title)}|${authorNames(author).join('&')}`;
 
 /**
  * The library's entry for a book, or null when the library doesn't have it, or 'later'
@@ -222,7 +224,7 @@ export async function libraryBook(
   const hit = db.prepare('SELECT data, checked_at FROM catalog_cache WHERE key = ?').get(key) as
     | { data: string | null; checked_at: number }
     | undefined;
-  if (hit && nowSeconds() - hit.checked_at < (hit.data ? HIT_TTL : MISS_TTL)) {
+  if (hit && nowSeconds() - hit.checked_at < (hit.data ? LIBRARY_HIT_TTL : MISS_TTL)) {
     return hit.data ? (JSON.parse(hit.data) as LibraryBook) : null;
   }
   // A library that just failed isn't waited on again for every book and every request. An expired
@@ -319,10 +321,27 @@ export async function storeLibraryCover(
        ON CONFLICT(source, digest) DO UPDATE SET fetched_at = excluded.fetched_at`
     ).run(crypto.randomBytes(16).toString('hex'), source, digest, type, data, nowSeconds());
     const row = db.prepare('SELECT id FROM library_covers WHERE source = ? AND digest = ?').get(source, digest) as { id: string };
+    pruneLibraryCovers(db);
     return libraryCoverPath(row.id);
   } catch {
     return null;
   }
+}
+
+/**
+ * Drop stored covers no book shows any more (an older picture of a changed cover, a book gone from the
+ * server) once they are a week old: by then every reader has the new address.
+ */
+export function pruneLibraryCovers(db: DB): void {
+  db.prepare(
+    `DELETE FROM library_covers WHERE fetched_at < ?
+       AND NOT EXISTS (SELECT 1 FROM documents WHERE cover_url = '${LIBRARY_COVERS}' || library_covers.id)`
+  ).run(nowSeconds() - LIBRARY_HIT_TTL);
+}
+
+/** Whether this server holds the library cover at `path` (without loading the image). */
+export function hasLibraryCover(db: DB, path: string): boolean {
+  return db.prepare('SELECT 1 FROM library_covers WHERE id = ?').get(path.slice(LIBRARY_COVERS.length)) !== undefined;
 }
 
 /** A stored library cover by its id. */

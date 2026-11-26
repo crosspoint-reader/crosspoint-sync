@@ -13,6 +13,9 @@ CREATE TABLE library_covers (
 -- A cover picked by hand is kept; the library replaces only automatic ones. Covers stored
 -- before this can't be told apart and count as automatic.
 ALTER TABLE documents ADD COLUMN cover_manual INTEGER NOT NULL DEFAULT 0;
+-- The cover came from the user's library (stored here, or a link on another host): it goes when the
+-- library drops it or the book's title or author is changed.
+ALTER TABLE documents ADD COLUMN cover_library INTEGER NOT NULL DEFAULT 0;
 -- When the library last answered for the book, and whether it had it (a miss is asked again).
 ALTER TABLE documents ADD COLUMN library_checked_at INTEGER;
 ALTER TABLE documents ADD COLUMN library_match INTEGER NOT NULL DEFAULT 0;
