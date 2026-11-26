@@ -159,6 +159,9 @@ DATABASE_PATH=./data/crosspoint.db PORT=8080 node dist/index.js
 
 ## Configuration
 
+Set `CROSSPAPER_KAGI_NEWS=1` on a noncommercial deployment to offer Kagi News under **CrossPaper → Feeds**. Users select their own categories. The server fetches the public Kagi News API without an API key, and CrossPaper includes attributed summaries in the same EPUB as saved pages and RSS articles. Contact Kagi for commercial licensing. [Kagi News API terms](https://news.kagi.com/api-docs)
+
+
 | Env var | Default | Meaning |
 |---------|---------|---------|
 | `PORT` | `8080` | Listen port |

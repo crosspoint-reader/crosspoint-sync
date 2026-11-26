@@ -606,6 +606,8 @@ export const api = {
   removeArticle: (s, id) => call(s, `/api/v1/newspaper/articles/${id}`, { method: 'DELETE' }),
   addFeed: (s, url) => call(s, '/api/v1/newspaper/feeds', { method: 'POST', body: JSON.stringify({ url }) }),
   removeFeed: (s, id) => call(s, `/api/v1/newspaper/feeds/${id}`, { method: 'DELETE' }),
+  crossPaperKagiCategories: (s) => call(s, '/api/v1/newspaper/kagi/categories', {}, false),
+  saveCrossPaperKagi: (s, categories) => call(s, '/api/v1/newspaper/kagi', { method: 'PUT', body: JSON.stringify({ categories }) }),
   // An edition as a File, named by the server: today's, or a past one by its YYYY-MM-DD date.
   async crossPaperEpub(s, date = 'today') {
     const res = await http(`${s.server}/api/v1/newspaper/issue/${date}.epub?tz=${new Date().getTimezoneOffset()}`, {

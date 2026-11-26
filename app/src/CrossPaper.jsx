@@ -97,6 +97,94 @@ async function sharedLinks() {
 }
 
 // `aside` sits at the top right of the masthead: Browse puts its side switch there.
+function KagiNews({ session, settings, run }) {
+  const [editing, setEditing] = useState(false)
+  const [catalog, setCatalog] = useState(null)
+  const [selected, setSelected] = useState([])
+  const [query, setQuery] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const load = async () => {
+    setLoading(true)
+    setCatalog(null)
+    try {
+      const result = await api.crossPaperKagiCategories(session)
+      setCatalog(result.categories)
+    } catch {
+      setCatalog([])
+    } finally {
+      setLoading(false)
+    }
+  }
+  const open = () => {
+    setSelected(settings.categories.length ? settings.categories : ['world'])
+    setQuery('')
+    setEditing(true)
+    load()
+  }
+  const save = async (categories) => {
+    setBusy(true)
+    if (await run(() => api.saveCrossPaperKagi(session, categories))) setEditing(false)
+    setBusy(false)
+  }
+  const names = new Map((catalog ?? []).map(({ id, name }) => [id, name]))
+  const available = (catalog ?? []).filter(({ name }) => name.toLowerCase().includes(query.trim().toLowerCase()))
+  const missing = selected.filter((id) => !names.has(id))
+  return (
+    <div className="mt-4 rounded-xl border border-stone-200 p-4">
+      <h2 className="font-display text-lg text-stone-900">Kagi News</h2>
+      <p className="text-sm text-stone-600">Include a daily briefing in your paper.</p>
+      {settings.lastIncluded && <p className="text-xs text-stone-600">Last included in the {settings.lastIncluded} edition.</p>}
+      {settings.missing.length > 0 && (
+        <p className="text-xs text-stone-600">Unavailable for today’s briefing: {settings.missing.join(', ')}.</p>
+      )}
+      {!editing ? (
+        <button type="button" className={`${button} mt-3`} onClick={open}>
+          {settings.categories.length ? 'Edit categories' : 'Add Kagi News'}
+        </button>
+      ) : (
+        <div className="mt-3 space-y-3">
+          {loading && <p role="status" className="text-sm">Loading categories…</p>}
+          {catalog?.length === 0 && (
+            <p role="status" className="text-sm">Categories are unavailable. <button type="button" onClick={load} className="underline">Retry</button></p>
+          )}
+          {catalog?.length > 0 && (
+            <>
+              <input aria-label="Search Kagi News categories" placeholder="Search categories" value={query}
+                onChange={(event) => setQuery(event.target.value)} className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm" />
+              <div className="max-h-56 overflow-y-auto" role="group" aria-label="Kagi News categories">
+                {missing.map((id) => (
+                  <label key={id} className="flex gap-2 py-1 text-sm">
+                    <input type="checkbox" checked onChange={() => setSelected(selected.filter((value) => value !== id))} /> {id} (unavailable)
+                  </label>
+                ))}
+                {available.map(({ id, name }) => (
+                  <label key={id} className="flex gap-2 py-1 text-sm">
+                    <input type="checkbox" checked={selected.includes(id)} disabled={selected.length >= 5 && !selected.includes(id)}
+                      onChange={(event) => setSelected(event.target.checked ? [...selected, id] : selected.filter((value) => value !== id))} />
+                    {name}
+                  </label>
+                ))}
+              </div>
+              <p className="text-xs text-stone-600">{selected.length} of 5 categories selected</p>
+            </>
+          )}
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" className={button} disabled={busy || !catalog?.length || !selected.length} onClick={() => save(selected)}>
+              {settings.categories.length ? 'Save changes' : 'Add to paper'}
+            </button>
+            <button type="button" disabled={busy} onClick={() => setEditing(false)} className="text-sm">Cancel</button>
+            {settings.categories.length > 0 && (
+              <button type="button" disabled={busy} onClick={() => save([])} className="text-sm underline">Remove from paper</button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function CrossPaper({ session, aside }) {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
@@ -304,6 +392,7 @@ export default function CrossPaper({ session, aside }) {
             ))}
           </p>
         )}
+        {data?.kagi && <KagiNews session={session} settings={data.kagi} run={run} />}
       </section>
       )}
 

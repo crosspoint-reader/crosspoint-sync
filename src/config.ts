@@ -22,6 +22,7 @@ export interface Config {
   kindleServerRegistration: boolean;
   /** Bearer token for GET /api/catalog/books; the route does not exist when unset. */
   catalogExportToken?: string;
+  crossPaperKagiNews?: boolean;
 }
 
 export function fromEnv(env: NodeJS.ProcessEnv = process.env): Config {
@@ -42,6 +43,7 @@ export function fromEnv(env: NodeJS.ProcessEnv = process.env): Config {
       : '*',
     kindleServerRegistration:
       env.KINDLE_SERVER_REGISTRATION === 'true' || env.KINDLE_SERVER_REGISTRATION === '1',
+    crossPaperKagiNews: env.CROSSPAPER_KAGI_NEWS === '1' || env.CROSSPAPER_KAGI_NEWS === 'true',
     catalogExportToken: env.CATALOG_EXPORT_TOKEN || undefined,
   };
 }
