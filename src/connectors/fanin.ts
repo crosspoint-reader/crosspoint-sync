@@ -43,7 +43,13 @@ export async function pollConnector(
   userId: number,
   connectorId: string,
   http: HttpTransport = fetchTransport,
-  options: { document?: string; signal?: AbortSignal; throwOnError?: boolean; firstContact?: boolean } = {}
+  options: {
+    document?: string; signal?: AbortSignal; throwOnError?: boolean;
+    /** The book was just matched: a further dated position wins even if older than ours. */
+    firstContact?: boolean;
+    /** Only settle a dated position before a queued push; no highlights. */
+    positionOnly?: boolean;
+  } = {}
 ): Promise<number> {
   const conn = getConnector(connectorId);
   const account = getAccount(db, userId, connectorId);
@@ -56,8 +62,9 @@ export async function pollConnector(
     const dated = exact || connectorId === 'bookorbit';
     const pct = exact ? ch.percentage : ch.finished || ch.percentage >= 0.999 ? 1 : ch.percentage;
     let updatedAt = dated ? Math.floor(ch.updatedAtMs / 1000) : nowSeconds();
-    // First contact only trusts a dated position: an undated one can't be ordered against the device's.
-    if (options.firstContact && !dated) return 0;
+    if (!dated && options.positionOnly) return 0; // can't be ordered against the queued push
+    // First contact reads from the start, so keep the usual "newer than ours" rule for undated changes.
+    if (!dated && options.firstContact && current && ch.updatedAtMs <= current.updated_at * 1000) return 0;
     if (dated && current && updatedAt <= current.updated_at) {
       // A book the service has already read further: its place wins, stamped newest for devices
       // to pick up, instead of a fresh device's page 1 overwriting it.
@@ -106,8 +113,8 @@ export async function pollConnector(
         if (change && freshMatch?.external_id === match.external_id && freshMatch.source === match.source) {
           applied += apply(change, match.document);
         }
-        // First contact only settles the position; highlights wait for Sync now or the next pull.
-        if (conn.pullHighlights && !options.firstContact && freshMatch?.external_id === match.external_id) {
+        // A pull before a push only settles the position; highlights wait for the next pull.
+        if (conn.pullHighlights && !options.positionOnly && freshMatch?.external_id === match.external_id) {
           const known = clippingTexts(db, userId, match.document);
           const highlights = await conn.pullHighlights(credential, {
             externalId: match.external_id, externalEdition: match.external_edition, confidence: match.confidence,

@@ -81,3 +81,17 @@ it('sends a highlight synced before the book was matched once the match exists',
   const pushed = vi.mocked(bookorbitConnector.push).mock.calls.map(([, , ev]) => ev.kind);
   expect(pushed).toContain('highlight');
 });
+
+it('keeps a further BookOrbit position when a progress request makes the first match', async () => {
+  const f = await fixture(60);
+  await f.app.request('/syncs/progress', {
+    method: 'PUT', headers: f.headers,
+    body: JSON.stringify({ document: DOC, progress: '/body/DocFragment[1]/body/p[1]', percentage: 0, device: 'X4',
+      device_id: 'crosspoint-x4', metadata: { title: 'Piranesi', authors: 'Susanna Clarke' } }),
+  });
+  // The device asks again before the queue has run, so the request makes the match.
+  const got = await (await f.app.request(`/syncs/progress/${DOC}`, { headers: f.headers })).json();
+  expect(got).toMatchObject({ percentage: 0.6, device_id: 'bookorbit' });
+  await drainQueue(f.db, f.http, 10);
+  expect(f.calls.filter((c) => c.method === 'POST' && c.url.endsWith('/progress'))).toEqual([]);
+});

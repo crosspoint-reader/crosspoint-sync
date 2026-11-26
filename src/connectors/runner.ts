@@ -167,13 +167,23 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
   if (match && !wasMatched && ev.kind !== 'highlight' && connector.pullProgress && connector.capabilities.read) {
     try {
       const applied = await pollConnector(db, row.user_id, row.connector_id, http,
-        { document: row.document, throwOnError: true, firstContact: true });
+        { document: row.document, throwOnError: true, firstContact: true, positionOnly: true });
       if (applied > 0) {
         markDone(db, row.id); // the service's place won; pushing this event would move it back
         return;
       }
     } catch (err) {
       failOperation(db, row, err, 'pull before first push failed');
+      return;
+    }
+  }
+  // A position pulled from this service since the event was made (say, on first contact
+  // from a progress request) is the newer one; pushing the event would move the service back.
+  if (match && ev.kind !== 'highlight') {
+    const own = db.prepare('SELECT updated_at FROM progress WHERE user_id = ? AND document = ? AND device_id = ?')
+      .get(row.user_id, row.document, row.connector_id) as { updated_at: number } | undefined;
+    if (own && own.updated_at > ev.timestamp) {
+      markDone(db, row.id);
       return;
     }
   }
