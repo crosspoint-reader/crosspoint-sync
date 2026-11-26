@@ -34,8 +34,9 @@ fixture("broken.epub", "this is not lua")
 fixture("legacy.epub", 'return {bookmarks={}}')
 fixture("no-page.epub", 'return {partial_md5_checksum="' .. string.rep("b",32) .. '",annotations={{page="/b"}}}')
 fixture("unsafe.epub", 'os.remove("' .. root .. '/valid.epub"); return {}')
+write("no-metadata.epub", "book"); files[#files + 1] = "no-metadata.epub"
 local history = {}
-for _, name in ipairs({"valid.epub", "duplicate.epub", "missing.epub", "broken.epub", "legacy.epub", "no-page.epub", "unsafe.epub"}) do
+for _, name in ipairs({"valid.epub", "duplicate.epub", "missing.epub", "no-metadata.epub", "broken.epub", "legacy.epub", "no-page.epub", "unsafe.epub"}) do
     history[#history + 1] = '{file="' .. root .. '/' .. name .. '"}'
 end
 write("history.lua", 'return {' .. table.concat(history, ',') .. '}')
@@ -45,7 +46,10 @@ Library.each(nil, digest, function(snapshot, keep_missing)
     uploads[#uploads + 1] = snapshot
 end, skipped)
 assert(#uploads == 1 and #skipped == 4)
-for _, line in ipairs(skipped) do assert(not line:find("missing.epub", 1, true), "Deleted books are not errors") end
+for _, line in ipairs(skipped) do
+    assert(not line:find("missing.epub", 1, true), "Deleted books are not errors")
+    assert(not line:find("no-metadata.epub", 1, true), "Books without saved metadata have nothing to sync")
+end
 local snapshot = uploads[1]
 local _, bookmark = next(snapshot.bookmarks)
 assert(bookmark.percentage == .25 and bookmark.xpath == "/b")

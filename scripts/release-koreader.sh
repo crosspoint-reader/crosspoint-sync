@@ -34,9 +34,11 @@ Install by extracting crosspoint-koreader.zip into KOReader's plugins folder and
 
 Fixes "Book file is missing" errors filling the **Sync all highlights and bookmarks** result (#130). Books that are still in KOReader's reading history but have been deleted from the device are now skipped without being reported. Unreadable, legacy or incomplete metadata is still listed.
 
+Fixes "Saved metadata is missing" errors in the same result (#130). Books still on the device that KOReader has no saved metadata for, for example after their book settings were reset, have no saved highlights or bookmarks and are now skipped without being reported.
+
 Fixes "Could not create a sync result file" on some Android devices (#125), where Setup and Sync now failed before any network request. If the private result file cannot be reserved in KOReader's settings directory, the plugin now falls back to a plain file create there, then to KOReader's data directory. If every attempt fails, the message now includes the error number and reason for each directory. The cause of the original failure on the reporting Xiaomi/MIUI device is not yet known; the reporter confirmed an equivalent fallback let a full sync complete, and this exact build has not been verified on that device.
 
-Adds **Sync all highlights and bookmarks**: background upload of saved annotations from books in KOReader's retained reading history, without opening each document or requiring Reading statistics. Uses live annotations for the open book and saved page numbers for other books. Missing, unreadable, legacy or incomplete metadata is skipped and reported. Saved files are read-only; the backfill never infers deletions, and acknowledged unchanged annotations are not resent on retry.
+Adds **Sync all highlights and bookmarks**: background upload of saved annotations from books in KOReader's retained reading history, without opening each document or requiring Reading statistics. Uses live annotations for the open book and saved page numbers for other books. Unreadable, legacy or incomplete metadata is skipped and reported. Saved files are read-only; the backfill never infers deletions, and acknowledged unchanged annotations are not resent on retry.
 
 Sync results now show annotation books checked and acknowledged changes instead of claiming available annotations synced when none were inspected. Books removed from KOReader's reading history are outside the scan. Legacy annotation files require opening once in a current KOReader version to migrate.
 

@@ -33,8 +33,9 @@ function Library.each(current, hash, upload, skipped)
             local ok, snapshot = pcall(function()
                 -- History keeps deleted books; that is normal, not a skip worth reporting.
                 if lfs.attributes(path, "mode") ~= "file" then return end
+                -- No metadata file means KOReader has no saved annotations for this book.
                 local sidecar = DocSettings:findSidecarFile(path)
-                assert(sidecar, "Saved metadata is missing")
+                if not sidecar then return end
                 local data = readTable(sidecar)
                 if type(data.partial_md5_checksum) == "string" and seen[data.partial_md5_checksum:lower()] then return end
                 return Annotations.fromSaved(data.partial_md5_checksum, data.annotations, data.doc_pages, hash)
