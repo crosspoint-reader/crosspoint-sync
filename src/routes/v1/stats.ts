@@ -21,7 +21,7 @@ import { resolveDocument, statsAliases, statsDocuments } from '../../models/merg
 import type { HttpTransport } from '../../connectors/types.js';
 import { bookorbitExclusions, readBookorbitStats } from '../../models/bookorbit-stats.js';
 
-import { parseReadingSession, SEED_UTC_OFFSET } from '../../models/reading-sessions.js';
+import { SEED_UTC_OFFSET, storeReadingSessions } from '../../models/reading-sessions.js';
 import { combineReadingStreak } from '../../models/reading-streak.js';
 import { importBookorbitStats } from '../../connectors/bookorbit-stats.js';
 import { seedStatsCounters, storeStatsDays, storeStatsSnapshot } from '../../models/stats-counters.js';
@@ -147,7 +147,8 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
   }
 
 
-  // Cumulative session checkpoints retain one identity, including stale retries.
+  // Each session in a batch is stored or refused on its own: a reader resends unacknowledged sessions
+  // oldest first, so one it can never get stored must not hold back the rest of its history.
   app.put('/stats/sessions', async (c) => {
     let body: any;
     try { body = await c.req.json(); } catch { return kosyncError(c, 403, 2003, 'Invalid request'); }
@@ -156,41 +157,17 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     if (!deviceId || !Array.isArray(body.items) || !body.items.length || body.items.length > 20) {
       return kosyncError(c, 403, 2003, 'Invalid request');
     }
-    const items = body.items.map((s: unknown) => parseReadingSession(s, now));
-    if (items.some((s: unknown) => !s) || new Set(items.map((s: any) => s.session_id)).size !== items.length) {
-      return kosyncError(c, 403, 2003, 'Invalid request');
-    }
     const userId = c.get('user').id;
-    const existing = db.prepare('SELECT * FROM reading_sessions WHERE user_id=? AND device_id=? AND session_id=?');
-    for (const s of items) {
-      const old = existing.get(userId, deviceId, s.session_id);
-      if (old && (['document', 'started_at', 'utc_offset_minutes'].some((key) => old[key] !== s[key]) ||
-          !((s.seconds >= Number(old.seconds) && s.ended_at >= Number(old.ended_at)) ||
-            (s.seconds <= Number(old.seconds) && s.ended_at <= Number(old.ended_at))))) {
-        return kosyncError(c, 403, 2003, 'Session ID already has different data');
-      }
+    const result = storeReadingSessions(db, userId, deviceId, body.items, now);
+    if (result.refused.length) {
+      const reasons: Record<string, number> = {};
+      for (const r of result.refused) reasons[r.reason] = (reasons[r.reason] ?? 0) + 1;
+      console.warn(JSON.stringify({ msg: 'reading sessions refused', user_id: userId, device_id: deviceId, reasons }));
     }
-    withTransaction(db, () => {
-      const insert = db.prepare(`INSERT INTO reading_sessions
-        (user_id, device_id, session_id, document, started_at, ended_at, seconds, utc_offset_minutes, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id,device_id,session_id) DO UPDATE SET
-          seconds=MAX(reading_sessions.seconds, excluded.seconds),
-          ended_at=MAX(reading_sessions.ended_at, excluded.ended_at)`);
-      // A reader seeded from /stats/sessions/export uploads that history back under its own IDs:
-      // acknowledge it without storing it again.
-      const known = db.prepare(`SELECT 1 FROM reading_sessions WHERE user_id=? AND document=? AND started_at=?
-        AND seconds=? AND NOT (device_id=? AND session_id=?)`);
-      for (const s of items) {
-        if (s.utc_offset_minutes === SEED_UTC_OFFSET ||
-            known.get(userId, s.document, s.started_at, s.seconds, deviceId, s.session_id)) continue;
-        insert.run(userId, deviceId, s.session_id, s.document, s.started_at,
-          s.ended_at, s.seconds, s.utc_offset_minutes, now);
-      }
-    });
-    for (const document of new Set<string>(items.map((s: any) => resolveDocument(db, userId, s.document)))) {
+    for (const document of new Set<string>(result.documents.map((d) => resolveDocument(db, userId, d)))) {
       void importBookorbitStats(db, userId, http, { document }).catch(() => {});
     }
-    return c.json({ until: now, accepted_session_ids: items.map((s: any) => s.session_id) });
+    return c.json({ until: now, accepted_session_ids: result.acknowledged, refused: result.refused });
   });
 
   // The account's reading as the firmware's session log (/.crosspoint/reading_sessions.jsonl), so a
