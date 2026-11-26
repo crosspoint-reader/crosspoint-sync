@@ -695,6 +695,21 @@ describe('catalog export and cleanup', () => {
     });
   });
 
+  it('keeps a page count set by hand during a lookup', async () => {
+    const db = book('Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
+    const base = library('');
+    const http: HttpTransport = async (url, init) => {
+      if (url.includes('openlibrary')) {
+        db.prepare('UPDATE documents SET page_count = 123').run(); // the user enters it in the app meanwhile
+        return Response.json({ docs: [{ title: 'Die drei Fragezeichen und das weiße Auge', author_name: ['Marco Sonnleitner'], number_of_pages_median: 160 }] });
+      }
+      return base(url, init);
+    };
+    const info = await documentInfo(db, 1, DOC, http, {});
+    expect(info.pages).toBe(123);
+    expect(db.prepare('SELECT page_count FROM documents').get()).toEqual({ page_count: 123 });
+  });
+
   it('cleans up covers nothing shows any more without a new download', async () => {
     const { enrichSoon } = await import('../src/models/cover.js');
     const db = book('x', 'y');

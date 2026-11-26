@@ -426,7 +426,10 @@ export async function documentInfo(
   // (it often ran before the throttled Hardcover lookup did).
   if (!row.page_count && hc?.pages) {
     row.page_count = hc.pages;
-    db.prepare(`UPDATE documents SET page_count = ? WHERE user_id = ? AND document = ? ${SAME}`).run(hc.pages, userId, document, ...same(id));
+    // Only into an empty page count: one set by hand while this ran stays.
+    db.prepare(`UPDATE documents SET page_count = ? WHERE user_id = ? AND document = ? AND page_count IS NULL ${SAME}`).run(
+      hc.pages, userId, document, ...same(id)
+    );
   }
   if (!row.cover_url && hc?.cover) {
     row.cover_url = hc.cover;
@@ -442,7 +445,8 @@ export async function documentInfo(
       ? await sharedBookInfo(db, http, want.title, want.author, env, { cover: hc?.cover, pages: hc?.pages })
       : { cover: null, pages: null };
     info = { cover: row.cover_url ?? found.cover, pages: row.page_count ?? found.pages };
-    db.prepare(`UPDATE documents SET page_count = ?, cover_checked_at = ? WHERE user_id = ? AND document = ? ${SAME}`).run(
+    // A page count set by hand while this ran stays.
+    db.prepare(`UPDATE documents SET page_count = COALESCE(page_count, ?), cover_checked_at = ? WHERE user_id = ? AND document = ? ${SAME}`).run(
       info.pages, nowSeconds(), userId, document, ...same(id)
     );
     // A cover found here only goes into a still empty slot: a cover the user picked, or one another lookup
