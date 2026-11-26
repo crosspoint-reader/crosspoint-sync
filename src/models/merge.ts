@@ -91,6 +91,22 @@ export function statsAliases(db: DB, userId: number): Map<string, string> {
  * stats are not moved; `mergeStats` decides whether they combine on read.
  * Callers must pass already-resolved, distinct documents.
  */
+/**
+ * library_fields after a merge: per detail, from the copy whose value mergeManualSql() keeps (the alias's
+ * when only it was set by hand, else the kept document's when it has one, else the alias's), so a value
+ * from another source isn't marked as the library's or the other way round.
+ */
+function mergeLibraryFieldsSql(): string {
+  const fields: [field: string, flag: string][] = [['description', 'description'], ['genres', 'genres'], ['series', 'series'], ['release_year', 'release_year']];
+  const pieces = fields.map(([field, flag]) => {
+    const has = (row: string) => `instr(COALESCE(${row}.library_fields, ''), ',${field},') > 0`;
+    const fromAlias = `excluded.${flag}_manual AND NOT documents.${flag}_manual`;
+    const keepOwn = `documents.${flag}_manual OR documents.${field} IS NOT NULL`;
+    return `CASE WHEN CASE WHEN ${fromAlias} THEN ${has('excluded')} WHEN ${keepOwn} THEN ${has('documents')} ELSE ${has('excluded')} END THEN '${field},' ELSE '' END`;
+  });
+  return `library_fields = NULLIF(',' || ${pieces.join(' || ')}, ',')`;
+}
+
 export function mergeDocuments(
   db: DB,
   userId: number,
@@ -166,8 +182,7 @@ export function mergeDocuments(
          -- A cover picked by hand beats an automatic one, whichever copy has it.
          cover_manual = CASE WHEN documents.cover_url IS NULL OR (excluded.cover_manual AND NOT documents.cover_manual)
            THEN excluded.cover_manual ELSE documents.cover_manual END,
-         -- Details from either copy's library stay out of the catalog export.
-         library_fields = NULLIF(COALESCE(documents.library_fields, '') || COALESCE(excluded.library_fields, ''), ''),
+         ${mergeLibraryFieldsSql()},
          cover_library = CASE WHEN documents.cover_url IS NULL OR (excluded.cover_manual AND NOT documents.cover_manual)
            THEN excluded.cover_library ELSE documents.cover_library END,
          cover_url = CASE WHEN excluded.cover_manual AND NOT documents.cover_manual THEN excluded.cover_url

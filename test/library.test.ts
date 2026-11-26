@@ -681,6 +681,20 @@ describe('catalog export and cleanup', () => {
     expect(db.prepare('SELECT cover_url, cover_library FROM documents').get()).toEqual({ cover_url: libraryCoverUrl, cover_library: 1 });
   });
 
+  it('takes the library mark from the copy whose value a merge keeps', async () => {
+    const { mergeDocuments } = await import('../src/models/merge.js');
+    const db = book('Foundryside', 'Robert Jackson Bennett');
+    const alias = 'd'.repeat(32);
+    // Kept copy: another source's description, no series. Alias: the library's description and series.
+    db.prepare("UPDATE documents SET description = 'A heist.', library_fields = NULL").run();
+    db.prepare(`INSERT INTO documents (user_id, document, title, description, series, series_position, library_fields, updated_at)
+      VALUES (1, ?, 'x', 'My own notes.', 'The Founders', 1, ',description,series,', 0)`).run(alias);
+    mergeDocuments(db, 1, alias, DOC, Math.floor(Date.now() / 1000));
+    expect(db.prepare('SELECT description, series, library_fields FROM documents WHERE document = ?').get(DOC)).toEqual({
+      description: 'A heist.', series: 'The Founders', library_fields: ',series,',
+    });
+  });
+
   it('cleans up covers nothing shows any more without a new download', async () => {
     const { enrichSoon } = await import('../src/models/cover.js');
     const db = book('x', 'y');
