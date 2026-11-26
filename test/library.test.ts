@@ -313,7 +313,8 @@ describe('library lookups over time', () => {
     const base = library(AUGE);
     const broken: HttpTransport = async (url, init) => (url.endsWith('/opds/cover/170') ? new Response('busy', { status: 503 }) : base(url, init));
     await documentInfo(db, 1, DOC, broken, LIB, { hardcover: true });
-    expect(db.prepare('SELECT cover_url, library_match FROM documents').get()).toEqual({ cover_url: null, library_match: 0 });
+    // Meanwhile the other sources' cover is shown.
+    expect(db.prepare('SELECT cover_url, library_match FROM documents').get()).toEqual({ cover_url: 'https://apple.test/600x600bb.jpg', library_match: 0 });
     db.prepare('UPDATE documents SET library_checked_at = library_checked_at - 86400').run(); // a day later
     await documentInfo(db, 1, DOC, base, LIB, { hardcover: true });
     expect((db.prepare('SELECT cover_url FROM documents').get() as { cover_url: string }).cover_url).toMatch(/^\/api\/v1\/library\/covers\//);
@@ -499,7 +500,8 @@ describe('library matching', () => {
     await documentInfo(db, 1, DOC, redirecting, LIB);
     expect(redirect).toBe('manual');
     expect(calls.some((c) => c.url.startsWith('http://10.'))).toBe(false);
-    expect((db.prepare('SELECT cover_url FROM documents').get() as { cover_url: string | null }).cover_url).toBeNull();
+    // Not the library's (redirected) cover: the other sources' one.
+    expect((db.prepare('SELECT cover_url FROM documents').get() as { cover_url: string | null }).cover_url).toBe('https://apple.test/600x600bb.jpg');
 
     resetLibraryState();
     const elsewhere: HttpTransport = async (url, init) => {
