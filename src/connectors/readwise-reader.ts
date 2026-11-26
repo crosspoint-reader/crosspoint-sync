@@ -73,16 +73,17 @@ interface ReaderList {
  * The reading_progress we last wrote to Reader. Any edit (a highlight we add, a tag) moves a
  * document's updated_at, so only a change from this value means someone read on in Reader.
  */
-interface ProgressSnapshot { progress: number }
+// `at`: when the position was read (ms), so an older queued event can't write over it.
+interface ProgressSnapshot { progress: number; at?: number }
 const SAME_PROGRESS = 0.0005;
-function knownProgress(ctx: ConnectorContext | undefined, m: Match): number | null {
+function knownProgress(ctx: ConnectorContext | undefined, m: Match): ProgressSnapshot | null {
   const snap = ctx ? getMatchSnapshot<ProgressSnapshot>(ctx.db, ctx.userId, 'readwise-reader', m.externalId) : null;
-  return typeof snap?.progress === 'number' ? snap.progress : null;
+  return typeof snap?.progress === 'number' ? snap : null;
 }
-function rememberProgress(ctx: ConnectorContext | undefined, m: Match, progress: number): void {
-  if (ctx) setMatchSnapshot(ctx.db, ctx.userId, 'readwise-reader', m.externalId, { progress } satisfies ProgressSnapshot);
+function rememberProgress(ctx: ConnectorContext | undefined, m: Match, progress: number, at: number): void {
+  if (ctx) setMatchSnapshot(ctx.db, ctx.userId, 'readwise-reader', m.externalId, { progress, at } satisfies ProgressSnapshot);
 }
-const unchanged = (known: number | null, progress: number) => known != null && Math.abs(progress - known) < SAME_PROGRESS;
+const unchanged = (known: ProgressSnapshot | null, progress: number) => known != null && Math.abs(progress - known.progress) < SAME_PROGRESS;
 
 function tokenOf(cred: Credential): string {
   const t = (cred as ReadwiseCred).token;
@@ -336,7 +337,10 @@ async function push(
     return { ok: false, retryable: true, error: 'Cannot safely compare Reader progress timestamps' };
   }
   const readerProgress = typeof doc.reading_progress === 'number' ? doc.reading_progress : 0;
-  if (updatedAt > ev.timestamp * 1000 && !unchanged(knownProgress(ctx, m), readerProgress)) {
+  const known = knownProgress(ctx, m);
+  // Reader still holding our own write only moved updated_at, unless that write came after this event.
+  const ours = unchanged(known, readerProgress) && !(known?.at && known.at > ev.timestamp * 1000);
+  if (updatedAt > ev.timestamp * 1000 && !ours) {
     return { ok: true, note: 'Newer Reader progress kept; sync this book to pull it.' };
   }
   if (doc.category === 'pdf' && ev.kind === 'progress') {
@@ -362,7 +366,7 @@ async function push(
     return { ok: false, retryable: true, error: 'bulk_update partial failure' };
   }
   if (res.status >= 200 && res.status < 300) {
-    rememberProgress(ctx, m, doc.category !== 'pdf' ? ev.percentage : readerProgress);
+    rememberProgress(ctx, m, doc.category !== 'pdf' ? ev.percentage : readerProgress, ev.timestamp * 1000);
     return { ok: true };
   }
   return { ok: false, retryable: false, error: `unexpected status ${res.status}` };
@@ -384,7 +388,7 @@ export const readwiseReaderConnector: Connector = {
   pushUnmatched,
   pullProgress,
   // A pulled position is Reader's reading we now hold; a later edit must not bring it back.
-  progressStored: (m, change, ctx) => rememberProgress(ctx, m, change.percentage),
+  progressStored: (m, change, ctx) => rememberProgress(ctx, m, change.percentage, change.updatedAtMs),
   listCurrentlyReading,
   search,
 };

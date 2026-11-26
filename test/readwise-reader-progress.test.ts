@@ -99,3 +99,16 @@ it('returns a position read further in Reader when a device asks for progress', 
   const ctx = { db: f.db, userId: f.id, document: DOC };
   expect(await readwiseReaderConnector.pullProgress!(r.cred, MATCH, r.http, 0, ctx)).toBeNull();
 });
+
+it('does not write a retried older position over a newer one it already wrote', async () => {
+  const r = reader(0.2, '2026-11-01T00:00:00Z');
+  const f = await app(r.http, r.cred.token);
+  const ctx = { db: f.db, userId: f.id, document: DOC };
+  const now = Math.floor(Date.now() / 1000);
+  const finished = { kind: 'finished' as const, document: DOC, percentage: 1, timestamp: now };
+  expect(await readwiseReaderConnector.push(r.cred, MATCH, finished, r.http, ctx)).toEqual({ ok: true });
+  // A progress event from before the finish, retried after it.
+  const older = { kind: 'progress' as const, document: DOC, percentage: 0.5, timestamp: now - 600 };
+  expect(await readwiseReaderConnector.push(r.cred, MATCH, older, r.http, ctx)).toMatchObject({ ok: true, note: expect.stringMatching(/Newer Reader/) });
+  expect(r.doc.reading_progress).toBe(1);
+});
