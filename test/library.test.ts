@@ -151,9 +151,11 @@ describe('the user\'s library as the first source', () => {
     expect(info.cover).toBe('https://apple.test/600x600bb.jpg');
     const searches = () => calls.filter((c) => c.url.includes('/opds/search/')).length;
     const before = searches();
-    db.prepare('UPDATE documents SET cover_checked_at = NULL').run();
-    await documentInfo(db, 1, DOC, library(AUGE, calls), LIB);
-    expect(searches()).toBe(before); // the library's miss is cached
+    expect(before).toBeGreaterThan(0);
+    // Due again for the book (as after a day), but the library's miss is still cached: no new search.
+    db.prepare('UPDATE documents SET cover_checked_at = NULL, library_checked_at = NULL').run();
+    await documentInfo(db, 1, DOC, library(AUGE, calls), LIB, { hardcover: true });
+    expect(searches()).toBe(before);
   });
 
   it('leaves the book for later when the library can\'t be reached', async () => {
@@ -276,7 +278,8 @@ describe('keeping covers in line with the library', () => {
       }
       return base(url, init);
     };
-    await documentInfo(db, 1, DOC, http, LIB, { hardcover: true });
+    const info = await documentInfo(db, 1, DOC, http, LIB, { hardcover: true });
+    expect(info.cover).toBe('https://mine.test/cover.jpg');
     expect(db.prepare('SELECT cover_url, cover_manual FROM documents').get()).toEqual({ cover_url: 'https://mine.test/cover.jpg', cover_manual: 1 });
   });
 
@@ -388,6 +391,17 @@ describe('library lookups over time', () => {
     resetLibraryState(); // five minutes later
     await documentInfo(db, 1, DOC, library(AUGE), LIB, { hardcover: true });
     expect((db.prepare('SELECT library_checked_at FROM documents').get() as { library_checked_at: number }).library_checked_at).toBeGreaterThan(due);
+  });
+
+  it('drops the library\'s old cover when the library no longer has one', async () => {
+    const db = book('241 - Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
+    await documentInfo(db, 1, DOC, library(AUGE), LIB, { hardcover: true });
+    expect((db.prepare('SELECT cover_url FROM documents').get() as { cover_url: string }).cover_url).toMatch(/^\/api\/v1\/library\/covers\//);
+    // A week later the entry has no cover any more: the other sources' cover takes its place.
+    db.prepare('UPDATE documents SET library_checked_at = library_checked_at - 7 * 86400').run();
+    db.prepare("UPDATE catalog_cache SET checked_at = checked_at - 8 * 86400 WHERE key LIKE 'library:%'").run();
+    const info = await documentInfo(db, 1, DOC, library(AUGE.replace(/<link type="image\/jpeg"[^>]*\/>/, '')), LIB, { hardcover: true });
+    expect(info.cover).toBe('https://apple.test/600x600bb.jpg');
   });
 
   it('retries a cover whose weekly download failed, showing the old one meanwhile', async () => {

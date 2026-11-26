@@ -5,7 +5,7 @@ import { documentMeta } from '../connectors/store.js';
 import { extractTitleAuthor, scoreCandidate, type Candidate } from '../connectors/matching.js';
 import { nowSeconds } from './sync.js';
 import { cacheKey, cachedHardcoverBook, hardcoverBook, metadataApiUrl, tidy, type HardcoverBook } from './hardcover-catalog.js';
-import { LIBRARY_HIT_TTL, libraryBook, libraryConfig, sameAuthor, sameTitle, storeLibraryCover, type LibraryBook } from './library.js';
+import { LIBRARY_HIT_TTL, isLibraryCoverPath, libraryBook, libraryConfig, sameAuthor, sameTitle, storeLibraryCover, type LibraryBook } from './library.js';
 import { keepManual } from './manual-details.js';
 
 /**
@@ -324,6 +324,15 @@ export async function documentInfo(
           .run(path, now, userId, document);
         if (set.changes) row.cover_url = path;
       }
+    } else if (!lib?.cover && isLibraryCoverPath(row.cover_url) && !row.cover_manual) {
+      // The library no longer has a cover (or the book) for it: drop its old one so the other sources fill in.
+      const set = db
+        .prepare('UPDATE documents SET cover_url = NULL, cover_checked_at = NULL WHERE user_id = ? AND document = ? AND cover_manual = 0')
+        .run(userId, document);
+      if (set.changes) {
+        row.cover_url = null;
+        row.cover_checked_at = null;
+      }
     }
     // Details stored before the library had the book: its own go over them now (those set by hand stay).
     if (lib && row.hc_checked_at != null) {
@@ -372,7 +381,11 @@ export async function documentInfo(
        WHERE user_id = ? AND document = ?`
     ).run(info.cover, info.pages, nowSeconds(), userId, document);
   }
-  return info;
+  // What is stored now: a cover the user picked while this ran wins over the one found here.
+  const stored = db.prepare('SELECT cover_url FROM documents WHERE user_id = ? AND document = ?').get(userId, document) as
+    | { cover_url: string | null }
+    | undefined;
+  return stored ? { ...info, cover: stored.cover_url } : info;
 }
 
 // Books still waiting on Hardcover details, filled in the background a few at a
