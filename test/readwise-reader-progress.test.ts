@@ -94,4 +94,8 @@ it('returns a position read further in Reader when a device asks for progress', 
   await f.app.request(`/syncs/progress/${DOC}`, { headers: f.headers });
   await drainQueue(f.db, r.http, 10);
   expect(r.calls.filter((c) => c.url.endsWith('/bulk_update/'))).toEqual([]);
+  // Once pulled, a later edit that only moves updated_at (say, a highlight) doesn't bring 0.6 back.
+  r.doc.updated_at = new Date(Date.now() + 120_000).toISOString();
+  const ctx = { db: f.db, userId: f.id, document: DOC };
+  expect(await readwiseReaderConnector.pullProgress!(r.cred, MATCH, r.http, 0, ctx)).toBeNull();
 });

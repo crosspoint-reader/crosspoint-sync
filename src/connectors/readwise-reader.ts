@@ -383,6 +383,8 @@ export const readwiseReaderConnector: Connector = {
   push,
   pushUnmatched,
   pullProgress,
+  // A pulled position is Reader's reading we now hold; a later edit must not bring it back.
+  progressStored: (m, change, ctx) => rememberProgress(ctx, m, change.percentage),
   listCurrentlyReading,
   search,
 };

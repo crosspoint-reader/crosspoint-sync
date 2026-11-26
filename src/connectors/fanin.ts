@@ -56,7 +56,7 @@ export async function pollConnector(
   if (!conn || !account || !account.enabled || account.status === 'needs_reauth' ||
       (!conn.pullChanges && !conn.pullProgress) || !conn.capabilities.read) return 0;
 
-  function apply(ch: InboundChange, document: string): number {
+  function apply(ch: InboundChange, document: string, onStored?: () => void): number {
     const exact = ch.progress !== undefined;
     const current = latestProgress(db, userId, document);
     const dated = exact || connectorId === 'bookorbit';
@@ -87,6 +87,7 @@ export async function pollConnector(
       userId, document, deviceId: connectorId, device: conn!.displayName,
       percentage: pct, progress, position, metadata: null, updatedAt,
     });
+    onStored?.();
     if (exact) recordProgressSample(db, userId, document, pct, progress, null, updatedAt);
     if (samePosition) return 0; // Remember the source timestamp without echoing our own push.
     fanOutProgress(db, userId, document, pct, updatedAt, progress, position, connectorId);
@@ -101,17 +102,19 @@ export async function pollConnector(
       if (!match?.external_id) continue;
       try {
         const current = latestProgress(db, userId, match.document);
-        const change = await conn.pullProgress(credential, {
+        const pulled = {
           externalId: match.external_id, externalEdition: match.external_edition,
           confidence: match.confidence, fromSidecar: match.source === 'sidecar',
-        }, http, options.firstContact ? 0 : (current?.updated_at ?? 0) * 1000, { db, userId, document: match.document });
+        };
+        const change = await conn.pullProgress(credential, pulled, http, options.firstContact ? 0 : (current?.updated_at ?? 0) * 1000, { db, userId, document: match.document });
         options.signal?.throwIfAborted();
         // The account, match, or canonical progress can change while the request is in flight.
         const freshAccount = getAccount(db, userId, connectorId);
         if (!freshAccount?.enabled || freshAccount.cred_enc !== account.cred_enc || freshAccount.status !== 'ok') break;
         const freshMatch = getMatch(db, userId, connectorId, match.document);
         if (change && freshMatch?.external_id === match.external_id && freshMatch.source === match.source) {
-          applied += apply(change, match.document);
+          applied += apply(change, match.document,
+            () => conn.progressStored?.(pulled, change, { db, userId, document: match.document }));
         }
         // A pull before a push only settles the position; highlights wait for the next pull.
         if (conn.pullHighlights && !options.positionOnly && freshMatch?.external_id === match.external_id) {

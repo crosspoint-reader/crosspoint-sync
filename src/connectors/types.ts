@@ -316,6 +316,8 @@ export interface Connector {
   pullProgress?(
     cred: Credential, match: Match, http: HttpTransport, sinceMs: number, ctx?: ConnectorContext
   ): Promise<InboundChange | null>;
+  /** Called once a pulled change is stored as this service's progress. Optional. */
+  progressStored?(match: Match, change: InboundChange, ctx: ConnectorContext): void;
 
   /**
    * Highlights on a known book, for import as clippings. `skip` says whether a
