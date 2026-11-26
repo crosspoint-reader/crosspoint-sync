@@ -197,6 +197,7 @@ export interface MatchRow {
   source: string;
   query_used: string | null;
   push_note: string | null;
+  first_pull_pending: number;
   updated_at: number;
 }
 
@@ -291,6 +292,12 @@ export function seedSidecarMatches(
 }
 
 /** Record (or clear) a per-book push condition for the review UI. */
+/** Mark whether a new match still needs its pull before its first push. */
+export function setFirstPullPending(db: DB, userId: number, connectorId: string, document: string, pending: boolean): void {
+  db.prepare('UPDATE connector_matches SET first_pull_pending = ? WHERE user_id = ? AND connector_id = ? AND document = ?')
+    .run(pending ? 1 : 0, userId, connectorId, document);
+}
+
 export function setMatchNote(
   db: DB,
   userId: number,

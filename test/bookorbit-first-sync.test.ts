@@ -13,7 +13,8 @@ afterEach(() => { delete process.env.TOKEN_ENC_KEY; resetEncryptionKeyCache(); v
 const REMOTE_TIME = Date.parse('2026-10-20T12:00:00Z');
 const XPATH = '/body/DocFragment[30]/body/p[4]';
 
-async function fixture(remotePercentage: number, library = { found: true }) {
+async function fixture(remotePercentage: number,
+    library: { found: boolean; failedPulls: number; onPull?: () => void } = { found: true, failedPulls: 0 }) {
   const calls: { url: string; method: string }[] = [];
   const http: HttpTransport = async (url, init) => {
     calls.push({ url, method: init.method });
@@ -23,6 +24,11 @@ async function fixture(remotePercentage: number, library = { found: true }) {
     else if (url.includes('/books/search?')) body = library.found ? [{ id: 12, title: 'Piranesi', authors: ['Susanna Clarke'] }] : [];
     else if (url.endsWith('/books/12')) body = { files: [{ id: 71, format: 'epub', role: 'primary' }] };
     else if (url.endsWith('/books/files/71/progress') && init.method === 'GET') {
+      library.onPull?.();
+      if (library.failedPulls > 0) {
+        library.failedPulls--;
+        return { status: 503, json: async () => ({}), text: async () => 'busy' };
+      }
       body = { percentage: remotePercentage, koreaderProgress: XPATH, updatedAt: new Date(REMOTE_TIME).toISOString() };
     } else if (url.endsWith('/books/files/71/progress') && init.method === 'POST') body = {};
     else if (url.endsWith('/books/12/annotations') && init.method === 'POST') body = { id: 5 };
@@ -83,7 +89,7 @@ it('sends a highlight synced before the book was matched once the match exists',
 });
 
 it('sends a highlight that found no book once a later sync matches the book', async () => {
-  const library = { found: false };
+  const library = { found: false, failedPulls: 0 };
   const f = await fixture(10, library);
   vi.spyOn(bookorbitConnector, 'push');
   await firstSync(f, 0.2); // the book is not in BookOrbit yet
@@ -102,6 +108,24 @@ it('sends a highlight that found no book once a later sync matches the book', as
   await drainQueue(f.db, f.http, 10);
   const pushed = vi.mocked(bookorbitConnector.push).mock.calls.map(([, , ev]) => ev.kind);
   expect(pushed).toContain('highlight');
+});
+
+it('pulls again on the retry when the first pull of a new match fails', async () => {
+  const f = await fixture(60, { found: true, failedPulls: 1 });
+  await firstSync(f, 0);
+  expect(f.db.prepare("SELECT status FROM connector_queue WHERE connector_id='bookorbit'").get()).toEqual({ status: 'pending' });
+  await drainQueue(f.db, f.http, 10, Math.floor(Date.now() / 1000) + 3600);
+  expect(f.calls.filter((c) => c.method === 'POST' && c.url.endsWith('/progress'))).toEqual([]);
+  const got = await (await f.app.request(`/syncs/progress/${DOC}`, { headers: f.headers })).json();
+  expect(got).toMatchObject({ percentage: 0.6, device_id: 'bookorbit' });
+});
+
+it('does not push to a book that was unlinked while its first pull ran', async () => {
+  const library = { found: true, failedPulls: 0, onPull: () => {} };
+  const f = await fixture(10, library);
+  library.onPull = () => { f.db.prepare("DELETE FROM connector_matches WHERE connector_id='bookorbit'").run(); };
+  await firstSync(f, 0.5);
+  expect(f.calls.filter((c) => c.method === 'POST' && c.url.endsWith('/books/files/71/progress'))).toEqual([]);
 });
 
 it('keeps a further BookOrbit position when a progress request makes the first match', async () => {

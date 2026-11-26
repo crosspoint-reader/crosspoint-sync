@@ -17,6 +17,7 @@ import {
   latestPercentage,
   saveMatch,
   setAccountStatus,
+  setFirstPullPending,
   setMatchNote,
 } from './store.js';
 import { decideMatch, extractTitleAuthor } from './matching.js';
@@ -154,7 +155,9 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
   }
 
   let match: Match | null;
-  const wasMatched = !!getMatch(db, row.user_id, row.connector_id, row.document)?.external_id;
+  const before = getMatch(db, row.user_id, row.connector_id, row.document);
+  // A match whose first pull failed is still new: pull before pushing over the service's place.
+  const wasMatched = !!before?.external_id && !before.first_pull_pending;
   try {
     match = await resolveMatch(db, row.connector_id, row.user_id, row.document, http, ev);
     if (!stillCurrent()) return;
@@ -168,14 +171,18 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
     try {
       const applied = await pollConnector(db, row.user_id, row.connector_id, http,
         { document: row.document, throwOnError: true, firstContact: true, positionOnly: true });
+      setFirstPullPending(db, row.user_id, row.connector_id, row.document, false);
       if (applied > 0) {
         markDone(db, row.id); // the service's place won; pushing this event would move it back
         return;
       }
     } catch (err) {
+      setFirstPullPending(db, row.user_id, row.connector_id, row.document, true);
       failOperation(db, row, err, 'pull before first push failed');
       return;
     }
+    // Unlinked, replaced or matched again while the pull ran: this push would go to the old book.
+    if (getMatch(db, row.user_id, row.connector_id, row.document)?.external_id !== match.externalId) return;
   }
   // A position pulled from this service since the event was made (say, on first contact
   // from a progress request) is the newer one; pushing the event would move the service back.
