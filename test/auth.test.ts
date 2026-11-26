@@ -42,6 +42,13 @@ describe('registration validation', () => {
     expect(res.status).toBe(200);
     expect((await res.json()).status).toBe('ok');
   });
+
+  it('healthz reports the package version', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+    const { app } = makeTestApp();
+    expect((await (await app.request('/healthz')).json()).version).toBe(version);
+  });
 });
 
 describe('session secret persistence', () => {

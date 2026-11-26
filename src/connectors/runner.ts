@@ -3,6 +3,7 @@ import { nowSeconds } from '../models/sync.js';
 import { getConnector, fetchTransport } from './registry.js';
 import {
   claimReady,
+  readyRow,
   markDone,
   markFailed,
   _internals,
@@ -17,10 +18,13 @@ import {
   latestPercentage,
   saveMatch,
   setAccountStatus,
+  setFirstPullPending,
   setMatchNote,
 } from './store.js';
 import { decideMatch, extractTitleAuthor } from './matching.js';
 import { scheduleMicroblogClippings } from './microblog-clippings.js';
+import { pollConnector } from './fanin.js';
+import { queueUnsentHighlights } from './fanout.js';
 import {
   ConnectorOperationError,
   type HttpTransport,
@@ -108,7 +112,10 @@ export async function resolveMatch(
   saveMatch(db, userId, connectorId, document, match, match ? 'auto' : 'none');
   // A resolved match teaches us the book's title/author; keep it for future
   // metadata-less syncs and other connectors.
-  if (match) backfillDocumentMeta(db, userId, document, match.title, match.author);
+  if (match) {
+    backfillDocumentMeta(db, userId, document, match.title, match.author);
+    queueUnsentHighlights(db, userId, connectorId, document);
+  }
   return match;
 }
 
@@ -137,18 +144,21 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
   if (row.connector_id === 'microblog' && ev.kind === 'highlight'
       && !getMatch(db, row.user_id, 'microblog', row.document)?.external_id) {
     // Publication intent remains durable; a later matched sync reschedules it.
-    markDone(db, row.id);
+    markDone(db, row);
     return;
   }
   if (connector.shouldPush?.(
     ev,
     latestPercentage(db, row.user_id, row.document)
   ) === false) {
-    markDone(db, row.id);
+    markDone(db, row);
     return;
   }
 
   let match: Match | null;
+  const before = getMatch(db, row.user_id, row.connector_id, row.document);
+  // A match whose first pull failed is still new: pull before pushing over the service's place.
+  const wasMatched = !!before?.external_id && !before.first_pull_pending;
   try {
     match = await resolveMatch(db, row.connector_id, row.user_id, row.document, http, ev);
     if (!stillCurrent()) return;
@@ -156,6 +166,39 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
     if (!stillCurrent()) return;
     failOperation(db, row, err, 'match failed');
     return;
+  }
+  const canPull = !!connector.pullProgress && connector.capabilities.read;
+  // A highlight pushes no position, so the first position event after it still pulls first.
+  if (match && !wasMatched && ev.kind === 'highlight' && canPull) {
+    setFirstPullPending(db, row.user_id, row.connector_id, row.document, true);
+  }
+  // A new match may point at a book already read elsewhere: pull its place first, like Sync now.
+  if (match && !wasMatched && ev.kind !== 'highlight' && canPull) {
+    try {
+      const applied = await pollConnector(db, row.user_id, row.connector_id, http,
+        { document: row.document, throwOnError: true, firstContact: true, positionOnly: true });
+      setFirstPullPending(db, row.user_id, row.connector_id, row.document, false);
+      if (applied > 0) {
+        markDone(db, row); // the service's place won; pushing this event would move it back
+        return;
+      }
+    } catch (err) {
+      setFirstPullPending(db, row.user_id, row.connector_id, row.document, true);
+      failOperation(db, row, err, 'pull before first push failed');
+      return;
+    }
+    // Unlinked, replaced or matched again while the pull ran: this push would go to the old book.
+    if (getMatch(db, row.user_id, row.connector_id, row.document)?.external_id !== match.externalId) return;
+  }
+  // A position pulled from this service since the event was made (say, on first contact
+  // from a progress request) is the newer one; pushing the event would move the service back.
+  if (match && ev.kind !== 'highlight') {
+    const own = db.prepare('SELECT updated_at FROM progress WHERE user_id = ? AND document = ? AND device_id = ?')
+      .get(row.user_id, row.document, row.connector_id) as { updated_at: number } | undefined;
+    if (own && own.updated_at > ev.timestamp) {
+      markDone(db, row);
+      return;
+    }
   }
   const cred = decryptCredential(account, db);
   try {
@@ -177,7 +220,7 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
       if (ev.kind !== 'highlight' || result.note !== undefined) {
         setMatchNote(db, row.user_id, row.connector_id, row.document, result.note ?? null);
       }
-      markDone(db, row.id);
+      markDone(db, row);
       // A progress push may have established the first match, or a clipping
       // may have arrived while publication was in flight.
       if (row.connector_id === 'microblog') {
@@ -242,8 +285,10 @@ export async function drainQueue(
   now = nowSeconds()
 ): Promise<number> {
   const rows = claimReady(db, limit, now);
-  for (const row of rows) {
-    await processRow(db, row, http);
+  for (const claimed of rows) {
+    // An earlier row's pull may have fanned out a newer event into this one.
+    const row = readyRow(db, claimed.id, now);
+    if (row) await processRow(db, row, http);
   }
   return rows.length;
 }

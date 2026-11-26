@@ -61,14 +61,26 @@ export function claimReady(db: DB, limit: number, now = nowSeconds()): QueueRow[
       `SELECT id, user_id, connector_id, document, kind, payload, attempts, status, next_try_at, last_error
        FROM connector_queue
        WHERE status = 'pending' AND next_try_at <= ?
-       ORDER BY next_try_at
+       -- Positions before highlights: adding a highlight can make a service's copy look newer.
+       ORDER BY kind LIKE 'highlight:%', next_try_at
        LIMIT ?`
     )
     .all(now, limit) as unknown as QueueRow[];
 }
 
-export function markDone(db: DB, id: number, now = nowSeconds()): void {
-  db.prepare(`UPDATE connector_queue SET status = 'done', updated_at = ? WHERE id = ?`).run(now, id);
+// Status updates match the payload that was processed: a newer event that replaced the row
+// meanwhile (say, from a pull's fan-out during the push) stays pending.
+export function markDone(db: DB, row: Pick<QueueRow, 'id' | 'payload'>, now = nowSeconds()): void {
+  db.prepare(`UPDATE connector_queue SET status = 'done', updated_at = ? WHERE id = ? AND payload = ?`)
+    .run(now, row.id, row.payload);
+}
+
+/** The row as it stands now, if it is still pending and due. */
+export function readyRow(db: DB, id: number, now = nowSeconds()): QueueRow | undefined {
+  return db.prepare(
+    `SELECT id, user_id, connector_id, document, kind, payload, attempts, status, next_try_at, last_error
+     FROM connector_queue WHERE id = ? AND status = 'pending' AND next_try_at <= ?`
+  ).get(id, now) as unknown as QueueRow | undefined;
 }
 
 /** Record a failed attempt: reschedule with backoff, or dead-letter past the cap. */
@@ -82,14 +94,14 @@ export function markFailed(
   const attempts = row.attempts + 1;
   if (!retryable || attempts >= MAX_ATTEMPTS) {
     db.prepare(
-      `UPDATE connector_queue SET status = 'dead', attempts = ?, last_error = ?, updated_at = ? WHERE id = ?`
-    ).run(attempts, error.slice(0, 500), now, row.id);
+      `UPDATE connector_queue SET status = 'dead', attempts = ?, last_error = ?, updated_at = ? WHERE id = ? AND payload = ?`
+    ).run(attempts, error.slice(0, 500), now, row.id, row.payload);
     return;
   }
   const backoff = BACKOFF[Math.min(attempts - 1, BACKOFF.length - 1)];
   db.prepare(
-    `UPDATE connector_queue SET attempts = ?, last_error = ?, next_try_at = ?, updated_at = ? WHERE id = ?`
-  ).run(attempts, error.slice(0, 500), now + backoff, now, row.id);
+    `UPDATE connector_queue SET attempts = ?, last_error = ?, next_try_at = ?, updated_at = ? WHERE id = ? AND payload = ?`
+  ).run(attempts, error.slice(0, 500), now + backoff, now, row.id, row.payload);
 }
 
 /** Drop a queued row entirely (e.g. connector unlinked). */

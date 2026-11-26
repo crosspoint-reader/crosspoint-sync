@@ -237,17 +237,55 @@ describe('readwise-reader connector', () => {
       .toEqual({ updates: [{ id: 'pdf', location: 'archive', seen: true }] });
   });
 
-  it('lists archived books but excludes highlights and notes from matching', async () => {
+  it('lists only EPUB documents, in every location', async () => {
     const fake = fakeTransport();
-    fake.on('/list/', 200, { results: [
-      { id: 'book', title: 'Book', category: 'epub', location: 'archive' },
-      { id: 'highlight', title: 'Book', category: 'highlight' },
-      { id: 'note', title: 'Book', category: 'note' },
-    ] });
+    fake.on('/list/', 200, { results: [{ id: 'book', title: 'Book', category: 'epub', location: 'archive' }] });
     expect(await readwiseReaderConnector.listCurrentlyReading!(CRED, fake.transport))
       .toEqual([{ externalId: 'book', title: 'Book', author: null }]);
     expect(fake.calls).toHaveLength(1);
-    expect(fake.calls[0].url).not.toContain('location=');
+    const params = new URL(fake.calls[0].url).searchParams;
+    expect(params.get('category')).toBe('epub');
+    expect(params.has('location')).toBe(false);
+  });
+
+  it('resumes the listing from its cursor after a rate limit', async () => {
+    const fake = fakeTransport();
+    fake.on('/list/', 200, { results: [{ id: 'b1', title: 'First Book' }], nextPageCursor: 'P2' });
+    fake.on('pageCursor=P2', 429, {});
+    const now = vi.spyOn(Date, 'now');
+    try {
+      now.mockReturnValue(5_000_000);
+      await expect(readwiseReaderConnector.search!(CRED, 'book', fake.transport)).rejects.toThrow('429');
+      expect(fake.calls).toHaveLength(2);
+      now.mockReturnValue(5_000_000 + 61_000);
+      fake.on('pageCursor=P2', 200, { results: [{ id: 'b2', title: 'Second Book' }] });
+      const found = await readwiseReaderConnector.search!(CRED, 'book', fake.transport);
+      expect(found.map(b => b.externalId)).toEqual(['b1', 'b2']);
+      expect(fake.calls).toHaveLength(3);
+      expect(fake.calls[2].url).toContain('pageCursor=P2');
+    } finally { now.mockRestore(); }
+  });
+
+  it('refreshes the listing with only changed documents, and fully once a day', async () => {
+    const fake = fakeTransport();
+    fake.on('/list/', 200, { results: [{ id: 'old', title: 'Old Book' }, { id: 'gone', title: 'Gone Book' }] });
+    const now = vi.spyOn(Date, 'now');
+    try {
+      now.mockReturnValue(10_000_000);
+      expect(await readwiseReaderConnector.search!(CRED, 'book', fake.transport)).toHaveLength(2);
+      now.mockReturnValue(10_000_000 + 300_001);
+      fake.on('updatedAfter=', 200, { results: [{ id: 'new', title: 'New Book' }, { id: 'old', title: 'Old Book Renamed' }] });
+      const found = await readwiseReaderConnector.search!(CRED, 'book', fake.transport);
+      expect(found.map(b => [b.externalId, b.title])).toEqual([['old', 'Old Book Renamed'], ['gone', 'Gone Book'], ['new', 'New Book']]);
+      expect(fake.calls).toHaveLength(2);
+      expect(new URL(fake.calls[1].url).searchParams.get('updatedAfter')).toBe(new Date(10_000_000).toISOString());
+
+      now.mockReturnValue(10_000_000 + 86_400_001);
+      fake.on('/list/', 200, { results: [{ id: 'old', title: 'Old Book Renamed' }] });
+      expect((await readwiseReaderConnector.search!(CRED, 'book', fake.transport)).map(b => b.externalId)).toEqual(['old']);
+      expect(fake.calls).toHaveLength(3);
+      expect(fake.calls[2].url).not.toContain('updatedAfter=');
+    } finally { now.mockRestore(); }
   });
 
   it('retries a 207 partial failure', async () => {
@@ -389,4 +427,68 @@ it('expires cached candidates and does not retain failed requests', async () => 
     await readwiseReaderConnector.search!(CRED, 'book', fake.transport);
     expect(fake.calls).toHaveLength(3);
   } finally { now.mockRestore(); }
+});
+
+it('shares one listing when the cache expires while it runs', async () => {
+  const fake = fakeTransport();
+  fake.on('/list/', 200, { results: [{ id: 'b1', title: 'Book One' }], nextPageCursor: 'P2' });
+  fake.on('pageCursor=P2', 200, { results: [{ id: 'b2', title: 'Book Two' }], nextPageCursor: 'P3' });
+  fake.on('pageCursor=P3', 200, { results: [{ id: 'b3', title: 'Book Three' }] });
+  let open!: () => void;
+  let waiting = false;
+  const gate = new Promise<void>((resolve) => { open = resolve; });
+  const slow: HttpTransport = async (url, init) => {
+    if (url.includes('pageCursor=P2')) { waiting = true; await gate; } // a slow page outlives the candidate cache
+    return fake.transport(url, init);
+  };
+  const now = vi.spyOn(Date, 'now');
+  try {
+    now.mockReturnValue(2_000_000);
+    const first = readwiseReaderConnector.search!(CRED, 'book', slow);
+    await vi.waitFor(() => expect(waiting).toBe(true));
+    now.mockReturnValue(2_300_001);
+    const second = readwiseReaderConnector.search!(CRED, 'book', slow);
+    open();
+    for (const found of await Promise.all([first, second])) {
+      expect(found.map(b => b.externalId)).toEqual(['b1', 'b2', 'b3']);
+    }
+    expect(fake.calls).toHaveLength(3);
+  } finally { now.mockRestore(); }
+});
+
+it('goes on from its cursor after the page limit, without marking the listing done', async () => {
+  let pages = 0;
+  let ends = false;
+  const calls: string[] = [];
+  const http: HttpTransport = async (url) => {
+    calls.push(url);
+    pages++;
+    const body = { results: [{ id: `b${pages}`, title: `Book ${pages}` }], nextPageCursor: ends ? null : `c${pages}` };
+    return { status: 200, text: async () => JSON.stringify(body), json: async () => body };
+  };
+  const now = vi.spyOn(Date, 'now');
+  try {
+    now.mockReturnValue(3_000_000);
+    expect(await readwiseReaderConnector.search!(CRED, 'book', http)).toHaveLength(200);
+    now.mockReturnValue(3_300_001);
+    ends = true;
+    expect(await readwiseReaderConnector.search!(CRED, 'book', http)).toHaveLength(201);
+    const resumed = new URL(calls[200]).searchParams;
+    expect(resumed.get('pageCursor')).toBe('c200');
+    expect(resumed.get('updatedAfter')).toBeNull();
+    // Only the finished listing sets the watermark, from when it started.
+    now.mockReturnValue(3_600_002);
+    await readwiseReaderConnector.search!(CRED, 'book', http);
+    expect(new URL(calls[201]).searchParams.get('updatedAfter')).toBe(new Date(3_000_000).toISOString());
+  } finally { now.mockRestore(); }
+});
+
+it('fails a listing whose cursor repeats and starts it over next time', async () => {
+  const fake = fakeTransport();
+  fake.on('/list/', 200, { results: [{ id: 'b1', title: 'Book One' }], nextPageCursor: 'P2' });
+  fake.on('pageCursor=P2', 200, { results: [{ id: 'b2', title: 'Book Two' }], nextPageCursor: 'P2' });
+  await expect(readwiseReaderConnector.search!(CRED, 'book', fake.transport)).rejects.toThrow('repeated');
+  fake.on('pageCursor=P2', 200, { results: [{ id: 'b2', title: 'Book Two' }] });
+  expect(await readwiseReaderConnector.search!(CRED, 'book', fake.transport)).toHaveLength(2);
+  expect(fake.calls[2].url).not.toContain('pageCursor=');
 });

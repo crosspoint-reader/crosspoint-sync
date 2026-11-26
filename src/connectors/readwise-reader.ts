@@ -1,8 +1,10 @@
 import { ConnectorOperationError } from './types.js';
 import { decideMatch, extractTitleAuthor, normalizeText, type Candidate } from './matching.js';
 import { postHighlight } from './readwise.js';
+import { getMatchSnapshot, setMatchSnapshot } from './store.js';
 import type {
   Connector,
+  ConnectorContext,
   Credential,
   DocumentMeta,
   ExternalBook,
@@ -17,10 +19,17 @@ import type {
 /** Sync percentage progress with Readwise Reader; completion also archives the document. */
 const BASE = 'https://readwise.io/api/v3';
 
-// Follow nextPageCursor through the library; this is just a safety bound
-// against a pathological cursor loop (a 429 mid-walk stops us far sooner and the
-// backfill/fan-in worker resumes after the cooldown).
-const MAX_CANDIDATE_PAGES = 50;
+// CrossPoint reads EPUBs, so only Reader's EPUB documents are match candidates. Reader has
+// no title search, so we list them, then fetch only what changed since the last listing.
+const BOOK_CATEGORY = 'epub';
+// Safety bound on pages per walk, against a cursor loop.
+const MAX_CANDIDATE_PAGES = 200;
+// A walk stopped by a rate limit resumes from its cursor if it is younger than this.
+const WALK_TTL_MS = 3_600_000;
+// How long a listing serves matching and the picker before we ask Reader what changed.
+const CANDIDATE_TTL_MS = 300_000;
+// A full listing drops documents deleted from Reader, which a changes-only fetch can't see.
+const FULL_LISTING_MS = 86_400_000;
 // Archiving the wrong doc is worse than not archiving; our titles match ~1.0.
 const MATCH_THRESHOLD = 0.85;
 
@@ -60,6 +69,22 @@ interface ReaderList {
   nextPageCursor?: string | null;
 }
 
+/**
+ * The reading_progress we last wrote to Reader. Any edit (a highlight we add, a tag) moves a
+ * document's updated_at, so only a change from this value means someone read on in Reader.
+ */
+// `at`: when the position was read (ms), so an older queued event can't write over it.
+interface ProgressSnapshot { progress: number; at?: number }
+const SAME_PROGRESS = 0.0005;
+function knownProgress(ctx: ConnectorContext | undefined, m: Match): ProgressSnapshot | null {
+  const snap = ctx ? getMatchSnapshot<ProgressSnapshot>(ctx.db, ctx.userId, 'readwise-reader', m.externalId) : null;
+  return typeof snap?.progress === 'number' ? snap : null;
+}
+function rememberProgress(ctx: ConnectorContext | undefined, m: Match, progress: number, at: number): void {
+  if (ctx) setMatchSnapshot(ctx.db, ctx.userId, 'readwise-reader', m.externalId, { progress, at } satisfies ProgressSnapshot);
+}
+const unchanged = (known: ProgressSnapshot | null, progress: number) => known != null && Math.abs(progress - known.progress) < SAME_PROGRESS;
+
 function tokenOf(cred: Credential): string {
   const t = (cred as ReadwiseCred).token;
   if (typeof t !== 'string' || t.length === 0) throw new Error('missing readwise token');
@@ -70,40 +95,97 @@ function authHeaders(token: string): Record<string, string> {
   return { authorization: `Token ${token}`, 'content-type': 'application/json' };
 }
 
-async function listDocs(token: string, http: HttpTransport): Promise<ReaderDoc[]> {
-  const out: ReaderDoc[] = [];
-  let cursor: string | undefined;
-  const seenCursors = new Set<string>();
-  for (let page = 0; page < MAX_CANDIDATE_PAGES; page++) {
-    const params = new URLSearchParams({ withHtmlContent: 'false' });
-    if (cursor) params.set('pageCursor', cursor);
-    const res = await http(`${BASE}/list/?${params.toString()}`, {
-      method: 'GET',
-      headers: authHeaders(token),
-    });
-    noteRateLimit(token, res.status);
-    if (res.status !== 200) throw new ConnectorOperationError(`Readwise Reader request failed (${res.status})`, res.status === 429 || res.status >= 500, res.status === 401 || res.status === 403);
-    const body = (await res.json()) as ReaderList;
-    out.push(...(body.results ?? []));
-    const next = body.nextPageCursor ?? undefined;
-    // Stop at the last page, or if the API ever repeats a cursor (loop guard).
-    if (!next || seenCursors.has(next)) break;
-    seenCursors.add(next);
-    cursor = next;
-  }
-  return out;
+interface Library {
+  byId: Map<string, Candidate>;
+  listedAt: number; // start of the last finished walk
+  fullAt: number; // start of the last full walk
+}
+interface LibraryWalk {
+  since?: number; // set for a changes-only walk
+  found: Map<string, Candidate>;
+  cursor?: string;
+  seenCursors: Set<string>;
+  pages: number;
+  startedAt: number;
+}
+const libraries = new Map<string, Library>();
+// Per-token progress through a listing, kept when a 429 or 5xx stops it so the retry
+// goes on from the same page instead of starting again from page one.
+const walks = new Map<string, LibraryWalk>();
+
+function remember<V>(map: Map<string, V>, key: string, value: V): void {
+  map.delete(key);
+  if (map.size >= 100) map.delete(map.keys().next().value!);
+  map.set(key, value);
 }
 
-async function loadCandidatePool(token: string, http: HttpTransport): Promise<Candidate[]> {
-  const seen = new Set<string>();
-  const pool: Candidate[] = [];
+function walkFor(token: string, since: number | undefined): LibraryWalk {
+  const walk = walks.get(token);
+  if (walk && walk.since === since && Date.now() - walk.startedAt < WALK_TTL_MS) return walk;
+  const fresh: LibraryWalk = { since, found: new Map(), seenCursors: new Set(), pages: 0, startedAt: Date.now() };
+  remember(walks, token, fresh);
+  return fresh;
+}
+
+// One listing per token at a time, so two callers never share or drop each other's cursor.
+const listings = new Map<string, Promise<Candidate[]>>();
+function loadCandidatePool(token: string, http: HttpTransport): Promise<Candidate[]> {
+  const running = listings.get(token);
+  if (running) return running;
+  const listing = walkLibrary(token, http).finally(() => listings.delete(token));
+  listings.set(token, listing);
+  return listing;
+}
+
+async function walkLibrary(token: string, http: HttpTransport): Promise<Candidate[]> {
   if (rateLimited(token)) throw new ConnectorOperationError('Readwise Reader is rate limited; try again later', true);
-  for (const d of await listDocs(token, http)) {
-    if (!d.title || seen.has(d.id) || d.category === 'highlight' || d.category === 'note') continue;
-    seen.add(d.id);
-    pool.push({ externalId: d.id, title: d.title, author: d.author ?? d.site_name ?? null });
+  const library = libraries.get(token);
+  const since = library && Date.now() - library.fullAt < FULL_LISTING_MS ? library.listedAt : undefined;
+  const walk = walkFor(token, since);
+  let finished = false;
+  while (walk.pages < MAX_CANDIDATE_PAGES) {
+    const params = new URLSearchParams({ withHtmlContent: 'false', category: BOOK_CATEGORY });
+    if (walk.since !== undefined) params.set('updatedAfter', new Date(walk.since).toISOString());
+    if (walk.cursor) params.set('pageCursor', walk.cursor);
+    const res = await http(`${BASE}/list/?${params.toString()}`, { method: 'GET', headers: authHeaders(token) });
+    noteRateLimit(token, res.status);
+    if (res.status !== 200) {
+      const needsReauth = res.status === 401 || res.status === 403;
+      if (needsReauth) {
+        walks.delete(token);
+        libraries.delete(token);
+      }
+      throw new ConnectorOperationError(`Readwise Reader request failed (${res.status})`, res.status === 429 || res.status >= 500, needsReauth);
+    }
+    const body = (await res.json()) as ReaderList;
+    walk.pages++;
+    for (const d of body.results ?? []) {
+      if (d.title) walk.found.set(d.id, { externalId: d.id, title: d.title, author: d.author ?? d.site_name ?? null });
+    }
+    const next = body.nextPageCursor ?? undefined;
+    if (!next) { finished = true; break; }
+    if (walk.seenCursors.has(next)) {
+      walks.delete(token); // Reader looped: start over next time rather than match against part of the list
+      throw new ConnectorOperationError('Readwise Reader repeated a page; try again later', true);
+    }
+    walk.seenCursors.add(next);
+    walk.cursor = next;
   }
-  return pool;
+  const known = walk.since !== undefined && library ? library.byId : undefined;
+  if (!finished) {
+    // Use what was listed, but keep the old watermark so later changes-only walks miss nothing.
+    walk.pages = 0; // a page-bound stop goes on from its cursor next time
+    return [...new Map([...(known ?? []), ...walk.found]).values()];
+  }
+  walks.delete(token);
+  const byId = known ?? new Map<string, Candidate>();
+  for (const [id, candidate] of walk.found) byId.set(id, candidate);
+  remember(libraries, token, {
+    byId,
+    listedAt: walk.startedAt,
+    fullAt: walk.since !== undefined && library ? library.fullAt : walk.startedAt,
+  });
+  return [...byId.values()];
 }
 
 // Share in-flight library requests across matching and the picker; never cache positions.
@@ -115,7 +197,7 @@ function candidatePool(token: string, http: HttpTransport): Promise<Candidate[]>
     if (entry.expires <= Date.now()) candidateCache.delete(key);
   }
   if (candidateCache.size >= 100) candidateCache.delete(candidateCache.keys().next().value!);
-  const entry = { expires: Date.now() + 300_000, pending: loadCandidatePool(token, http) };
+  const entry = { expires: Date.now() + CANDIDATE_TTL_MS, pending: loadCandidatePool(token, http) };
   candidateCache.set(token, entry);
   entry.pending.catch(() => {
     if (candidateCache.get(token) === entry) candidateCache.delete(token);
@@ -222,7 +304,8 @@ async function pullProgress(
   cred: Credential,
   match: Match,
   http: HttpTransport,
-  sinceMs: number
+  sinceMs: number,
+  ctx?: ConnectorContext
 ): Promise<InboundChange | null> {
   const token = tokenOf(cred);
   if (rateLimited(token)) throw new ConnectorOperationError('Readwise Reader is rate limited; try again later', true);
@@ -238,6 +321,7 @@ async function pullProgress(
   const doc = body.results?.[0];
   if (!doc || typeof doc.reading_progress !== 'number' || !Number.isFinite(doc.reading_progress)) return null;
   const pct = Math.max(0, Math.min(1, doc.reading_progress));
+  if (unchanged(knownProgress(ctx, match), pct)) return null; // still what we wrote; only updated_at moved
   // Always return a finite timestamp: a missing/unparseable updated_at falls
   // back to "now" so the cursor comparison works and we never leak NaN.
   const parsed = doc.updated_at ? Date.parse(doc.updated_at) : NaN;
@@ -250,7 +334,8 @@ async function push(
   cred: Credential,
   m: Match,
   ev: OutboundEvent,
-  http: HttpTransport
+  http: HttpTransport,
+  ctx?: ConnectorContext
 ): Promise<PushResult> {
   if (!shouldPush(ev)) return { ok: true };
   if (ev.kind === 'highlight') return pushHighlight(tokenOf(cred), m, ev, http);
@@ -272,7 +357,13 @@ async function push(
   if (!Number.isFinite(updatedAt) || !Number.isFinite(ev.timestamp)) {
     return { ok: false, retryable: true, error: 'Cannot safely compare Reader progress timestamps' };
   }
-  if (updatedAt > ev.timestamp * 1000) return { ok: true, note: 'Newer Reader progress kept; sync this book to pull it.' };
+  const readerProgress = typeof doc.reading_progress === 'number' ? doc.reading_progress : 0;
+  const known = knownProgress(ctx, m);
+  // Reader still holding our own write only moved updated_at, unless that write came after this event.
+  const ours = unchanged(known, readerProgress) && !(known?.at && known.at > ev.timestamp * 1000);
+  if (updatedAt > ev.timestamp * 1000 && !ours) {
+    return { ok: true, note: 'Newer Reader progress kept; sync this book to pull it.' };
+  }
   if (doc.category === 'pdf' && ev.kind === 'progress') {
     return { ok: true, note: 'Readwise Reader does not support updating PDF reading progress.' };
   }
@@ -295,7 +386,10 @@ async function push(
     // Partial failure: the single item we sent didn't apply. Retry.
     return { ok: false, retryable: true, error: 'bulk_update partial failure' };
   }
-  if (res.status >= 200 && res.status < 300) return { ok: true };
+  if (res.status >= 200 && res.status < 300) {
+    rememberProgress(ctx, m, doc.category !== 'pdf' ? ev.percentage : readerProgress, ev.timestamp * 1000);
+    return { ok: true };
+  }
   return { ok: false, retryable: false, error: `unexpected status ${res.status}` };
 }
 
@@ -314,6 +408,8 @@ export const readwiseReaderConnector: Connector = {
   push,
   pushUnmatched,
   pullProgress,
+  // A pulled position is Reader's reading we now hold; a later edit must not bring it back.
+  progressStored: (m, change, ctx) => rememberProgress(ctx, m, change.percentage, change.updatedAtMs),
   listCurrentlyReading,
   search,
 };

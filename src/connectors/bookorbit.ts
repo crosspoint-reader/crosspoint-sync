@@ -244,12 +244,21 @@ async function search(cred: Credential, query: string, http: HttpTransport): Pro
   return (await searchBooks(http, c, query)).map((b) => ({ externalId: b.externalId, title: b.title, author: b.author ?? null }));
 }
 
-/** The book's EPUB file id (progress is stored per file). Primary EPUB first. */
+/** A read-along EPUB carries its audio, often past the size we can download. */
+const isReadAlong = (f: any) => !!f.mediaOverlay || /\.readaloud\.epub$/i.test(String(f.filename ?? ''));
+
+/**
+ * The book's EPUB file id (progress is stored per file). Read-along editions only when nothing
+ * else exists, then the primary EPUB, then the smallest. BookOrbit keeps editions' progress in step.
+ */
 async function fileId(http: HttpTransport, c: OrbitCred, bookId: string): Promise<string | null> {
   const book = await getJson(http, c, `/books/${encodeURIComponent(bookId)}`);
   const files: any[] = Array.isArray(book?.files) ? book.files : [];
   const epubs = files.filter((f) => f?.id != null && String(f.format).toLowerCase() === 'epub');
-  const chosen = epubs.find((f) => f.role === 'primary') ?? epubs[0];
+  const plain = epubs.filter((f) => !isReadAlong(f));
+  const pool = plain.length ? plain : epubs;
+  const size = (f: any) => (typeof f.sizeBytes === 'number' ? f.sizeBytes : Infinity);
+  const chosen = pool.find((f) => f.role === 'primary') ?? [...pool].sort((a, b) => size(a) - size(b))[0];
   return chosen ? String(chosen.id) : null;
 }
 

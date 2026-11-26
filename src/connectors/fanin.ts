@@ -43,20 +43,34 @@ export async function pollConnector(
   userId: number,
   connectorId: string,
   http: HttpTransport = fetchTransport,
-  options: { document?: string; signal?: AbortSignal; throwOnError?: boolean } = {}
+  options: {
+    document?: string; signal?: AbortSignal; throwOnError?: boolean;
+    /** The book was just matched: a further dated position wins even if older than ours. */
+    firstContact?: boolean;
+    /** Only settle a dated position before a queued push; no highlights. */
+    positionOnly?: boolean;
+  } = {}
 ): Promise<number> {
   const conn = getConnector(connectorId);
   const account = getAccount(db, userId, connectorId);
   if (!conn || !account || !account.enabled || account.status === 'needs_reauth' ||
       (!conn.pullChanges && !conn.pullProgress) || !conn.capabilities.read) return 0;
 
-  function apply(ch: InboundChange, document: string): number {
+  function apply(ch: InboundChange, document: string, onStored?: () => void): number {
     const exact = ch.progress !== undefined;
     const current = latestProgress(db, userId, document);
     const dated = exact || connectorId === 'bookorbit';
-    const updatedAt = dated ? Math.floor(ch.updatedAtMs / 1000) : nowSeconds();
-    if (dated && current && updatedAt <= current.updated_at) return 0;
     const pct = exact ? ch.percentage : ch.finished || ch.percentage >= 0.999 ? 1 : ch.percentage;
+    let updatedAt = dated ? Math.floor(ch.updatedAtMs / 1000) : nowSeconds();
+    if (!dated && options.positionOnly) return 0; // can't be ordered against the queued push
+    // First contact reads from the start, so keep the usual "newer than ours" rule for undated changes.
+    if (!dated && options.firstContact && current && ch.updatedAtMs <= current.updated_at * 1000) return 0;
+    if (dated && current && updatedAt <= current.updated_at) {
+      // A book the service has already read further: its place wins, stamped newest for devices
+      // to pick up, instead of a fresh device's page 1 overwriting it.
+      if (!options.firstContact || pct <= current.percentage + ECHO_EPSILON) return 0;
+      updatedAt = Math.max(nowSeconds(), current.updated_at + 1);
+    }
     // Furthest-read-only sources (Kindle FRL): apply only when ADVANCING the
     // canonical position. A lower-or-equal value is always stale — FRL can't be
     // behind when the user has read further anywhere — so this also covers
@@ -73,6 +87,7 @@ export async function pollConnector(
       userId, document, deviceId: connectorId, device: conn!.displayName,
       percentage: pct, progress, position, metadata: null, updatedAt,
     });
+    onStored?.();
     if (exact) recordProgressSample(db, userId, document, pct, progress, null, updatedAt);
     if (samePosition) return 0; // Remember the source timestamp without echoing our own push.
     fanOutProgress(db, userId, document, pct, updatedAt, progress, position, connectorId);
@@ -87,19 +102,22 @@ export async function pollConnector(
       if (!match?.external_id) continue;
       try {
         const current = latestProgress(db, userId, match.document);
-        const change = await conn.pullProgress(credential, {
+        const pulled = {
           externalId: match.external_id, externalEdition: match.external_edition,
           confidence: match.confidence, fromSidecar: match.source === 'sidecar',
-        }, http, (current?.updated_at ?? 0) * 1000, { db, userId, document: match.document });
+        };
+        const change = await conn.pullProgress(credential, pulled, http, options.firstContact ? 0 : (current?.updated_at ?? 0) * 1000, { db, userId, document: match.document });
         options.signal?.throwIfAborted();
         // The account, match, or canonical progress can change while the request is in flight.
         const freshAccount = getAccount(db, userId, connectorId);
         if (!freshAccount?.enabled || freshAccount.cred_enc !== account.cred_enc || freshAccount.status !== 'ok') break;
         const freshMatch = getMatch(db, userId, connectorId, match.document);
         if (change && freshMatch?.external_id === match.external_id && freshMatch.source === match.source) {
-          applied += apply(change, match.document);
+          applied += apply(change, match.document,
+            () => conn.progressStored?.(pulled, change, { db, userId, document: match.document }));
         }
-        if (conn.pullHighlights && freshMatch?.external_id === match.external_id) {
+        // A pull before a push only settles the position; highlights wait for the next pull.
+        if (conn.pullHighlights && !options.positionOnly && freshMatch?.external_id === match.external_id) {
           const known = clippingTexts(db, userId, match.document);
           const highlights = await conn.pullHighlights(credential, {
             externalId: match.external_id, externalEdition: match.external_edition, confidence: match.confidence,

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -26,7 +27,8 @@ import { createProgressRefresh } from './connectors/refresh.js';
 import type { HttpTransport } from './connectors/types.js';
 
 // Injected at build time via package.json; read lazily to keep this file dependency-free.
-export const VERSION = process.env.npm_package_version ?? '0.2.0';
+// package.json sits beside src/ and dist/ (and in the image); npm only sets npm_package_version under `npm run`.
+export const VERSION = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version;
 
 export interface AppOptions {
   /** Override the connector HTTP transport (tests inject a fake). */

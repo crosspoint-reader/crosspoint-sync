@@ -37,6 +37,8 @@ const PER_BOOK_PULLERS: { id: string; strict: boolean; sidecarOnly: boolean; mat
   { id: 'seekquel', strict: false, sidecarOnly: false, matchOnDemand: true },
   { id: 'readest', strict: false, sidecarOnly: false, matchOnDemand: true },
   { id: 'kosync', strict: false, sidecarOnly: false, matchOnDemand: true },
+  // Matching lists the whole Reader library, too slow for a progress request; pull matched books only.
+  { id: 'readwise-reader', strict: false, sidecarOnly: false },
 ];
 
 /** Shared by both progress endpoints; only overlapping requests share a refresh. */
@@ -50,6 +52,7 @@ export function createProgressRefresh(db: DB, http: HttpTransport = fetchTranspo
         error: err instanceof Error ? err.message : String(err) }));
     }
     const pullers: typeof PER_BOOK_PULLERS = [];
+    const firstContact = new Set<string>();
     for (const p of PER_BOOK_PULLERS) {
       const account = getAccount(db, userId, p.id);
       if (!account?.enabled) continue;
@@ -58,6 +61,7 @@ export function createProgressRefresh(db: DB, http: HttpTransport = fetchTranspo
           (!match || match.updated_at < account.updated_at)) {
         await resolveMatch(db, p.id, userId, document, http).catch(() => null);
         match = getMatch(db, userId, p.id, document);
+        if (match?.external_id) firstContact.add(p.id);
       }
       if (!match?.external_id) continue;
       if (p.sidecarOnly && match.source !== 'sidecar') continue;
@@ -96,6 +100,7 @@ export function createProgressRefresh(db: DB, http: HttpTransport = fetchTranspo
             document,
             signal: controller.signal,
             throwOnError: p.strict,
+            firstContact: firstContact.has(p.id),
           })
         )
       ),
