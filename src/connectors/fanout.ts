@@ -231,3 +231,30 @@ export function backfillConnector(db: DB, userId: number, connectorId: string, d
 
   return queued;
 }
+
+/**
+ * Queue a newly matched book's clippings that never reached this connector. A clipping
+ * synced before the book had a title or match was skipped by fan-out; this catches it up.
+ */
+export function queueUnsentHighlights(db: DB, userId: number, connectorId: string, document: string): number {
+  if (!secretsEnabled() || connectorId === 'microblog') return 0;
+  const conn = getConnector(connectorId);
+  if (!conn || !conn.capabilities.write || !carriesFor(db, userId, conn, 'highlight')) return 0;
+  const rows = db
+    .prepare(
+      `SELECT c.id, c.text, c.note, c.created_at, c.spine_index, c.start_offset, c.end_offset,
+              c.chapter_title, d.title, d.author
+       FROM clippings c
+       LEFT JOIN documents d ON d.user_id = c.user_id AND d.document = c.document
+       WHERE c.user_id = ? AND c.document = ? AND c.deleted = 0
+         AND NOT EXISTS (SELECT 1 FROM connector_queue q WHERE q.user_id = c.user_id AND q.connector_id = ?
+                           AND q.document = c.document AND q.kind = 'highlight:' || c.id)`
+    )
+    .all(userId, document, connectorId) as unknown as (ClippingHighlightRow & { id: string; title: string | null; author: string | null })[];
+  for (const r of rows) {
+    enqueue(db, userId, connectorId, {
+      kind: 'highlight', document, timestamp: r.created_at || nowSeconds(), highlight: highlightFromRow(r, r),
+    }, `highlight:${r.id}`);
+  }
+  return rows.length;
+}

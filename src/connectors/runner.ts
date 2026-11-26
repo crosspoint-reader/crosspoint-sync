@@ -22,6 +22,7 @@ import {
 import { decideMatch, extractTitleAuthor } from './matching.js';
 import { scheduleMicroblogClippings } from './microblog-clippings.js';
 import { pollConnector } from './fanin.js';
+import { queueUnsentHighlights } from './fanout.js';
 import {
   ConnectorOperationError,
   type HttpTransport,
@@ -109,7 +110,10 @@ export async function resolveMatch(
   saveMatch(db, userId, connectorId, document, match, match ? 'auto' : 'none');
   // A resolved match teaches us the book's title/author; keep it for future
   // metadata-less syncs and other connectors.
-  if (match) backfillDocumentMeta(db, userId, document, match.title, match.author);
+  if (match) {
+    backfillDocumentMeta(db, userId, document, match.title, match.author);
+    queueUnsentHighlights(db, userId, connectorId, document);
+  }
   return match;
 }
 

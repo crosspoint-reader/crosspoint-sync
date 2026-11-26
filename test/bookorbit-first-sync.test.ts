@@ -25,6 +25,7 @@ async function fixture(remotePercentage: number) {
     else if (url.endsWith('/books/files/71/progress') && init.method === 'GET') {
       body = { percentage: remotePercentage, koreaderProgress: XPATH, updatedAt: new Date(REMOTE_TIME).toISOString() };
     } else if (url.endsWith('/books/files/71/progress') && init.method === 'POST') body = {};
+    else if (url.endsWith('/books/12/annotations') && init.method === 'POST') body = { id: 5 };
     else throw new Error(`Unexpected request: ${init.method} ${url}`);
     return { status: 200, json: async () => body, text: async () => JSON.stringify(body) };
   };
@@ -63,4 +64,20 @@ it('still pushes the device position on the first sync when the device is furthe
   await firstSync(f, 0.5);
   const posts = f.calls.filter((c) => c.method === 'POST' && c.url.endsWith('/books/files/71/progress'));
   expect(posts).toHaveLength(1);
+});
+
+it('sends a highlight synced before the book was matched once the match exists', async () => {
+  const f = await fixture(10);
+  vi.spyOn(bookorbitConnector, 'push');
+  const clip = await f.app.request(`/api/v1/clippings/${DOC}`, {
+    method: 'PUT', headers: f.headers,
+    body: JSON.stringify({ items: [{ id: 'c0ffee0011223344', spine: 2, start_page: 1, end_page: 1, pages: 20,
+      start_word: 0, end_word: 6, words: 6, para: 3, chapter: 'Chapter 1', text: 'A quiet house of tides.',
+      created_at: 1764000000 }] }),
+  });
+  expect(clip.status).toBe(200);
+  await firstSync(f, 0.5);
+  await drainQueue(f.db, f.http, 10);
+  const pushed = vi.mocked(bookorbitConnector.push).mock.calls.map(([, , ev]) => ev.kind);
+  expect(pushed).toContain('highlight');
 });
