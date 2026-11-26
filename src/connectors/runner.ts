@@ -21,6 +21,7 @@ import {
 } from './store.js';
 import { decideMatch, extractTitleAuthor } from './matching.js';
 import { scheduleMicroblogClippings } from './microblog-clippings.js';
+import { pollConnector } from './fanin.js';
 import {
   ConnectorOperationError,
   type HttpTransport,
@@ -149,6 +150,7 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
   }
 
   let match: Match | null;
+  const wasMatched = !!getMatch(db, row.user_id, row.connector_id, row.document)?.external_id;
   try {
     match = await resolveMatch(db, row.connector_id, row.user_id, row.document, http, ev);
     if (!stillCurrent()) return;
@@ -156,6 +158,20 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
     if (!stillCurrent()) return;
     failOperation(db, row, err, 'match failed');
     return;
+  }
+  // A new match may point at a book already read elsewhere: pull its place first, like Sync now.
+  if (match && !wasMatched && ev.kind !== 'highlight' && connector.pullProgress && connector.capabilities.read) {
+    try {
+      const applied = await pollConnector(db, row.user_id, row.connector_id, http,
+        { document: row.document, throwOnError: true, firstContact: true });
+      if (applied > 0) {
+        markDone(db, row.id); // the service's place won; pushing this event would move it back
+        return;
+      }
+    } catch (err) {
+      failOperation(db, row, err, 'pull before first push failed');
+      return;
+    }
   }
   const cred = decryptCredential(account, db);
   try {

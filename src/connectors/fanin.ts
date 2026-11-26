@@ -43,7 +43,7 @@ export async function pollConnector(
   userId: number,
   connectorId: string,
   http: HttpTransport = fetchTransport,
-  options: { document?: string; signal?: AbortSignal; throwOnError?: boolean } = {}
+  options: { document?: string; signal?: AbortSignal; throwOnError?: boolean; firstContact?: boolean } = {}
 ): Promise<number> {
   const conn = getConnector(connectorId);
   const account = getAccount(db, userId, connectorId);
@@ -54,9 +54,16 @@ export async function pollConnector(
     const exact = ch.progress !== undefined;
     const current = latestProgress(db, userId, document);
     const dated = exact || connectorId === 'bookorbit';
-    const updatedAt = dated ? Math.floor(ch.updatedAtMs / 1000) : nowSeconds();
-    if (dated && current && updatedAt <= current.updated_at) return 0;
     const pct = exact ? ch.percentage : ch.finished || ch.percentage >= 0.999 ? 1 : ch.percentage;
+    let updatedAt = dated ? Math.floor(ch.updatedAtMs / 1000) : nowSeconds();
+    // First contact only trusts a dated position: an undated one can't be ordered against the device's.
+    if (options.firstContact && !dated) return 0;
+    if (dated && current && updatedAt <= current.updated_at) {
+      // A book the service has already read further: its place wins, stamped newest for devices
+      // to pick up, instead of a fresh device's page 1 overwriting it.
+      if (!options.firstContact || pct <= current.percentage + ECHO_EPSILON) return 0;
+      updatedAt = Math.max(nowSeconds(), current.updated_at + 1);
+    }
     // Furthest-read-only sources (Kindle FRL): apply only when ADVANCING the
     // canonical position. A lower-or-equal value is always stale — FRL can't be
     // behind when the user has read further anywhere — so this also covers
@@ -90,7 +97,7 @@ export async function pollConnector(
         const change = await conn.pullProgress(credential, {
           externalId: match.external_id, externalEdition: match.external_edition,
           confidence: match.confidence, fromSidecar: match.source === 'sidecar',
-        }, http, (current?.updated_at ?? 0) * 1000, { db, userId, document: match.document });
+        }, http, options.firstContact ? 0 : (current?.updated_at ?? 0) * 1000, { db, userId, document: match.document });
         options.signal?.throwIfAborted();
         // The account, match, or canonical progress can change while the request is in flight.
         const freshAccount = getAccount(db, userId, connectorId);
@@ -99,7 +106,8 @@ export async function pollConnector(
         if (change && freshMatch?.external_id === match.external_id && freshMatch.source === match.source) {
           applied += apply(change, match.document);
         }
-        if (conn.pullHighlights && freshMatch?.external_id === match.external_id) {
+        // First contact only settles the position; highlights wait for Sync now or the next pull.
+        if (conn.pullHighlights && !options.firstContact && freshMatch?.external_id === match.external_id) {
           const known = clippingTexts(db, userId, match.document);
           const highlights = await conn.pullHighlights(credential, {
             externalId: match.external_id, externalEdition: match.external_edition, confidence: match.confidence,
