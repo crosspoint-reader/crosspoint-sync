@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { bookorbitConnector } from '../src/connectors/bookorbit.js';
 import { drainQueue } from '../src/connectors/runner.js';
-import { upsertAccount } from '../src/connectors/store.js';
+import { saveMatch, upsertAccount } from '../src/connectors/store.js';
+import { hardcoverConnector } from '../src/connectors/hardcover.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
 import type { HttpTransport } from '../src/connectors/types.js';
 import { DOC, makeTestApp, registerUser } from './helpers.js';
@@ -161,4 +162,28 @@ it('keeps a further BookOrbit position when a progress request makes the first m
   expect(got).toMatchObject({ percentage: 0.6, device_id: 'bookorbit' });
   await drainQueue(f.db, f.http, 10);
   expect(f.calls.filter((c) => c.method === 'POST' && c.url.endsWith('/progress'))).toEqual([]);
+});
+
+it('sends another service the position a first pull brought in, not the one queued before it', async () => {
+  const f = await fixture(60);
+  const { id } = f.db.prepare('SELECT id FROM users').get() as { id: number };
+  upsertAccount(f.db, id, 'hardcover', { token: 'hc' }, null);
+  saveMatch(f.db, id, 'hardcover', DOC, { externalId: '9', externalEdition: null, confidence: 1 }, 'manual');
+  const sent: number[] = [];
+  vi.spyOn(hardcoverConnector, 'push').mockImplementation(async (_cred, _m, ev) => {
+    if (ev.kind !== 'highlight') sent.push(ev.percentage);
+    return { ok: true };
+  });
+  const put = await f.app.request('/syncs/progress', {
+    method: 'PUT', headers: f.headers,
+    body: JSON.stringify({ document: DOC, progress: '/body/DocFragment[1]/body/p[1]', percentage: 0, device: 'X4',
+      device_id: 'crosspoint-x4', metadata: { title: 'Piranesi', authors: 'Susanna Clarke' } }),
+  });
+  expect(put.status).toBe(200);
+  // BookOrbit goes first, so its pull replaces the position queued for Hardcover mid-drain.
+  f.db.prepare("UPDATE connector_queue SET next_try_at = next_try_at - 1 WHERE connector_id = 'bookorbit'").run();
+  await drainQueue(f.db, f.http, 10);
+  expect(sent).toEqual([0.6]);
+  expect(f.db.prepare("SELECT status FROM connector_queue WHERE connector_id='hardcover'").all())
+    .toEqual([{ status: 'done' }]);
 });

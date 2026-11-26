@@ -41,7 +41,7 @@ describe('connector queue', () => {
     expect(queueErrors(db, 1, 'hardcover', 100)).toEqual([]);
     enqueue(db, 1, 'bookorbit', ev({ kind: 'highlight' }), 'highlight:a', 101);
     expect(queueErrors(db, 1, 'bookorbit', 101)[0].count).toBe(1);
-    markDone(db, rows[1].id, 102);
+    markDone(db, rows[1], 102);
     expect(queueErrors(db, 1, 'bookorbit', 102)).toEqual([]);
   });
 
@@ -83,9 +83,22 @@ describe('connector queue', () => {
     const db = freshDb();
     enqueue(db, 1, 'hardcover', ev(), 'progress', 100);
     const [row] = claimReady(db, 10, 200);
-    markDone(db, row.id, 200);
+    markDone(db, row, 200);
     expect(claimReady(db, 10, 300)).toHaveLength(0);
     expect(queueDepth(db, 1, 'hardcover')).toEqual({ pending: 0, dead: 0 });
+  });
+
+  it('keeps a newer event that replaced the row while the older one was processed', () => {
+    const db = freshDb();
+    enqueue(db, 1, 'hardcover', ev(), 'progress', 100);
+    enqueue(db, 1, 'readwise', ev(), 'progress', 100);
+    const [hc, rw] = claimReady(db, 10, 200);
+    enqueue(db, 1, 'hardcover', ev({ percentage: 0.6 }), 'progress', 201);
+    enqueue(db, 1, 'readwise', ev({ percentage: 0.6 }), 'progress', 201);
+    markDone(db, hc, 202);
+    markFailed(db, rw, 'permanent', false, 202);
+    const left = claimReady(db, 10, 300);
+    expect(left.map((r) => [r.connector_id, JSON.parse(r.payload).percentage])).toEqual([['hardcover', 0.6], ['readwise', 0.6]]);
   });
 
   it('retryable failure backs off; non-retryable dead-letters immediately', () => {
