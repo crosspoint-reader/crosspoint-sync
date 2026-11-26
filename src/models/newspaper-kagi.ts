@@ -221,28 +221,39 @@ export async function assignKagiIssue(db: DB, userId: number, today: string, pro
   withTransaction(db, () => {
     if (existing() || JSON.stringify(kagiSettings(db, userId)) !== JSON.stringify(selected)) return;
     const usedNow = used();
-    const categories: string[] = [];
-    const articles: IssueArticle[] = [];
     const missing: string[] = [];
-    const seen = new Set<string>();
-    for (const [index, result] of results.entries()) {
+    const candidates = results.flatMap((result, index) => {
       const id = eligible[index];
-      if (usedNow.has(id) || articles.length >= 15) continue;
+      if (usedNow.has(id)) return [];
       if (result.status === 'rejected' || !result.value.stories.length) {
         missing.push(id);
-        continue;
+        return [];
       }
-      const { category, stories } = result.value;
-      let count = 0;
-      for (const story of stories) {
-        if (seen.has(story.key) || story.sources.some(({ url }) => seen.has(url))) continue;
+      return [{ ...result.value, next: 0, articles: [] as IssueArticle[] }];
+    });
+
+    const seen = new Set<string>();
+    const duplicate = (story: Story) => seen.has(story.key) || story.sources.some(({ url }) => seen.has(url));
+    let remaining = 15;
+    // Give each category one turn per pass, preserving provider rank within it.
+    for (let pass = 0; pass < 5 && remaining; pass++) {
+      for (const candidate of candidates) {
+        if (!remaining) break;
+        const { stories, category, articles } = candidate;
+        while (candidate.next < stories.length && duplicate(stories[candidate.next])) candidate.next++;
+        if (candidate.next === stories.length) continue;
+        const story = stories[candidate.next++];
         seen.add(story.key);
         for (const { url } of story.sources) seen.add(url);
         articles.push(toArticle(story, category, batch));
-        if (++count === 5 || articles.length === 15) break;
+        remaining--;
       }
-      if (count) categories.push(id);
     }
+    const articles = candidates.flatMap((candidate) => candidate.articles);
+    // A category whose stories are already represented must not repeat tomorrow.
+    const categories = candidates
+      .filter((candidate) => candidate.articles.length || candidate.stories.every(duplicate))
+      .map(({ category }) => category.id);
     if (articles.length) db.prepare(`INSERT INTO news_kagi_issues (user_id, issue, batch_id, categories, articles, missing)
       VALUES (?, ?, ?, ?, ?, ?)`).run(userId, today, batch.id, JSON.stringify(categories), JSON.stringify(articles), JSON.stringify(missing));
   });
