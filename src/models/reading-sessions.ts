@@ -95,7 +95,8 @@ export function storeReadingSessions(db: DB, userId: number, deviceId: string, i
       }
       acknowledged.add(s.session_id);
       documents.add(s.document);
-      if (known.get(userId, s.document, s.started_at, s.seconds, deviceId, s.session_id)) continue;
+      // A later checkpoint of a stored session always merges, even when another session matches it.
+      if (!old && known.get(userId, s.document, s.started_at, s.seconds, deviceId, s.session_id)) continue;
       insert.run(userId, deviceId, s.session_id, s.document, s.started_at,
         s.ended_at, s.seconds, s.utc_offset_minutes, now);
     }

@@ -121,6 +121,12 @@ describe('device session ingestion',()=>{
     expect(f.db.prepare('SELECT seconds,ended_at,utc_offset_minutes FROM reading_sessions').get())
       .toMatchObject({seconds:900,ended_at:record.ended_at+350,utc_offset_minutes:0});
   });
+  it('grows a stored session even when another session matches the new checkpoint',async()=>{
+    const f=await fixture(); await f.submit([{...record,ended_at:record.started_at+1200}]);
+    await f.submit([{...record,ended_at:record.started_at+1000,seconds:900}],'reader2');
+    expect((await f.submit([{...record,ended_at:record.started_at+1000,seconds:900}])).status).toBe(200);
+    expect((f.db.prepare("SELECT seconds FROM reading_sessions WHERE device_id='reader1'").get() as any).seconds).toBe(900);
+  });
   it('rejects malformed requests and isolates device/user identities',async()=>{
     const f=await fixture();
     for(const body of [{items:[record]},{device_id:'reader1',items:[]},{device_id:'reader1',items:{}},
