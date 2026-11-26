@@ -428,3 +428,57 @@ it('expires cached candidates and does not retain failed requests', async () => 
     expect(fake.calls).toHaveLength(3);
   } finally { now.mockRestore(); }
 });
+
+it('shares one listing when the cache expires while it runs', async () => {
+  const fake = fakeTransport();
+  fake.on('/list/', 200, { results: [{ id: 'b1', title: 'Book One' }], nextPageCursor: 'P2' });
+  fake.on('pageCursor=P2', 200, { results: [{ id: 'b2', title: 'Book Two' }], nextPageCursor: 'P3' });
+  fake.on('pageCursor=P3', 200, { results: [{ id: 'b3', title: 'Book Three' }] });
+  let open!: () => void;
+  let waiting = false;
+  const gate = new Promise<void>((resolve) => { open = resolve; });
+  const slow: HttpTransport = async (url, init) => {
+    if (url.includes('pageCursor=P2')) { waiting = true; await gate; } // a slow page outlives the candidate cache
+    return fake.transport(url, init);
+  };
+  const now = vi.spyOn(Date, 'now');
+  try {
+    now.mockReturnValue(2_000_000);
+    const first = readwiseReaderConnector.search!(CRED, 'book', slow);
+    await vi.waitFor(() => expect(waiting).toBe(true));
+    now.mockReturnValue(2_300_001);
+    const second = readwiseReaderConnector.search!(CRED, 'book', slow);
+    open();
+    for (const found of await Promise.all([first, second])) {
+      expect(found.map(b => b.externalId)).toEqual(['b1', 'b2', 'b3']);
+    }
+    expect(fake.calls).toHaveLength(3);
+  } finally { now.mockRestore(); }
+});
+
+it('goes on from its cursor after the page limit, without marking the listing done', async () => {
+  let pages = 0;
+  let ends = false;
+  const calls: string[] = [];
+  const http: HttpTransport = async (url) => {
+    calls.push(url);
+    pages++;
+    const body = { results: [{ id: `b${pages}`, title: `Book ${pages}` }], nextPageCursor: ends ? null : `c${pages}` };
+    return { status: 200, text: async () => JSON.stringify(body), json: async () => body };
+  };
+  const now = vi.spyOn(Date, 'now');
+  try {
+    now.mockReturnValue(3_000_000);
+    expect(await readwiseReaderConnector.search!(CRED, 'book', http)).toHaveLength(200);
+    now.mockReturnValue(3_300_001);
+    ends = true;
+    expect(await readwiseReaderConnector.search!(CRED, 'book', http)).toHaveLength(201);
+    const resumed = new URL(calls[200]).searchParams;
+    expect(resumed.get('pageCursor')).toBe('c200');
+    expect(resumed.get('updatedAfter')).toBeNull();
+    // Only the finished listing sets the watermark, from when it started.
+    now.mockReturnValue(3_600_002);
+    await readwiseReaderConnector.search!(CRED, 'book', http);
+    expect(new URL(calls[201]).searchParams.get('updatedAfter')).toBe(new Date(3_000_000).toISOString());
+  } finally { now.mockRestore(); }
+});

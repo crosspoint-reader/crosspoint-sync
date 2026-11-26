@@ -127,11 +127,22 @@ function walkFor(token: string, since: number | undefined): LibraryWalk {
   return fresh;
 }
 
-async function loadCandidatePool(token: string, http: HttpTransport): Promise<Candidate[]> {
+// One listing per token at a time, so two callers never share or drop each other's cursor.
+const listings = new Map<string, Promise<Candidate[]>>();
+function loadCandidatePool(token: string, http: HttpTransport): Promise<Candidate[]> {
+  const running = listings.get(token);
+  if (running) return running;
+  const listing = walkLibrary(token, http).finally(() => listings.delete(token));
+  listings.set(token, listing);
+  return listing;
+}
+
+async function walkLibrary(token: string, http: HttpTransport): Promise<Candidate[]> {
   if (rateLimited(token)) throw new ConnectorOperationError('Readwise Reader is rate limited; try again later', true);
   const library = libraries.get(token);
   const since = library && Date.now() - library.fullAt < FULL_LISTING_MS ? library.listedAt : undefined;
   const walk = walkFor(token, since);
+  let finished = false;
   while (walk.pages < MAX_CANDIDATE_PAGES) {
     const params = new URLSearchParams({ withHtmlContent: 'false', category: BOOK_CATEGORY });
     if (walk.since !== undefined) params.set('updatedAfter', new Date(walk.since).toISOString());
@@ -152,12 +163,19 @@ async function loadCandidatePool(token: string, http: HttpTransport): Promise<Ca
       if (d.title) walk.found.set(d.id, { externalId: d.id, title: d.title, author: d.author ?? d.site_name ?? null });
     }
     const next = body.nextPageCursor ?? undefined;
-    if (!next || walk.seenCursors.has(next)) break;
+    if (!next) { finished = true; break; }
+    if (walk.seenCursors.has(next)) { walks.delete(token); break; } // Reader looped; start over next time
     walk.seenCursors.add(next);
     walk.cursor = next;
   }
+  const known = walk.since !== undefined && library ? library.byId : undefined;
+  if (!finished) {
+    // Use what was listed, but keep the old watermark so later changes-only walks miss nothing.
+    walk.pages = 0; // a page-bound stop goes on from its cursor next time
+    return [...new Map([...(known ?? []), ...walk.found]).values()];
+  }
   walks.delete(token);
-  const byId = walk.since !== undefined && library ? library.byId : new Map<string, Candidate>();
+  const byId = known ?? new Map<string, Candidate>();
   for (const [id, candidate] of walk.found) byId.set(id, candidate);
   remember(libraries, token, {
     byId,
