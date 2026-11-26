@@ -667,6 +667,20 @@ describe('catalog export and cleanup', () => {
     expect(body.books[0]).toMatchObject({ title: 'Foundryside', description: null, series: 'The Founders', series_position: 1 });
   });
 
+  it('doesn\'t overwrite a cover another lookup stored meanwhile', async () => {
+    const db = book('Die drei Fragezeichen und das weiße Auge', 'Marco Sonnleitner');
+    const libraryCoverUrl = '/api/v1/library/covers/0123456789abcdef0123456789abcdef';
+    const base = library('');
+    const http: HttpTransport = async (url, init) => {
+      // The background enricher stores the library's cover while this lookup asks Apple.
+      if (url.includes('itunes')) db.prepare('UPDATE documents SET cover_url = ?, cover_library = 1').run(libraryCoverUrl);
+      return base(url, init);
+    };
+    const info = await documentInfo(db, 1, DOC, http, {});
+    expect(info.cover).toBe(libraryCoverUrl);
+    expect(db.prepare('SELECT cover_url, cover_library FROM documents').get()).toEqual({ cover_url: libraryCoverUrl, cover_library: 1 });
+  });
+
   it('cleans up covers nothing shows any more without a new download', async () => {
     const { enrichSoon } = await import('../src/models/cover.js');
     const db = book('x', 'y');

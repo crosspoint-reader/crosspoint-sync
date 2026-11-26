@@ -430,7 +430,8 @@ export async function documentInfo(
   }
   if (!row.cover_url && hc?.cover) {
     row.cover_url = hc.cover;
-    db.prepare(`UPDATE documents SET cover_url = ?, cover_library = 0 WHERE user_id = ? AND document = ? AND cover_manual = 0 ${SAME}`).run(
+    // Only into a still empty slot: another lookup for this book may have stored a cover meanwhile.
+    db.prepare(`UPDATE documents SET cover_url = ?, cover_library = 0 WHERE user_id = ? AND document = ? AND cover_url IS NULL ${SAME}`).run(
       hc.cover, userId, document, ...same(id)
     );
   }
@@ -441,12 +442,16 @@ export async function documentInfo(
       ? await sharedBookInfo(db, http, want.title, want.author, env, { cover: hc?.cover, pages: hc?.pages })
       : { cover: null, pages: null };
     info = { cover: row.cover_url ?? found.cover, pages: row.page_count ?? found.pages };
-    // A cover the user picked meanwhile stays; a cover found here for a missing one is another source's.
-    db.prepare(
-      `UPDATE documents SET cover_library = CASE WHEN cover_manual OR cover_url IS NOT NULL THEN cover_library ELSE 0 END,
-         cover_url = CASE WHEN cover_manual THEN cover_url ELSE ? END, page_count = ?, cover_checked_at = ?
-       WHERE user_id = ? AND document = ? ${SAME}`
-    ).run(info.cover, info.pages, nowSeconds(), userId, document, ...same(id));
+    db.prepare(`UPDATE documents SET page_count = ?, cover_checked_at = ? WHERE user_id = ? AND document = ? ${SAME}`).run(
+      info.pages, nowSeconds(), userId, document, ...same(id)
+    );
+    // A cover found here only goes into a still empty slot: a cover the user picked, or one another lookup
+    // for this book stored meanwhile (e.g. the library's), stays.
+    if (!row.cover_url && found.cover) {
+      db.prepare(`UPDATE documents SET cover_url = ?, cover_library = 0 WHERE user_id = ? AND document = ? AND cover_url IS NULL ${SAME}`).run(
+        found.cover, userId, document, ...same(id)
+      );
+    }
   }
   // What is stored now: a cover the user picked, or a title edit, while this ran wins over what was found here.
   const stored = db.prepare('SELECT cover_url, page_count FROM documents WHERE user_id = ? AND document = ?').get(userId, document) as
