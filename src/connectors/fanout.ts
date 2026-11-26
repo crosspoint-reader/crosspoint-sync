@@ -248,7 +248,9 @@ export function queueUnsentHighlights(db: DB, userId: number, connectorId: strin
        LEFT JOIN documents d ON d.user_id = c.user_id AND d.document = c.document
        WHERE c.user_id = ? AND c.document = ? AND c.deleted = 0
          AND NOT EXISTS (SELECT 1 FROM connector_queue q WHERE q.user_id = c.user_id AND q.connector_id = ?
-                           AND q.document = c.document AND q.kind = 'highlight:' || c.id)`
+                           AND q.document = c.document AND q.kind = 'highlight:' || c.id
+                           -- a clipping that died for want of a match goes again now that there is one
+                           AND NOT (q.status = 'dead' AND q.last_error = 'no book match'))`
     )
     .all(userId, document, connectorId) as unknown as (ClippingHighlightRow & { id: string; title: string | null; author: string | null })[];
   for (const r of rows) {

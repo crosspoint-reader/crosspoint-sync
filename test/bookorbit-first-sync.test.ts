@@ -13,14 +13,14 @@ afterEach(() => { delete process.env.TOKEN_ENC_KEY; resetEncryptionKeyCache(); v
 const REMOTE_TIME = Date.parse('2026-10-20T12:00:00Z');
 const XPATH = '/body/DocFragment[30]/body/p[4]';
 
-async function fixture(remotePercentage: number) {
+async function fixture(remotePercentage: number, library = { found: true }) {
   const calls: { url: string; method: string }[] = [];
   const http: HttpTransport = async (url, init) => {
     calls.push({ url, method: init.method });
     let body: unknown;
     if (url.endsWith('/auth/login')) body = { accessToken: 'token' };
     else if (url.endsWith('/auth/me')) body = { settings: { timezone: 'UTC' } };
-    else if (url.includes('/books/search?')) body = [{ id: 12, title: 'Piranesi', authors: ['Susanna Clarke'] }];
+    else if (url.includes('/books/search?')) body = library.found ? [{ id: 12, title: 'Piranesi', authors: ['Susanna Clarke'] }] : [];
     else if (url.endsWith('/books/12')) body = { files: [{ id: 71, format: 'epub', role: 'primary' }] };
     else if (url.endsWith('/books/files/71/progress') && init.method === 'GET') {
       body = { percentage: remotePercentage, koreaderProgress: XPATH, updatedAt: new Date(REMOTE_TIME).toISOString() };
@@ -76,6 +76,28 @@ it('sends a highlight synced before the book was matched once the match exists',
       created_at: 1764000000 }] }),
   });
   expect(clip.status).toBe(200);
+  await firstSync(f, 0.5);
+  await drainQueue(f.db, f.http, 10);
+  const pushed = vi.mocked(bookorbitConnector.push).mock.calls.map(([, , ev]) => ev.kind);
+  expect(pushed).toContain('highlight');
+});
+
+it('sends a highlight that found no book once a later sync matches the book', async () => {
+  const library = { found: false };
+  const f = await fixture(10, library);
+  vi.spyOn(bookorbitConnector, 'push');
+  await firstSync(f, 0.2); // the book is not in BookOrbit yet
+  const clip = await f.app.request(`/api/v1/clippings/${DOC}`, {
+    method: 'PUT', headers: f.headers,
+    body: JSON.stringify({ items: [{ id: 'c0ffee0011223355', spine: 2, start_page: 1, end_page: 1, pages: 20,
+      start_word: 0, end_word: 6, words: 6, para: 3, chapter: 'Chapter 1', text: 'A quiet house of tides.',
+      created_at: 1764000000 }] }),
+  });
+  expect(clip.status).toBe(200);
+  await drainQueue(f.db, f.http, 10);
+  expect(f.db.prepare("SELECT status, last_error FROM connector_queue WHERE connector_id='bookorbit' AND kind LIKE 'highlight:%'").get())
+    .toEqual({ status: 'dead', last_error: 'no book match' });
+  library.found = true; // the book is added to BookOrbit
   await firstSync(f, 0.5);
   await drainQueue(f.db, f.http, 10);
   const pushed = vi.mocked(bookorbitConnector.push).mock.calls.map(([, , ev]) => ev.kind);
