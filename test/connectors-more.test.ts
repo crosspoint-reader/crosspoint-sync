@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DOC, makeTestApp, registerUser } from './helpers.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
 import { SAVE_CREDENTIAL, type HttpTransport } from '../src/connectors/types.js';
@@ -930,6 +930,38 @@ describe('hardcover connector (unit)', () => {
     );
     expect(r.ok).toBe(false);
     expect(r.error).toBe('invalid token format');
+  });
+
+  // #148: Hardcover creates the quote but returns no journal row, and each retry posted a copy.
+  const quote = (transport: HttpTransport) =>
+    hardcoverConnector.push(
+      { token: 't' },
+      { externalId: '42', confidence: 1 },
+      { kind: 'highlight', document: DOC, timestamp: 1, highlight: { text: 'a line' } },
+      transport
+    );
+
+  it.each([
+    ['a null journal row', { data: { insert_reading_journal: { reading_journal: null } } }],
+    ['an empty body', {}],
+  ])('does not resend a quote when Hardcover answers 200 with %s', async (_label, body) => {
+    const fake = fakeTransport();
+    fake.on('InsQuote', 200, body);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const r = await quote(fake.transport);
+      expect(r.ok).toBe(true);
+      expect(fake.calls.filter((c) => c.body?.includes('InsQuote'))).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('still retries a quote Hardcover rate limited', async () => {
+    const fake = fakeTransport();
+    fake.on('InsQuote', 429, {});
+    const r = await quote(fake.transport);
+    expect(r).toMatchObject({ ok: false, retryable: true });
   });
 });
 

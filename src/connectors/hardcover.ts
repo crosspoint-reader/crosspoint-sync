@@ -630,8 +630,9 @@ async function push(
 /**
  * A clipping becomes a "quote" reading-journal entry on the book, with the
  * reader's note (if any) after it. Modeled on Billiam/hardcoverapp.koplugin.
- * ponytail: insert-only, so a retry after a lost response or an edited clipping
- * posts the quote again; look up existing entries first if that shows up.
+ * Insert-only, so a request Hardcover answered is never resent: a retry would
+ * post a copy.
+ * An edited clipping still posts a new quote.
  */
 async function pushQuote(
   http: HttpTransport,
@@ -668,8 +669,12 @@ async function pushQuote(
   if (res.status === 403) return { ok: false, retryable: false, error: res.errors?.[0]?.message ?? 'forbidden' };
   const auth = classify(res);
   if (auth) return auth;
-  if (res.data?.insert_reading_journal?.reading_journal?.id == null) {
-    return { ok: false, retryable: true, error: 'quote write not confirmed (empty response)' };
+  // Hardcover can create the quote and still return reading_journal as null
+  // (#148). A 200 without errors may have written it, so don't retry it; only
+  // 429/5xx (above) are retried.
+  if (res.data?.insert_reading_journal == null) {
+    // Nothing at all came back, so the quote may be missing. Log it, don't resend.
+    console.warn(JSON.stringify({ msg: 'hardcover: quote write not confirmed (empty response), not retried', bookId }));
   }
   return { ok: true };
 }
