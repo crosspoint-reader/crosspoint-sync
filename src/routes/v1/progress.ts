@@ -99,18 +99,34 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
     const limit =
       Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 500) : 100;
     const includeHistory = c.req.query('include_history') === '1';
+    // Completion can arrive via stats before the server has metadata or a position.
     const rows = db
       .prepare(
-        `WITH library AS (
+        `WITH ${includeHistory ? `completed_stats AS (
+           SELECT s.user_id, COALESCE(a.document, s.document) AS document, MAX(s.updated_at) AS updated_at
+           FROM stats_device_book s
+           LEFT JOIN document_aliases a ON a.user_id = s.user_id AND a.alias = s.document
+           WHERE s.user_id = ? AND json_extract(s.payload, '$.completed') = 1
+             AND (a.alias IS NULL OR a.merge_stats = 1)
+           GROUP BY s.user_id, COALESCE(a.document, s.document)
+         ),` : ''} library AS (
            SELECT user_id, document, device_id, device, percentage, progress, position, updated_at FROM progress WHERE user_id = ?
            ${includeHistory ? `UNION ALL
            SELECT d.user_id, d.document, NULL, NULL, NULL, NULL, NULL,
              COALESCE((SELECT MAX(at) FROM progress_log l WHERE l.user_id = d.user_id AND l.document = d.document), d.updated_at)
-           FROM documents d WHERE d.user_id = ?
+           FROM documents d
+           LEFT JOIN completed_stats c ON c.user_id = d.user_id AND c.document = d.document
+           WHERE d.user_id = ?
              AND NOT EXISTS (SELECT 1 FROM progress p WHERE p.user_id = d.user_id AND p.document = d.document)
              AND NOT EXISTS (SELECT 1 FROM document_aliases a WHERE a.user_id = d.user_id AND a.alias = d.document)
-             AND (d.status IS NOT NULL OR EXISTS (SELECT 1 FROM stats_device_book s WHERE s.user_id = d.user_id AND s.document = d.document)
-               OR EXISTS (SELECT 1 FROM progress_log l WHERE l.user_id = d.user_id AND l.document = d.document))` : ''}
+             AND (d.status IS NOT NULL OR c.document IS NOT NULL
+               OR EXISTS (SELECT 1 FROM stats_device_book s WHERE s.user_id = d.user_id AND s.document = d.document)
+               OR EXISTS (SELECT 1 FROM progress_log l WHERE l.user_id = d.user_id AND l.document = d.document))
+           UNION ALL
+           SELECT c.user_id, c.document, NULL, NULL, NULL, NULL, NULL, c.updated_at
+           FROM completed_stats c
+           WHERE NOT EXISTS (SELECT 1 FROM documents d WHERE d.user_id = c.user_id AND d.document = c.document)
+             AND NOT EXISTS (SELECT 1 FROM progress p WHERE p.user_id = c.user_id AND p.document = c.document)` : ''}
          ) SELECT p.document, p.device_id, p.device, p.percentage, p.progress, p.position, p.updated_at,
                 d.title, d.author, d.filename, d.language, d.cover_url, d.page_count,
                 d.hc_slug, d.moods, d.genres, d.content_warnings, d.rating, d.user_rating, d.isbn, d.series, d.series_position, d.release_year,
@@ -133,7 +149,7 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
          ORDER BY p.updated_at DESC, p.document DESC
          LIMIT ?`
       )
-      .all(user.id, ...(includeHistory ? [user.id] : []), user.id, cursor?.at ?? null, cursor?.at ?? null, cursor?.at ?? null, cursor?.document ?? null, limit + 1) as unknown as {
+      .all(...(includeHistory ? [user.id] : []), user.id, ...(includeHistory ? [user.id] : []), user.id, cursor?.at ?? null, cursor?.at ?? null, cursor?.at ?? null, cursor?.document ?? null, limit + 1) as unknown as {
       document: string;
       device_id: string | null;
       device: string | null;

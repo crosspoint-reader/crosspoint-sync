@@ -1073,11 +1073,14 @@ but not `finished_this_year`.
 
 `GET /api/v1/progress?include_history=1` includes metadata-backed historical books
 with statistics, activity, or a manual status even when they have no current
-progress. These rows have `history_only: true`, null `percentage`, `progress`,
-`device_id`, and `device`; their timestamp comes from their last historical activity
-or metadata. Pagination works across current and historical books. The app uses
-this option for its Library. Without this option, the endpoint continues to return
-only synced progress; the KOReader sync and progress change endpoints are unchanged.
+progress. Books marked finished in synced reading stats also appear without
+metadata; the app shows them as Untitled book until metadata is available.
+Historical rows have `history_only: true` and null `percentage`, `progress`,
+`device_id`, and `device`. Their timestamp comes from historical activity or
+metadata, or the latest completed stats update when neither is available.
+Pagination works across current and historical books. The app uses this option
+for its Library. Without this option, the endpoint returns only synced progress;
+the KOReader sync and progress change endpoints are unchanged.
 
 ### Sleep-image plugin support
 

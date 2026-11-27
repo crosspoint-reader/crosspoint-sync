@@ -52,6 +52,77 @@ describe('CrossInk completion in the library', () => {
     expect((await book()).status).toBe('reading');
   });
 
+  it('lists a manually finished book with no metadata or position only in Library history', async () => {
+    const { app, db, headers, upload } = await setup();
+    const untouched = '0123456789abcdef'.repeat(2);
+    const list = async (query = '', auth = headers) =>
+      (await (await app.request('/api/v1/progress' + query, { headers: auth })).json()).items;
+    const history = '?include_history=1';
+    const completion = { ...stats(true, ALIAS), sessions: 0, seconds: 0, pages: 0 };
+    const finish = (device_id: string) => app.request('/api/v1/stats/counters/books', {
+      method: 'PUT', headers, body: JSON.stringify({ device_id, items: [completion] }),
+    });
+
+    expect((await finish('reader')).status).toBe(200);
+    expect((await finish('second-reader')).status).toBe(200);
+    expect((await upload(false, untouched)).status).toBe(200);
+    expect((await list()).map((item: { document: string }) => item.document)).toEqual([DOC]);
+    expect(await list(history)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ document: DOC, percentage: 0.6, progress: 'last-read-page' }),
+      expect.objectContaining({
+        document: ALIAS, status: 'finished', history_only: true, title: null, filename: null,
+        percentage: null, progress: null, device_id: null, device: null,
+      }),
+    ]));
+    expect(await list(history)).toHaveLength(2);
+    expect(await list(history, (await registerUser(app)).headers)).toEqual([]);
+    const first = await (await app.request('/api/v1/progress?include_history=1&limit=1', { headers })).json();
+    const next = await list(history + '&limit=1&cursor=' + encodeURIComponent(first.next));
+    expect([...first.items, ...next].map(item => item.document).sort()).toEqual([DOC, ALIAS].sort());
+    expect(await (await app.request(`/syncs/progress/${ALIAS}`, { headers })).json()).toEqual({});
+    expect(db.prepare('SELECT 1 FROM documents WHERE document = ?').get(ALIAS)).toBeUndefined();
+
+    expect((await app.request('/api/v1/documents', {
+      method: 'PUT', headers, body: JSON.stringify({ items: [{ document: ALIAS, title: 'Paperback finish' }] }),
+    })).status).toBe(200);
+    expect((await list(history)).filter((item: { document: string }) => item.document === ALIAS))
+      .toEqual([expect.objectContaining({ title: 'Paperback finish', status: 'finished', percentage: null })]);
+  });
+
+  it.each([true, false])('does not list a merged alias as a separate stats-only book (merge stats: %s)', async (mergeStats) => {
+    const { app, headers, upload } = await setup();
+    expect((await upload(true, ALIAS)).status).toBe(200);
+    expect((await app.request('/api/v1/documents/merge', {
+      method: 'POST', headers, body: JSON.stringify({ document: ALIAS, into: DOC, stats: mergeStats }),
+    })).status).toBe(200);
+    const body = await (await app.request('/api/v1/progress?include_history=1', { headers })).json();
+    expect(body.items).toEqual([expect.objectContaining({
+      document: DOC, status: mergeStats ? 'finished' : 'reading', percentage: 0.6, progress: 'last-read-page',
+    })]);
+  });
+
+  it('includes completion inherited from an alias when the canonical book has no position', async () => {
+    const { app, headers, upload } = await setup();
+    const canonical = '0123456789abcdef'.repeat(2);
+    const list = async () => (await (await app.request('/api/v1/progress?include_history=1', { headers })).json()).items;
+    expect((await upload(true, ALIAS)).status).toBe(200);
+    expect((await app.request('/api/v1/documents/merge', {
+      method: 'POST', headers, body: JSON.stringify({ document: ALIAS, into: canonical, stats: true }),
+    })).status).toBe(200);
+    const withoutPosition = (item: { document: string }) => item.document !== DOC;
+    expect((await list()).filter(withoutPosition)).toEqual([
+      expect.objectContaining({ document: canonical, status: 'finished', percentage: null, aliases: [ALIAS] }),
+    ]);
+    expect((await app.request('/api/v1/documents', {
+      method: 'PUT', headers, body: JSON.stringify({ items: [{ document: canonical, title: 'Canonical title' }] }),
+    })).status).toBe(200);
+    expect((await list()).filter(withoutPosition)).toEqual([
+      expect.objectContaining({ document: canonical, title: 'Canonical title', status: 'finished', percentage: null }),
+    ]);
+    expect((await upload(false, ALIAS)).status).toBe(200);
+    expect((await list()).filter(withoutPosition)).toEqual([]);
+  });
+
   it('combines completion across devices without leaking another account’s stats', async () => {
     const { app, upload, book } = await setup();
     const other = await registerUser(app);
