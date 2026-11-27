@@ -957,11 +957,15 @@ describe('hardcover connector (unit)', () => {
     }
   });
 
-  it('still retries a quote Hardcover rate limited', async () => {
+  it.each([
+    [429, true],
+    [408, true],
+    [413, false],
+  ])('fails a quote that got HTTP %i (retryable: %s)', async (status, retryable) => {
     const fake = fakeTransport();
-    fake.on('InsQuote', 429, {});
+    fake.on('InsQuote', status, {});
     const r = await quote(fake.transport);
-    expect(r).toMatchObject({ ok: false, retryable: true });
+    expect(r).toMatchObject({ ok: false, retryable });
   });
 });
 

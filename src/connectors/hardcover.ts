@@ -669,6 +669,10 @@ async function pushQuote(
   if (res.status === 403) return { ok: false, retryable: false, error: res.errors?.[0]?.message ?? 'forbidden' };
   const auth = classify(res);
   if (auth) return auth;
+  // A non-2xx reply (HTML or empty body) means the write was refused, not answered.
+  if (res.status < 200 || res.status >= 300) {
+    return { ok: false, retryable: res.status === 408, error: `quote write failed (HTTP ${res.status})` };
+  }
   // Hardcover can create the quote and still return reading_journal as null
   // (#148). A 200 without errors may have written it, so don't retry it; only
   // 429/5xx (above) are retried.
