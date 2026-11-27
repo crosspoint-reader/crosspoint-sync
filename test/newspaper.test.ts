@@ -87,6 +87,104 @@ describe('newspaper', () => {
     expect((await app.request('/api/v1/newspaper/issue/today.epub', { headers: other.headers })).status).toBe(404);
   });
 
+  it('includes an attributed Kagi briefing with saved pages and reuses the issue snapshot', async () => {
+    const base = 'https://news.kagi.com/api/batches';
+    const createdAt = new Date(Date.now() - 60_000).toISOString();
+    const batch = 'a5271a19-6f23-453f-a6df-6a2e3ea7ebfe';
+    const category = 'fc51072b-3a2c-4444-a607-ec5fe3b1f1c1';
+    const pages: Record<string, string> = {
+      [base + '/latest']: JSON.stringify({ id: batch, createdAt }),
+      [base + '/' + batch + '/categories']: JSON.stringify({
+        batchId: batch, categories: [{ id: category, categoryId: 'world', categoryName: 'World' }],
+      }),
+      [base + '/' + batch + '/categories/' + category + '/stories?lang=en&limit=20']: JSON.stringify({
+        batchId: batch, categoryId: category,
+        stories: [{
+          cluster_number: 1, title: 'Ports & tides', short_summary: 'Shared alerts <for everyone>.',
+          articles: [{ link: 'https://publisher.test/story', domain: 'Publisher' }, { link: 'javascript:bad()' }],
+        }],
+      }),
+      'https://news.test/story': articlePage('Saved Story'),
+    };
+    const requests: string[] = [];
+    const { app } = makeTestApp({ crossPaperKagiNews: true }, { connectorTransport: async (url, init) => {
+      requests.push(url);
+      return site(pages)(url, init);
+    } });
+    const { headers, username } = await registerUser(app);
+    const root = '/api/v1/newspaper';
+    const catalog = await app.request(root + '/kagi/categories', { headers });
+    expect(catalog.status).toBe(200);
+    expect(await catalog.json()).toEqual({ categories: [{ id: 'world', name: 'World' }] });
+    const config = await app.request(root + '/kagi', {
+      method: 'PUT', headers, body: JSON.stringify({ categories: ['world'] }),
+    });
+    expect(config.status).toBe(200);
+    await app.request(root + '/articles', post(headers, 'https://news.test/story'));
+    const pull = async () => {
+      const response = await app.request(root + '/issue/today.epub', { headers });
+      expect(response.status).toBe(200);
+      return entries(Buffer.from(await response.arrayBuffer()));
+    };
+    const files = await pull();
+    expect(files['OEBPS/nav.xhtml']).toMatch(/Saved Story.*Kagi News.*World.*Ports &amp; tides/s);
+    expect(files['OEBPS/a2.xhtml']).toContain('Shared alerts &lt;for everyone&gt;.');
+    expect(files['OEBPS/a2.xhtml']).toContain('https://publisher.test/story');
+    expect(files['OEBPS/a2.xhtml']).toContain('https://news.kagi.com/api-docs');
+    expect(files['OEBPS/a2.xhtml']).not.toContain('javascript:');
+    expect((await pull())['OEBPS/a2.xhtml']).toBe(files['OEBPS/a2.xhtml']);
+    const authorization = 'Basic ' + Buffer.from(username + ':' + headers['x-auth-key']).toString('base64');
+    const opds = await app.request('/opds/crosspaper/today.epub', { headers: { authorization } });
+    expect(opds.status).toBe(200);
+    expect((await entries(Buffer.from(await opds.arrayBuffer())))['OEBPS/a2.xhtml']).toBe(files['OEBPS/a2.xhtml']);
+    const remove = await app.request(root + '/kagi', {
+      method: 'PUT', headers, body: JSON.stringify({ categories: [] }),
+    });
+    expect(remove.status).toBe(200);
+    expect((await pull())['OEBPS/a2.xhtml']).toBe(files['OEBPS/a2.xhtml']);
+    expect(requests.filter((url) => url.includes('/stories?'))).toHaveLength(1);
+    const overview = await (await app.request(root, { headers })).json();
+    expect(overview.kagi.categories).toEqual([]);
+    expect(overview.articles).toEqual(expect.arrayContaining([expect.objectContaining({ title: 'Ports & tides' })]));
+    const other = await registerUser(app);
+    expect((await app.request(root + '/issue/today.epub', { headers: other.headers })).status).toBe(404);
+  });
+
+  it.each([false, true])('shares the Kagi story budget and consumes duplicate categories (duplicates: %s)', async (duplicates) => {
+    const root = '/api/v1/newspaper';
+    const base = 'https://news.kagi.com/api/batches';
+    const batch = 'a5271a19-6f23-453f-a6df-6a2e3ea7ebfe';
+    const categories = ['world', 'tech', 'science', 'business', 'culture'].map((slug, i) => ({
+      id: 'fc51072b-3a2c-4444-a607-ec5fe3b1f1c' + i, categoryId: slug, categoryName: slug,
+    }));
+    const pages: Record<string, string> = {
+      [base + '/latest']: JSON.stringify({ id: batch, createdAt: new Date().toISOString() }),
+      [base + '/' + batch + '/categories']: JSON.stringify({ batchId: batch, categories }),
+    };
+    for (const category of categories) {
+      pages[base + '/' + batch + '/categories/' + category.id + '/stories?lang=en&limit=20'] = JSON.stringify({
+        batchId: batch, categoryId: category.id,
+        stories: Array.from({ length: duplicates ? 1 : 5 }, (_, i) => ({
+          id: (duplicates ? 'shared' : category.categoryId) + i,
+          title: category.categoryName + ' ' + i, short_summary: 'A story summary.',
+        })),
+      });
+    }
+    const { app, db } = makeTestApp({ crossPaperKagiNews: true }, { connectorTransport: site(pages) });
+    const { headers } = await registerUser(app);
+    const settings = await app.request(root + '/kagi', {
+      method: 'PUT', headers, body: JSON.stringify({ categories: categories.map(({ categoryId }) => categoryId) }),
+    });
+    expect(settings.status).toBe(200);
+    expect((await app.request(root + '/issue/today.epub', { headers })).status).toBe(200);
+    const snapshot = db.prepare('SELECT categories, articles FROM news_kagi_issues').get()!;
+    expect(JSON.parse(String(snapshot.categories))).toEqual(categories.map(({ categoryId }) => categoryId));
+    const articles = JSON.parse(String(snapshot.articles)) as { category: string }[];
+    expect(articles.map(({ category }) => category)).toEqual(duplicates
+      ? ['world']
+      : categories.flatMap(({ categoryId }) => Array(3).fill(categoryId)));
+  });
+
   it('keeps the article and drops the page around it', () => {
     const page = `<html><head><title>Robots at Work</title></head><body>
       <nav><a href="/">Home</a><a href="/news">News</a></nav>

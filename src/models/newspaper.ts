@@ -375,7 +375,7 @@ export function refreshFeeds(db: DB, userId: number, http: HttpTransport): Promi
 
 // ---- The paper ---------------------------------------------------------------
 
-export interface IssueArticle { title: string; byline: string; section: string; url: string; content: string }
+export interface IssueArticle { title: string; byline: string; section: string; url: string; content: string; category?: string; provider?: string; language?: string }
 
 /**
  * Close out past days: anything still waiting that was added before today joins
@@ -409,8 +409,8 @@ export function issueArticles(db: DB, userId: number, date: string, claim: boole
 /** "6 min read", at an unhurried 230 words a minute. */
 const readingTime = (xhtml: string) => `${Math.max(1, Math.round(xhtml.replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length / 230))} min read`;
 
-const page = (title: string, body: string) =>
-  `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="en" lang="en"><head><meta charset="UTF-8"/><title>${escapeXml(title)}</title></head><body>${body}</body></html>`;
+const page = (title: string, body: string, language = 'en') =>
+  `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="${escapeXml(language)}" lang="${escapeXml(language)}"><head><meta charset="UTF-8"/><title>${escapeXml(title)}</title></head><body>${body}</body></html>`;
 
 /** The paper's name, everywhere it is shown. */
 export const PAPER_NAME = 'CrossPaper';
@@ -421,10 +421,23 @@ export const issueTitle = (date: string) =>
 /** One EPUB (3, with an NCX for older readers): a cover, a contents page, then a chapter per article. */
 export function buildEpub(date: string, articles: IssueArticle[]): Buffer {
   const title = issueTitle(date);
-  const sections = [...new Set(articles.map((a) => a.section))];
+  const sectionGroups = new Map<string, { label: string; links: string[]; categories: Map<string, string[]> }>();
   const file = (i: number) => `a${i + 1}.xhtml`;
-  const contents = sections.map((section) =>
-    `<li><span>${escapeXml(section)}</span><ol>${articles.map((a, i) => a.section === section ? `<li><a href="${file(i)}">${escapeXml(a.title)}</a></li>` : '').join('')}</ol></li>`
+  articles.forEach((article, i) => {
+    const key = article.provider === 'kagi' ? 'provider:kagi' : 'feed:' + article.section;
+    const group = sectionGroups.get(key) ?? { label: article.section, links: [], categories: new Map<string, string[]>() };
+    sectionGroups.set(key, group);
+    const link = `<li><a href="${file(i)}">${escapeXml(article.title)}</a></li>`;
+    if (!article.category) { group.links.push(link); return; }
+    const links = group.categories.get(article.category) ?? [];
+    links.push(link);
+    group.categories.set(article.category, links);
+  });
+  const contents = [...sectionGroups.values()].map(({ label, links, categories }) =>
+    `<li><span>${escapeXml(label)}</span><ol>${links.join('')}${
+      [...categories].map(([category, stories]) =>
+        `<li><span>${escapeXml(category)}</span><ol>${stories.join('')}</ol></li>`).join('')
+    }</ol></li>`
   ).join('');
   const nav = page(title, `<h1>${escapeXml(title)}</h1><nav epub:type="toc"><ol>${contents}</ol></nav>`);
   const ncx = `<?xml version="1.0" encoding="UTF-8"?>\n<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="crosspoint-newspaper-${date}"/></head><docTitle><text>${escapeXml(title)}</text></docTitle><navMap>${
@@ -442,6 +455,6 @@ export function buildEpub(date: string, articles: IssueArticle[]): Buffer {
     entry('OEBPS/nav.xhtml', nav),
     entry('OEBPS/toc.ncx', ncx),
     ...articles.map((a, i) => entry(`OEBPS/${file(i)}`, page(a.title,
-      `<h1>${escapeXml(a.title)}</h1><p><em>${escapeXml([a.byline, readingTime(a.content)].filter(Boolean).join(' · '))}</em></p><hr/>${a.content}`))),
+      `<h1>${escapeXml(a.title)}</h1><p><em>${escapeXml([a.byline, readingTime(a.content)].filter(Boolean).join(' · '))}</em></p><hr/>${a.content}`, a.language))),
   ]);
 }

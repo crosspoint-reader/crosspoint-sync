@@ -113,7 +113,7 @@ export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<A
   v1.route('/', connectorRoutes(db, opts.connectorTransport, config.trustProxy, basePath, config.allowHttpLocalhost));
   v1.route('/', meRoutes(db));
   v1.route('/', profileSettingsRoutes(db));
-  v1.route('/', newspaperRoutes(db, opts.connectorTransport ?? safeFetch));
+  v1.route('/', newspaperRoutes(db, opts.connectorTransport ?? safeFetch, config.crossPaperKagiNews, opts.connectorTransport ?? fetch));
   // Self-host-only Amazon device registration (off unless explicitly enabled).
   if (config.kindleServerRegistration) {
     v1.route('/', kindleRegisterRoutes(db, opts.connectorTransport, config.trustProxy));

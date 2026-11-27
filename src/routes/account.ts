@@ -22,6 +22,8 @@ export function deleteKosyncUserData(db: DB, userId: number, username: string, {
       'microblog_clipping_selections',
       'microblog_clipping_posts',
       'bookorbit_session_exports',
+      'news_kagi_issues',
+      'news_kagi_settings',
       'news_articles',
       'news_feeds',
       'bookorbit_session_destination',

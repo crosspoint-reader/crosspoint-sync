@@ -5,6 +5,8 @@ import type { HttpTransport } from '../../connectors/types.js';
 import { escapeXml } from '../../connectors/kindle-fiona.js';
 import { addFeed, buildEpub, issueArticles, issueTitle, NewspaperError, PAPER_NAME, refreshFeeds, rollUp, saveArticle } from '../../models/newspaper.js';
 
+import { assignKagiIssue, kagiArticles, kagiIssues, kagiProvider, kagiSettings, saveKagiSettings } from '../../models/newspaper-kagi.js';
+
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Today's date where the reader is; tz is minutes behind UTC, as in the stats API. */
@@ -20,8 +22,27 @@ async function bodyUrl(c: Context): Promise<string> {
   return typeof body?.url === 'string' ? body.url.slice(0, 2000) : '';
 }
 
-export function newspaperRoutes(db: DB, http: HttpTransport): Hono<AppEnv> {
+export function newspaperRoutes(db: DB, http: HttpTransport, kagiEnabled = false, kagiHttp = http): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
+  const kagi = kagiProvider(kagiHttp);
+
+  if (kagiEnabled) {
+    app.get('/newspaper/kagi/categories', async (c) => {
+      try {
+        const categories = await kagi.categories(await kagi.latest());
+        return c.json({ categories: categories.map(({ id, name }) => ({ id, name })) });
+      } catch {
+        return c.json({ message: 'Kagi News categories are temporarily unavailable.' }, 503);
+      }
+    });
+    app.put('/newspaper/kagi', async (c) => {
+      const body = await c.req.json().catch(() => null);
+      if (!saveKagiSettings(db, c.get('user').id, body?.categories)) {
+        return c.json({ message: 'Choose up to five distinct Kagi News categories.' }, 422);
+      }
+      return c.json({ ok: true });
+    });
+  }
 
   // Fetching a stranger's site fails in many ways; all of them are the user's to read.
   const attempt = async <T>(c: Context, work: () => Promise<T>) => {
@@ -36,12 +57,21 @@ export function newspaperRoutes(db: DB, http: HttpTransport): Hono<AppEnv> {
     const userId = c.get('user').id;
     const { today, offset } = localDay(c);
     rollUp(db, userId, today, offset);
+    const briefings = kagiIssues(db, userId, today);
+    const briefingArticles = briefings.flatMap((snapshot) => kagiArticles(snapshot).map((article, index) => ({
+      id: `kagi-${snapshot.issue}-${index}`, issue: snapshot.issue, title: article.title,
+      url: article.url, section: article.category ? `Kagi News · ${article.category}` : 'Kagi News',
+    })));
     return c.json({
+      kagi: kagiEnabled ? {
+        categories: kagiSettings(db, userId), lastIncluded: briefings[0]?.issue ?? null,
+        missing: JSON.parse(briefings.find(({ issue }) => issue === today)?.missing ?? '[]'),
+      } : null,
       feeds: db.prepare('SELECT id, url, title FROM news_feeds WHERE user_id = ? ORDER BY title COLLATE NOCASE').all(userId),
-      articles: db.prepare(
+      articles: [...db.prepare(
         `SELECT id, url, title, section, issue, created_at FROM news_articles
          WHERE user_id = ? AND content != '' ORDER BY created_at DESC, id DESC LIMIT 200`
-      ).all(userId),
+      ).all(userId), ...briefingArticles],
     });
   });
 
@@ -80,7 +110,11 @@ export function newspaperRoutes(db: DB, http: HttpTransport): Hono<AppEnv> {
     const date = name === 'today' ? today : name;
     if (!DATE_RE.test(date)) return c.json({ message: 'Unknown issue.' }, 404);
     if (date === today) await refreshFeeds(db, userId, http);
-    const articles = issueArticles(db, userId, date, date === today);
+    if (kagiEnabled && date === today) {
+      await assignKagiIssue(db, userId, today, kagi).catch(() => {});
+    }
+    const briefing = kagiIssues(db, userId, today).find(({ issue }) => issue === date);
+    const articles = [...issueArticles(db, userId, date, date === today), ...kagiArticles(briefing)];
     if (!articles.length) return c.json({ message: 'Nothing new to read yet.' }, 404);
     return c.body(new Uint8Array(buildEpub(date, articles)), 200, {
       'Content-Type': 'application/epub+zip',
