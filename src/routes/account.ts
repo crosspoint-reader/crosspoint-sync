@@ -31,6 +31,8 @@ export function deleteKosyncUserData(db: DB, userId: number, username: string, {
       'stats_counter_days',
       'connector_queue',
       'epub_maps',
+      'audio_alignment',
+      'audio_align_jobs',
       'connector_matches',
       'connector_reveals',
       'connector_accounts',

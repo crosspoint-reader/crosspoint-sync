@@ -71,6 +71,38 @@ beforeEach(() => {
 });
 
 describe('audiobookshelf ebook position (push)', () => {
+  it('uses the supplementary ebook when the item has no primary one (Audiobooks only libraries)', async () => {
+    const bytes = epub();
+    const calls: string[] = [];
+    const patches: any[] = [];
+    const http: HttpTransport = async (url, init) => {
+      calls.push(url);
+      const ok = (body: unknown) => ({ status: 200, text: async () => JSON.stringify(body), json: async () => body });
+      if (init.method === 'PATCH') { patches.push(JSON.parse(init.body!)); return ok({}); }
+      if (url.endsWith('/api/items/li_1/ebook')) return { status: 404, text: async () => 'Not Found', json: async () => null };
+      if (url.endsWith('/api/items/li_1?expanded=1')) {
+        return ok({ media: {}, libraryFiles: [
+          { ino: '1', fileType: 'audio', metadata: { filename: 'book.m4b' } },
+          { ino: '2', fileType: 'ebook', metadata: { filename: 'book.epub' } },
+        ] });
+      }
+      if (url.endsWith('/api/items/li_1/file/2')) {
+        return {
+          status: 200, text: async () => '', json: async () => null,
+          body: new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } }),
+        };
+      }
+      if (url.includes('/api/me/progress/li_1')) return ok({});
+      throw new Error(`Unexpected request: ${url}`);
+    };
+    const r = await audiobookshelfConnector.push(
+      CRED, MATCH, { kind: 'progress', document: 'd', percentage: 0.16, progress: XPATH, timestamp: 1 }, http
+    );
+    expect(r.ok).toBe(true);
+    expect(calls).toContain('https://abs.test/api/items/li_1/file/2');
+    expect(patches[0]).toMatchObject({ ebookLocation: CFI });
+  });
+
   it('resolves the device XPath to a CFI in the ABS EPUB and sends ebookLocation', async () => {
     const abs = absServer({ ebook: epub() });
     const r = await audiobookshelfConnector.push(

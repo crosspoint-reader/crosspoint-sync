@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { ACCOUNT_TABLES } from '../src/models/account-data.js';
+import { enqueueAlignment } from '../src/connectors/abs-align.js';
+import { saveAlignment } from '../src/models/audio-alignment.js';
+import { deleteKosyncUserData } from '../src/routes/account.js';
 import { seedStatsCounters } from '../src/models/stats-counters.js';
 import { DOC, makeTestApp, registerUser } from './helpers.js';
 
@@ -81,4 +84,17 @@ describe('account migration', () => {
     expect((await archiveOf(s)).data).toEqual(original.data);
     expect(s.db.prepare('SELECT value FROM change_seq').get()).toEqual(clock);
   });
+});
+
+it('deletes a user whose audiobook has an alignment and a queued job', async () => {
+  const s = await fixture();
+  saveAlignment(s.db, s.id, 'audiobookshelf', 'li_1', DOC, {
+    durationMs: 1_000, spineLengths: [10], samples: [[0, 0], [10, 1_000]], words: 1, coverage: 1, source: 'test',
+  });
+  enqueueAlignment(s.db, s.id, 'audiobookshelf', 'li_1', DOC);
+  // Both tables reference users(id): leaving either behind aborts the delete.
+  deleteKosyncUserData(s.db, s.id, s.username);
+  expect(s.db.prepare('SELECT COUNT(*) AS n FROM audio_alignment').get()).toEqual({ n: 0 });
+  expect(s.db.prepare('SELECT COUNT(*) AS n FROM audio_align_jobs').get()).toEqual({ n: 0 });
+  expect(s.db.prepare('SELECT COUNT(*) AS n FROM users WHERE id = ?').get(s.id)).toEqual({ n: 0 });
 });
